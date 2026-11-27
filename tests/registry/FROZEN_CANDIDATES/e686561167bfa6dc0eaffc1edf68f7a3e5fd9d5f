@@ -1,0 +1,288 @@
+name: Writer lock
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Writer lock' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('writer-lock-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Writer lock' && 'max' || 'single' }}
+
+
+jobs:
+  inputs:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 3
+    outputs:
+      hit: ${{ steps.key.outputs.hit }}
+      key: ${{ steps.key.outputs.key }}
+      hive_join: ${{ steps.hive-join.outputs.due }}
+      tick: ${{ steps.tick.outputs.due }}
+      events: ${{ steps.events.outputs.due }}
+      features: ${{ steps.features.outputs.due }}
+      lab_sandbox: ${{ steps.lab-sandbox.outputs.due }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Key the declared inputs
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: writer-lock
+      - name: Select hive join smoke inputs
+        id: hive-join
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          HIVE_JOIN_INPUTS: >-
+            scripts/hive/daemon.py scripts/hive/dispatch.py scripts/hive/orders.py
+            scripts/packaging/hive-join-smoke.sh .github/workflows/writer-lock.yml
+            .github/workflows/swarm-smoke.yml .github/workflows/hive-join.yml .github/workflows/test.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/hive-join-changed"
+          due=false
+          read -r -a inputs <<< "$HIVE_JOIN_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              if [[ "$path" == "$input" ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/hive-join-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+      - name: Select tick guard inputs
+        id: tick
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          TICK_INPUTS: >-
+            scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py
+            scripts/swarm/store.py scripts/swarm/lease.py scripts/swarm/ledger_client.py scripts/swarm/health/*
+            tests/swarm/test_tick.py tests/swarm/test_tick_idle.py tests/swarm/test_tick_claims.py tests/swarm/test_delivery.py
+            tests/swarm/tick_scenarios/* tests/swarm/tick_equivalence.sh tests/swarm/test_tick_load.py
+            .github/workflows/tick-equivalence.yml .github/workflows/writer-lock.yml
+            scripts/tick_pattern.py scripts/size_limits.py tests/TICK_PATTERN_ALLOWLIST.json tests/tick/*
+            profiles/package/skills/tick-step/* profiles/package/rules/tick-pattern.md docs/reference/tick-step-catalogue.md
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/tick-changed"
+          due=false
+          read -r -a inputs <<< "$TICK_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              # shellcheck disable=SC2053
+              if [[ "$path" == $input ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/tick-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+      - name: Select events launch smoke inputs
+        id: events
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENTS_INPUTS: >-
+            scripts/hub/* scripts/hive/* scripts/tick/* scripts/events/* tests/events_smoke/*
+            scripts/swarm/readiness.py scripts/swarm/execution*.py scripts/swarm/tick*.py scripts/swarm/engine_migration.py
+            scripts/swarm/fleet_red.py
+            .github/workflows/events-smoke.yml .github/workflows/writer-lock.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/events-changed"
+          due=false
+          read -r -a inputs <<< "$EVENTS_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              # shellcheck disable=SC2053
+              if [[ "$path" == $input ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/events-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+      - name: Select feature suite inputs
+        id: features
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          FEATURE_INPUTS: >-
+            scripts/swarm_ledger/*.py scripts/swarm/store.py scripts/swarm/lease.py scripts/swarm/ledger_*.py
+            scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py scripts/swarm/controller.py scripts/scheduler/*
+            scripts/swarm/cli.py scripts/swarm/idle.py scripts/swarm/launch_check.py scripts/swarm/promotion_watch.py
+            scripts/events/redis_state.py scripts/hive/headroom.py scripts/init_agent.py scripts/profiles/binding.py
+            scripts/install.py scripts/handoff/* tests/features/* tests/swarm/test_tick.py
+            .github/workflows/feature-suite.yml .github/workflows/writer-lock.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/features-changed"
+          due=false
+          read -r -a inputs <<< "$FEATURE_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              # shellcheck disable=SC2053
+              if [[ "$path" == $input ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/features-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+      - name: Select lab sandbox inputs
+        id: lab-sandbox
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          LAB_SANDBOX_INPUTS: >-
+            scripts/ci_lab/sandbox.py scripts/ci_lab/run_static.py scripts/ci_lab/run_tests.py
+            tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py
+            .github/workflows/writer-lock.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/lab-sandbox-changed"
+          due=false
+          read -r -a inputs <<< "$LAB_SANDBOX_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              if [[ "$path" == "$input" ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/lab-sandbox-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+  events:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.events == 'true'
+    uses: ./.github/workflows/events-smoke.yml
+
+  tick:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.tick == 'true'
+    uses: ./.github/workflows/tick-equivalence.yml
+
+  hive-join:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.hive_join == 'true'
+    uses: ./.github/workflows/hive-join.yml
+
+  features:
+    needs: [inputs]
+    if: github.event_name == 'pull_request' && needs.inputs.outputs.features == 'true'
+    uses: ./.github/workflows/feature-suite.yml
+
+  lab-sandbox:
+    needs: [inputs]
+    if: (github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true') || github.workflow == 'Writer lock'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Let bubblewrap create user and network namespaces
+        shell: bash
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing bubblewrap from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" bubblewrap
+          fi
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --dev-bind / / --unshare-net true
+
+      - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Run the lab sandbox tests under real bubblewrap
+        shell: bash
+        run: |
+          python -m pytest tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/lab-sandbox.log"
+          if grep -q SKIPPED "$RUNNER_TEMP/lab-sandbox.log"; then
+            echo '::error::A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.'
+            exit 1
+          fi
+
+  scenario:
+    needs: [inputs]
+    if: github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    services:
+      pgvector:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: memory
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-retries 30
+    env:
+      LEDGER_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5432/ledger
+      MEMORY_TEST_POSTGRES_URL: postgresql://postgres@127.0.0.1:5433/memory
+    steps:
+      - name: Start the ledger Postgres from the service image
+        run: |
+          docker run --pull never --rm -d --name writer-lock-postgres -p 127.0.0.1:5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger pgvector/pgvector:0.8.0-pg16
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: |
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]' && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
+          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Wait for the ledger Postgres
+        run: timeout 60 bash -c 'until docker exec writer-lock-postgres pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done'
+
+      - name: Run the idle writer lock holder scenario
+        shell: bash
+        run: |
+          python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py tests/test_memory_postgres_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
+          grep -q ' 38 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
+          python -m pytest tests/swarm_ledger/test_warm_writer_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/warm-writer-parity.log"
+          grep -q ' 25 passed' "$RUNNER_TEMP/warm-writer-parity.log" || { echo '::error::The warm writer parity scenarios on SQLite and Postgres did not all run.'; exit 1; }
+
+      - name: Save the passed input key
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/input-key/save
+        with:
+          key: ${{ needs.inputs.outputs.key }}

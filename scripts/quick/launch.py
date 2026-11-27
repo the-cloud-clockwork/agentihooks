@@ -20,10 +20,12 @@ Start = Callable[[list[str], dict[str, str]], int]
 
 
 def argv(swarm: registry.Swarm, seat: registry.Seat, prompt_file: Path) -> list[str]:
-    """The init-agent arguments that open the seat's agent in its own herdr pane, only on a routed account."""
+    selection = seat.auth if seat.auth == "default" else f"named:{seat.account}"
+    policy = ["--routed-only"] if seat.auth == "routed" else ["--auth", selection]
     return [
         *("--host", "herdr", "--pane", seat.pane_id, "--name", seat.name, "--agent", seat.harness),
-        *("--dir", swarm.directory, "--prompt-file", str(prompt_file), "--routed-only"),
+        *("--dir", swarm.directory, "--prompt-file", str(prompt_file)),
+        *policy,
     ]
 
 
@@ -65,13 +67,26 @@ def start_seat(folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: M
 
 
 def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> dict[str, int]:
-    """Open every engineer's agent at once, each in its own pane; the exit status per seat."""
     running: dict[str, subprocess.Popen[bytes]] = {}
-    for seat in swarm.seats[1:]:
-        prompt_file = _write_opening(Member(folder, swarm, seat))
-        command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
-        running[seat.seat] = subprocess.Popen(command, env=environ(base, folder, swarm, seat))
-    return {name: process.wait() for name, process in running.items()}
+    taken: dict[str, registry.Seat] = {}
+    codes: dict[str, int] = {}
+    try:
+        for seat in swarm.seats[1:]:
+            if seat.state not in (registry.READY, registry.PENDING):
+                continue
+            if registry.take(folder, seat.seat, seat.state, registry.LAUNCHING) is None:
+                continue
+            taken[seat.seat] = seat
+            prompt_file = _write_opening(Member(folder, swarm, seat))
+            command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
+            running[seat.seat] = subprocess.Popen(command, env=environ(base, folder, swarm, seat))
+        for name, process in running.items():
+            codes[name] = process.wait()
+        return codes
+    finally:
+        for name, seat in taken.items():
+            state = registry.READY if codes.get(name) == 0 and _recorded(folder, seat) else registry.PENDING
+            registry.set_state(folder, name, state)
 
 
 def exited(

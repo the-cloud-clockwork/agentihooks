@@ -44,14 +44,14 @@ panes to its right, ordered left to right: three engineers by default and four a
 at most with the master (`--agents 2` to `--agents 5`). Every
 agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
 says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a seat with no
-account free, fails `quick up`, which names it and leaves it pending for the next round. A seat's agent starts only
-on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
+account free, fails `quick up`, which names it and leaves it pending for the next round. Without an authentication
+option, an engineer starts on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
 when the shell left in a reused pane never loaded it, and a launch whose agent was not routed fails and leaves the
 seat pending instead of ready.
 
 | Piece | Where it lives |
 |---|---|
-| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state |
+| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state, authentication mode and safe account reference |
 | Seat notes | `seats/<seat>/` holds `plan.md` (checkbox stages), `notes.md`, `learned.md` and `handoff.md` |
 | Culture | `culture.md`, read into every seat's injected block |
 | Room | `room/chat.jsonl`, chat between seats that share no native channel |
@@ -91,6 +91,26 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   from a live session, records that session and its pane as the seat's occupant; it never takes a launching seat,
   a seat whose recorded pane herdr shows running an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
+
+### Native quick authentication
+
+`quick up --auth default` starts native engineers on each CLI's ordinary local
+login outside automatic quota tiers. `--auth named:reference` chooses an existing
+account suffix or token environment variable name for that harness. Pass a
+reference, never a credential value. A missing or incompatible named reference
+is refused before panes are created.
+
+One choice applies to every engineer. A comma separated list gives one choice
+per engineer in pane order, including mixed Claude and Codex seats. Omitted
+`--auth` keeps routed behavior. The master keeps its current authentication;
+engineer selection changes no global login.
+
+The registry and `quick status` retain the safe `auth` mode and `account`
+reference. The master context identifies explicit modes as outside automatic
+tiers. Handoff, forced relaunch and automatic retry reuse the saved choice even
+when the caller's environment changes. Default and named engineers keep native
+sign in and session binding checks; unavailable authentication leaves a seat
+pending. Quota driven switching remains active for routed seats.
 
 ## Event driven engine
 
@@ -1316,7 +1336,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, review, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 15; a swarm that stored another value keeps it. The host room guard still refuses a spawn when load or available memory leaves no room, whatever N allows. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
 | `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
-| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
+| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. The Helm chart's controller sets `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES` to 0, so a swarm it runs takes no automatic snapshot unless it sets `snapshot-minutes`. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, in the pane herdr restored for it when that pane waits at a bare shell with the agent's conversation and in a new pane otherwise, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -7196,6 +7216,10 @@ export AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES=60
 
 The first form snapshots every 15 minutes, the second turns automatic snapshots off for that swarm, and the third
 sets the default for swarms with no `snapshot-minutes` setting. With neither, the interval is 30 minutes.
+The Helm chart's controller sets `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES` to 0. Its `~/.agentihooks` sits in the container
+layer on the node's system disk, which no volume covers and which is lost with the pod, so a snapshot there restores
+nothing. Leave `snapshot-minutes` unset or at 0 on a swarm the hosted controller runs: a nonzero setting wins over
+the chart default and writes the snapshot back into that layer every interval.
 `agentihooks swarm my-swarm status` shows the outcome on its `snapshots` line:
 
 ```text
