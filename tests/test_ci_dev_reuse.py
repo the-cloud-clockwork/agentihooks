@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 
-from scripts import ci_dev_reuse, ci_test_plan
+from scripts import ci_dev_reuse, ci_test_plan, ci_unit_copy
 
 HEAD = "a" * 40
 TREE = "b" * 40
@@ -415,6 +416,49 @@ def test_an_unusable_push_leg_coverage_database_fails_the_copy_job(tmp_path: Pat
     assert code != 0
     assert f"{legs}/coverage-3.12-7|-m scripts.coverage_check .coverage" in calls
     assert not [call for call in calls if call.startswith(f"{legs}/coverage-3.12-7|-m tests.coverage_summary")]
+
+
+class _Uploads(ci_unit_copy.Results):
+    """Record each artifact the copy job would upload instead of sending it."""
+
+    def __init__(self) -> None:
+        self.uploaded: list[tuple[str, Path]] = []
+
+    def upload(self, name: str, folder: Path, days: int) -> None:
+        self.uploaded.append((name, folder))
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_the_twenty_legs_the_copy_job_uploads_are_the_twenty_the_coverage_merge_combines(tmp_path: Path) -> None:
+    queue, out, run = tmp_path / "queue", tmp_path / "push-legs", tmp_path / "run"
+    for leg in range(1, 17):
+        (queue / f"durations-3.12-{leg}").mkdir(parents=True)
+        (queue / f"durations-3.12-{leg}" / "durations.json").write_text("{}\n")
+        (queue / f"coverage-3.12-{leg}").mkdir()
+        (queue / f"coverage-3.12-{leg}" / ".coverage").write_text(f"database {leg}")
+        (queue / f"flakes-3.12-{leg}").mkdir()
+    ci_unit_copy.layout(queue, {str(leg): (leg - 1) % 16 + 1 for leg in range(1, 21)}, out)
+    results = _Uploads()
+    ci_unit_copy.upload(out, results, pause=lambda seconds: None)
+    coverage = sorted(name for name, _ in results.uploaded if name.startswith("coverage-"))
+    assert coverage == sorted(f"coverage-3.12-{leg}" for leg in range(1, 21))
+    for name, folder in results.uploaded:
+        if name.startswith("coverage-"):
+            shutil.copytree(folder, run / ".coverage-shards" / name)
+    bin_dir, calls = tmp_path / "bin", tmp_path / "calls.txt"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text(f'#!/usr/bin/env bash\necho "$*" >> {calls}\n')
+    (bin_dir / "python").chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(Path(__file__).parents[1] / ".github/coverage/combine.sh"), "--downloaded", "20"],
+        cwd=run,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    flattened = sorted(line.split()[1] for line in calls.read_text().splitlines() if "flatten.py" in line)
+    assert flattened == sorted(f".coverage-shards/coverage-3.12-{leg}/.coverage" for leg in range(1, 21))
 
 
 class _Context(dict):
