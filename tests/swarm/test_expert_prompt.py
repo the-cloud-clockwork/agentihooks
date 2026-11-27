@@ -93,15 +93,14 @@ def test_a_successor_is_told_to_confirm_the_handoff_it_inherits_and_carries_it()
     assert built.endswith(LOOP)
     middle = built[len(OPENING) : -len(LOOP)]
     for carried in (
-        "Your seat expert-1@sw carries what earlier occupants left. Read it in this order:\n",
-        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
-        f"{ME} confirm-handoff 9f2c --next '1. Finish slice two.'\n{HANDOFF}",
-        "1. Handoff runtime envelope:\n" + json.dumps(ENVELOPE, indent=2) + "\n",
-        "Handoff document: continue from it:\n" + HANDOFF,
-        "Read first: Open each address in rank order and answer its question before reading older recaps.\n"
-        f"- {MISSION} the mission and its deliverables\n",
+        "Your seat expert-1@sw carries what earlier occupants left.\n",
+        "After reading the handoff in your seat brief, confirm you read it and will take its first Next action by running "
+        f"{ME} confirm-handoff 9f2c --next '1. Finish slice two.'",
+        "Handoff runtime envelope:\n" + json.dumps(ENVELOPE, indent=2) + "\n",
+        prompt.SEAT_BRIEF,
     ):
         assert carried in middle, carried
+    assert HANDOFF not in middle
     assert NO_HISTORY not in built
 
 

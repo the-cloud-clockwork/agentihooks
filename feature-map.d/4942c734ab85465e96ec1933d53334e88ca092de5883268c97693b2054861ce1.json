@@ -3,7 +3,7 @@
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-brief",
   "behaviour": "agentihooks seat brief prints the caller's seat handoff, culture, latest recap and learned notes, in that order and under plain labels, from the swarm Redis seat store for a swarm seat or from the quick seat files for a quick seat, with corrected swarm learned notes withheld as in priming and the quick recap derived from the handoff; a standalone session gets one no seat line and exit 0, a swarm seat whose live handoff was cleared reads the handoff its transfer kept; a missing quick seat file reads as none; a store or file read failure prints the error and exits 1. The swarm priming lines, the quick openings and the seat notes reminder name the command.",
-  "seam": "scripts.seat_brief.main, scripts.swarm.prompt.priming_lines, scripts.quick.seeds.opening and hooks.context.seat_notes.reminder",
+  "seam": "scripts.seat_brief.main, scripts.swarm.prompt.priming_lines and seated builders, scripts.handoff.transfers.priming, scripts.swarm.resume._attempt, scripts.swarm.priming_trace.rows, scripts.quick.seeds.opening and hooks.context.seat_notes.reminder",
   "tests": [
     "tests/swarm/test_compact_priming.py::test_every_seated_builder_defers_continuity_to_one_brief",
     "tests/swarm/test_compact_priming.py::test_growing_continuity_does_not_grow_any_opening",

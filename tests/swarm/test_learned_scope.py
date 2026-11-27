@@ -45,10 +45,11 @@ def test_returned_notes_stay_with_the_caller_and_shared_guidance(
         returned = "\n".join(prompt.learned_lines(task["learned"]))
         assert "shared canon" in returned and "shared insight" in returned
         assert "own data" not in returned
-        rows = {row["text"]: row for row in priming_trace.rows("sw", task)}
-        assert rows["shared canon"]["source"] == "learned:ci-1@sw#3"
-        assert rows["shared insight"]["locator"] == {"seat": "ci-1@sw", "note": 4}
-        assert "unrelated recap" not in rows
+        notes = {note["text"]: note for note in task["learned"]}
+        assert (notes["shared canon"]["seat"], notes["shared canon"]["number"]) == ("ci-1@sw", 3)
+        assert (notes["shared insight"]["seat"], notes["shared insight"]["number"]) == ("ci-1@sw", 4)
+        assert "unrelated recap" not in notes
+        assert priming_trace.rows("sw", task) == []
     else:
         capsys.readouterr()
         arguments = ("--all",) if entrypoint == "all" else ()

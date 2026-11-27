@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice
+from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice, prompt
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -172,7 +172,11 @@ def _attempt(
             placed = context.runtime.resume(
                 store.ensure_code(slug),
                 agent,
-                restored_text(slug, agent, context.ledger) + "\n" + transfers.priming(slug, transfer),
+                restored_text(slug, agent, context.ledger)
+                + "\n"
+                + prompt.SEAT_BRIEF
+                + "\n"
+                + transfers.priming(slug, transfer),
             )
         except Exception as exc:
             why = f"resume failed to start: {exc}"

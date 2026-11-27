@@ -179,7 +179,7 @@ def priming(slug: str, transfer: dict | None) -> str:
     if not transfer or not transfer["handoff"]:
         return ""
     return (
-        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
+        "After reading the handoff in your seat brief, confirm you read it and will take its first Next action by running "
         f"agentihooks swarm {slug} confirm-handoff {transfer['id']} --next "
-        f"{shlex.quote(transfer['next'])}\n{transfer['handoff']}"
+        f"{shlex.quote(transfer['next'])}"
     )
