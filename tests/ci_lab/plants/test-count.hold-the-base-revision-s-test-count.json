@@ -3,9 +3,9 @@
   "reason": "fewer tests than the base floor",
   "edits": [
     {
-      "path": "tests/ci_lab/test_expressions.py",
-      "before": "def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:",
-      "after": "def interpolate_replaces_each_embedded_expression_with_its_text() -> None:"
+      "path": "tests/fixtures/phase_lifecycle.json",
+      "before": ",\n {\"phases\": [{\"id\": \"p0\", \"title\": \"Inbox\", \"done\": true}, {\"id\": \"p1\", \"title\": \"Seats\"}, {\"title\": \"Release\", \"id\": \"p2\"}], \"tasks\": [], \"phase\": \"p2\", \"state\": \"building\", \"label\": \"Building\"}\n]\n",
+      "after": "\n]\n"
     }
   ]
 }
