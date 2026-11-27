@@ -340,6 +340,25 @@ def test_statistics_candidates_ignore_unrelated_bound_hook_state(pytester: pytes
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")
+def test_statistics_candidates_stop_graph_work_after_known_reach(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = stats_candidates.Reach.references
+
+    def references(reach: stats_candidates.Reach, key: tuple[str, int]) -> set[tuple[str, int]]:
+        assert key[0] != "other.py"
+        return original(reach, key)
+
+    monkeypatch.setattr(stats_candidates.Reach, "references", references)
+    pytester.makepyfile(other="def unrelated():\n    return 1\n")
+    result = select(
+        pytester,
+        "def test_reaches():\n    import other\n    assert target(1) == 2\n",
+    )
+    assert result["selected"] == ["test_reaches"]
+
+
+@pytest.mark.feature("mutation-stats-trace-candidates")
 def test_stats_bucket_registers_candidate_selection_for_its_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

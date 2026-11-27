@@ -88,6 +88,7 @@ class Reach:
         self.aliases: dict[Key, dict[str, list[tuple[str, str]]]] = {}
         self.edges: dict[Key, set[Key]] = {}
         self.wanted: set[Key] = set()
+        self.direct: set[Key] = set()
         self.active: set[tuple[Key, str]] = set()
         self.resolving: dict[tuple[Key, str], set[Key]] = {}
         self.unknown: set[Key] = set()
@@ -539,53 +540,59 @@ class Reach:
                 self.arguments[function][name] = previous | value
                 self.dirty.add(function)
 
+    def analyze(self, key: Key) -> None:
+        self.dirty.discard(key)
+        self.direct.discard(key)
+        if key not in self.invalid:
+            self.unknown.discard(key)
+        edges = set[Key]() if self.changed(key) else self.references(key)
+        self.edges[key] = {edge for edge in edges if edge[0]}
+        if UNKNOWN in edges:
+            self.unknown.add(key)
+        if self.changed(key) or any(self.changed(edge) for edge in self.edges[key]):
+            self.direct.add(key)
+
+    def changed(self, key: Key) -> bool:
+        node = cast(Any, self.nodes[key])
+        lines = self.changes.get(key[0], ())
+        if key[1]:
+            return any(node.lineno <= line <= (node.end_lineno or node.lineno) for line in lines)
+        return bool(lines) and not any(
+            isinstance(value, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(value.lineno <= line <= (value.end_lineno or value.lineno) for line in lines)
+            for value in ast.walk(node)
+        )
+
     def fill(self, keys: set[Key]) -> None:
         pending = list(keys)
-        changed = False
+        seen: set[Key] = set()
         passes = 0
-        while pending or self.dirty:
-            if not pending:
-                pending.extend(self.dirty)
+        while pending:
             key = pending.pop()
-            if not key[0] or key in self.edges and key not in self.dirty:
+            if not key[0] or key in seen and key not in self.dirty:
                 continue
-            self.dirty.discard(key)
+            seen.add(key)
             passes += 1
             if passes >= 20000:
                 self.unknown.update(pending)
-                self.unknown.update(self.dirty)
                 self.unknown.add(key)
-                self.dirty.clear()
-                break
-            if key not in self.invalid:
-                self.unknown.discard(key)
-            edges = self.references(key)
-            self.edges[key] = {edge for edge in edges if edge[0]}
-            if UNKNOWN in edges:
-                self.unknown.add(key)
-            pending.extend(self.edges[key] - self.edges.keys())
-            changed = True
-        if changed:
-            self.propagate()
+                self.propagate()
+                return
+            if key not in self.edges or key in self.dirty:
+                self.analyze(key)
+            if key in self.direct or key in self.unknown:
+                self.propagate()
+                if keys & self.wanted:
+                    return
+            else:
+                pending.extend(self.edges[key])
+        self.propagate()
 
     def propagate(self) -> None:
-        self.wanted = set(self.unknown)
+        self.wanted = self.unknown | self.direct
         reverse: dict[Key, set[Key]] = defaultdict(set)
         for key, edges in self.edges.items():
-            node = cast(Any, self.nodes[key])
-            if (
-                any(node.lineno <= line <= (node.end_lineno or node.lineno) for line in self.changes.get(key[0], ()))
-                if key[1]
-                else bool(self.changes.get(key[0]))
-                and not any(
-                    isinstance(value, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and any(
-                        value.lineno <= line <= (value.end_lineno or value.lineno)
-                        for line in self.changes.get(key[0], ())
-                    )
-                    for value in ast.walk(node)
-                )
-            ):
+            if self.changed(key):
                 self.wanted.add(key)
             for edge in edges:
                 reverse[edge].add(key)
