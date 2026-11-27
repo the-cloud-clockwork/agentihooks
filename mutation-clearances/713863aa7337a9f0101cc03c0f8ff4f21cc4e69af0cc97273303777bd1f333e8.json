@@ -1,6 +1,0 @@
-{
-  "scripts/routing/native_default.py:scripts.routing.native_default.x__codex_trust:8e3e12980eb0b50625aab9cd1a681f6ae3d013f17f1ed73b201b0a8c0b7a5ede": {
-    "reader": "standards-reader",
-    "reason": "rebase_state filters solely by source_hooks and prefixes each distinct retained suffix with one constant target string. Replacing target_hooks with None changes only those temporary dictionary keys; the transformation stays injective and preserves value identity and insertion order. This caller consumes only values(), then performs the actual token rewrite using the unchanged target_hooks, so serialized bytes and all other outputs remain identical."
-  }
-}

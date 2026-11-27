@@ -45,15 +45,21 @@ def _rename_trust_key(key: SingleKey, value: Item, source: str, target: str) -> 
         value.display_name = value.display_name.replace(original.strip(), replacement.strip())
 
 
-def _trust_entries(container: Container, prefix: tuple[str, ...]) -> Iterator[tuple[SingleKey, Item]]:
+def _trust_entries(container: Container, prefix: tuple[str, ...]) -> Iterator[tuple[Container, SingleKey, Item]]:
     for key, value in container.body:
         if key is None:
             continue
         names = (*prefix, *(part.key for part in key))
         if names[:-1] == ("hooks", "state") and isinstance(key, SingleKey):
-            yield key, value
+            yield container, key, value
         elif isinstance(value, (Table, InlineTable)):
             yield from _trust_entries(value.value, names)
+
+
+def _remove_trust_entries(entries: list[tuple[Container, SingleKey, Item]]) -> None:
+    for container, key, _ in entries:
+        if key.key in container:
+            container.remove(key)
 
 
 def _codex_trust(source: Path, home: Path) -> None:
@@ -61,20 +67,23 @@ def _codex_trust(source: Path, home: Path) -> None:
     if not config.is_file():
         return
     doc = tomlkit.parse(config.read_bytes().decode())
-    entries: dict[str, list[tuple[SingleKey, Item]]] = {}
-    for key, value in _trust_entries(doc, ()):
-        entries.setdefault(key.key, []).append((key, value))
+    entries: dict[str, list[tuple[Container, SingleKey, Item]]] = {}
+    for container, key, value in _trust_entries(doc, ()):
+        entries.setdefault(key.key, []).append((container, key, value))
     source_hooks = source / "hooks.json"
     target_hooks = home / "hooks.json"
-    rebased = [
-        (path, key, value)
-        for path in dict.fromkeys((source_hooks, source_hooks.resolve()))
-        for group in rebase_state(entries, path, target_hooks).values()
-        for key, value in group
-    ]
-    for path, key, value in rebased:
-        _rename_trust_key(key, value, f"{path}:", f"{target_hooks}:")
-    if rebased:
+    destinations: set[str] = set()
+    for path in dict.fromkeys((source_hooks, source_hooks.resolve())):
+        source_prefix = f"{path}:"
+        for name, group in rebase_state(entries, path, target_hooks).items():
+            if name in destinations:
+                _remove_trust_entries(group)
+                continue
+            destinations.add(name)
+            for _, key, value in group:
+                target_prefix = name.removesuffix(key.key.removeprefix(source_prefix))
+                _rename_trust_key(key, value, source_prefix, target_prefix)
+    if destinations:
         config.write_bytes(tomlkit.dumps(doc).encode())
 
 
