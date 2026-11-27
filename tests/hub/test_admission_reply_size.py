@@ -72,7 +72,12 @@ def test_an_admission_carries_only_the_recaps_and_learned_notes_its_prompt_shows
     assert [recap["text"] for recap in task["recaps"]] == ["recap 9", "recap 8", "recap 7", "recap 6"]
     assert task[prompt.RECAPS_TOTAL] == 9
     assert [note["text"] for note in task["learned"]] == ["keep the queue warm"]
-    assert prompt.priming_lines(task)[-1] == prompt.SEAT_BRIEF
+    lines = prompt.priming_lines(task)
+    text = "\n".join(lines)
+    assert lines[-1] == prompt.SEAT_BRIEF
+    assert lines.count(prompt.SEAT_BRIEF) == 1
+    assert not [number for number in range(1, 10) if f"recap {number}" in text]
+    assert "keep the queue warm" not in text
 
 
 @pytest.mark.feature("hub-admission-reply-fits-bus")

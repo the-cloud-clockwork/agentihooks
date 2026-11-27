@@ -42,7 +42,7 @@ def test_a_task_carried_twice_keeps_the_seat_recap_count() -> None:
 
 
 @pytest.mark.feature("hub-admission-reply-fits-bus")
-def test_a_carried_task_keeps_only_the_learned_notes_its_prompt_counts() -> None:
+def test_a_carried_task_carries_only_the_learned_notes_not_withheld() -> None:
     assert [note["text"] for note in prompt.carried(whole())["learned"]] == ["canon note", "data note", "plain note"]
 
 
@@ -50,8 +50,7 @@ def test_a_carried_task_keeps_only_the_learned_notes_its_prompt_counts() -> None
 def test_a_seat_with_only_the_shown_recaps_names_the_seat_brief_instead_of_them() -> None:
     lines = prompt.priming_lines(prompt.carried(whole(1 + prompt.OLDER_RECAPS)))
 
-    assert lines[-1] == prompt.SEAT_BRIEF
-    assert not [line for line in lines if "older recaps" in line.lower() or line.startswith("recap ")]
+    assert lines == [f"Your seat {SEAT} carries what earlier occupants left.", prompt.SEAT_BRIEF]
 
 
 @pytest.mark.feature("hub-admission-reply-fits-bus")
