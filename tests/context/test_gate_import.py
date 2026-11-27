@@ -302,11 +302,33 @@ def test_an_unreadable_condition_reads_as_empty(tmp_path: Path) -> None:
     [
         ('exec "/opt/python/bin/python3" -P -m scripts.gates quiet\n', "/opt/python/bin/python3"),
         ("exec /opt/python/bin/python3 -m scripts.gates quiet\n", "/opt/python/bin/python3"),
-        ("exec python -m scripts.gates quiet\n", ""),
+        ("set -e\nexec python3 -I -m scripts.gates quiet\n", "/found/python3"),
+        ("exec no-such-python -m scripts.gates quiet\n", ""),
+        ('exec "${shebang#\\#!}" -P -m scripts.gates quiet\n', ""),
     ],
 )
-def test_a_shell_condition_names_its_literal_launcher(text: str, found: str) -> None:
+def test_a_shell_condition_names_the_command_it_launches(
+    monkeypatch: pytest.MonkeyPatch, text: str, found: str
+) -> None:
+    monkeypatch.setattr(gate_import.shutil, "which", lambda name: "/found/python3" if name == "python3" else None)
     assert gate_import.launcher(text) == found
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.parametrize(
+    "command, found",
+    [
+        ("/opt/agentihooks/bin/python", "/opt/agentihooks/bin/python"),
+        ("/usr/bin/env python3", "/found/python3"),
+        ("python3", "/found/python3"),
+        ("/usr/bin/env no-such-python", ""),
+    ],
+)
+def test_a_launch_command_resolves_to_an_absolute_interpreter(
+    monkeypatch: pytest.MonkeyPatch, command: str, found: str
+) -> None:
+    monkeypatch.setattr(gate_import.shutil, "which", lambda name: "/found/python3" if name == "python3" else None)
+    assert gate_import.resolved(command) == found
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
@@ -331,7 +353,7 @@ def test_a_condition_runs_under_the_hook_interpreter_or_its_launcher_or_an_unkno
         gate_import._ran_under(".sh", "exec /opt/python/bin/python3 -m scripts.gates quiet")
         == "/opt/python/bin/python3"
     )
-    assert gate_import._ran_under(".sh", "exec python -m scripts.gates quiet") == "an unknown interpreter"
+    assert gate_import._ran_under(".sh", "exec no-such-python -m scripts.gates quiet") == "an unknown interpreter"
 
 
 @pytest.mark.feature("gate-import-failure-alerts")

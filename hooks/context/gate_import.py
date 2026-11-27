@@ -3,7 +3,7 @@
 The gates come from the condition's own command, its main([...]) call or its -m scripts.gates launch, and each one the
 gate registry holds is reported when the child's last stderr line is an import failure of the gates package. The
 interpreter is the one the child ran under: the hook's own for a Python condition, else the one its launch error line
-names, the literal path its shell command launches, or the agentihooks command's shebang interpreter it reads.
+names, the command its shell launches, or the agentihooks command's shebang interpreter it reads.
 """
 
 import re
@@ -15,7 +15,7 @@ from typing import Any
 NAMED = re.compile(r"\bmain\(\s*\[([^\]]*)\]\s*\)")
 QUOTED = re.compile(r"""["']([\w-]+)["']""")
 LAUNCHED = re.compile(r"-m\s+scripts\.gates((?:[ \t]+[\w-]+)+)")
-LITERAL = re.compile(r"""["']?(/[^\s"']+)["']?(?:\s+-\w+)*\s+-m\s+scripts\.gates\b""")
+LAUNCH = re.compile(r"""(?:^|[\s;&|])["']?([\w./+][\w./+-]*)["']?(?:\s+-\w+)*\s+-m\s+scripts\.gates\b""", re.MULTILINE)
 SHEBANG = "command -v agentihooks"
 RAISED = re.compile(r"(?:ModuleNotFoundError|ImportError): .+")
 IMPORTING = re.compile(
@@ -42,8 +42,8 @@ def gate_names(text: str) -> list[str]:
 
 def launcher(text: str) -> str:
     """The interpreter a shell condition launches the gates package with, or an empty name when it cannot be told."""
-    if literal := LITERAL.search(text):
-        return literal[1]
+    if launched := LAUNCH.search(text):
+        return resolved(launched[1])
     command = shutil.which("agentihooks") if SHEBANG in text else None
     if command is None:
         return ""
@@ -51,7 +51,16 @@ def launcher(text: str) -> str:
         first = Path(command).read_text(errors="replace").partition("\n")[0]
     except OSError:
         return ""
-    return first.removeprefix("#!").strip()
+    return resolved(first.removeprefix("#!").strip())
+
+
+def resolved(command: str) -> str:
+    """The absolute interpreter a launch command runs: the path itself, the program an env shebang names, or the
+    program found on the path the condition inherits; empty when it is not found."""
+    program = command.removeprefix("/usr/bin/env ").strip()
+    if program.startswith("/"):
+        return program
+    return shutil.which(program) or ""
 
 
 def import_failure(stderr: str) -> tuple[str, str] | None:
