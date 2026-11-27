@@ -210,6 +210,43 @@ def test_a_resume_answers_done_on_this_hive_and_records_the_new_pane(
     rig.runtime.terminate.assert_not_called()
 
 
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_native_hive_resume_records_its_spawn_before_answering_done(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import DONE
+    from scripts.swarm import spawn_counts
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    rig = _resuming(redis, monkeypatch)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("rig", ".", 0, 0))
+    current = replace(rig.record, harness="codex")
+    store.put_agent("rig", current)
+    rig.consumer.store = store
+    monkeypatch.setattr(rig.consumer, "_holding", lambda order: current)
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: 0.007)
+    assert rig.consumer.resume(_order()).status == DONE
+    assert store.spawns("rig") == {"codex": 1}
+    assert store.agents("rig")[0].launched_at == 7
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_native_hive_resume_closes_the_new_process_when_spawn_recording_fails(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import spawn_counts
+
+    def refused(*args: Any) -> None:
+        raise OSError("spawn record refused")
+
+    rig = _resuming(redis, monkeypatch)
+    monkeypatch.setattr(spawn_counts, "record", refused)
+    with pytest.raises(OSError, match="spawn record refused"):
+        rig.consumer.resume(_order())
+    rig.runtime.terminate.assert_called_once_with(replace(rig.record, pane_id="new"))
+
+
 @pytest.mark.feature("hub-dead-resume")
 def test_a_resume_that_cannot_record_its_pane_closes_the_new_pane(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     rig = _resuming(redis, monkeypatch)
