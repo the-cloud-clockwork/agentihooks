@@ -2663,7 +2663,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     import redis
 
     from scripts.events import config, factory
-    from tests.ci_lab.test_scheduler_cache import startup_environments
+    from tests.ci_lab.test_scheduler_cache import capture_environment, startup_environments
 
     calls: dict[str, Any] = {"served": 0}
     client = fake_redis()
@@ -2756,11 +2756,11 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
     bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
 
-    def bus_from_environ(_cls: type[config.BusConfig], found: Any) -> config.BusConfig | None:
-        calls["bus_environ"] = found
-        return provisioning if found == environ else None
-
-    monkeypatch.setattr(config.BusConfig, "from_environ", classmethod(bus_from_environ))
+    monkeypatch.setattr(
+        config.BusConfig,
+        "from_environ",
+        classmethod(lambda cls, found: provisioning if capture_environment(calls, found) == environ else None),
+    )
     monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == bound else None)
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)

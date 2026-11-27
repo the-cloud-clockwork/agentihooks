@@ -25,6 +25,11 @@ def policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     }
 
 
+def capture_environment(calls: dict[str, object], found: Mapping[str, str]) -> Mapping[str, str]:
+    calls["bus_environ"] = found
+    return found
+
+
 def startup_environments(
     environ: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> tuple[dict[str, str], dict[str, str]]:
