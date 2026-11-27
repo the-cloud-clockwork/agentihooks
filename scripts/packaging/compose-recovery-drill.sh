@@ -52,6 +52,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -119,6 +120,10 @@ class Tasks:
 
     def reopen(self, event):
         return None
+
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        with open(REPORTS, "a") as reports:
+            reports.write(json.dumps([event.key, placed.harness]) + "\n")
 
 
 class StandIn:

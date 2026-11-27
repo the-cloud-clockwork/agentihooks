@@ -37,6 +37,7 @@ import time
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -88,6 +89,9 @@ class Tasks:
 
     def reopen(self, event):
         return None
+
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        reported.append([event.key, placed.harness])
 
 
 class StandIn:
