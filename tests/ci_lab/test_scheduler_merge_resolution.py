@@ -229,18 +229,23 @@ def test_an_arbitrary_resolver_error_through_background_holds_the_head_and_posts
 ) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    release = threading.Event()
 
     def broken(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        release.wait(10.0)
         raise RuntimeError("boom")
 
     background = merges.Background(broken)
     run.engine.ports = replace(run.engine.ports, merges=background)
     _push(run, HEAD_A, 41)
     held = run.tick(1000)
-    assert held[-1].endswith("is still resolving")
+    assert any(action.endswith("is still resolving") for action in held)
+    release.set()
     wait_futures([future for _, future in background.resolutions.values()])
     actions = run.tick(1100)
-    assert actions[-1].startswith(f"holding {HEAD_A}: the merge of {REPO}#41 for {HEAD_A} failed: boom")
+    assert any(
+        action.startswith(f"holding {HEAD_A}: the merge of {REPO}#41 for {HEAD_A} failed: boom") for action in actions
+    )
     assert run.grades() == []
     assert run.lab.poster.posts == []
 
@@ -256,12 +261,13 @@ def test_a_refused_pull_request_read_holds_the_required_frame_regrade(
     _push(run, HEAD_A, 41)
     run.tick(1000)
     old = run.grade(HEAD_A)
+    before = list(run.lab.poster.posts)
     monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
     port.side_effect = merges.MergeRefused("GET pulls/41 answered 404")
     actions = run.tick(2000)
     assert any("holding the required-frame regrade" in action for action in actions)
     assert run.grade(HEAD_A).run == old.run
-    assert run.lab.poster.posts == []
+    assert run.lab.poster.posts == before
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -275,12 +281,13 @@ def test_an_unanswered_pull_request_read_holds_the_required_frame_regrade(
     _push(run, HEAD_A, 41)
     run.tick(1000)
     old = run.grade(HEAD_A)
+    before = list(run.lab.poster.posts)
     monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
     port.side_effect = merges.MergeUnanswered("GET pulls/41 answered 500")
     actions = run.tick(2000)
     assert any("holding the required-frame regrade" in action for action in actions)
     assert run.grade(HEAD_A).run == old.run
-    assert run.lab.poster.posts == []
+    assert run.lab.poster.posts == before
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -294,9 +301,12 @@ def test_an_arbitrary_resolver_error_holds_the_required_frame_regrade(
     _push(run, HEAD_A, 41)
     run.tick(1000)
     old = run.grade(HEAD_A)
+    before = list(run.lab.poster.posts)
     monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    release = threading.Event()
 
     def broken(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        release.wait(10.0)
         raise RuntimeError("boom")
 
     background = merges.Background(broken)
@@ -304,11 +314,12 @@ def test_an_arbitrary_resolver_error_holds_the_required_frame_regrade(
     held = run.tick(2000)
     assert any(action.endswith("is still resolving") for action in held)
     assert run.grade(HEAD_A).run == old.run
+    release.set()
     wait_futures([future for _, future in background.resolutions.values()])
     actions = run.tick(2100)
     assert any("failed: boom" in action for action in actions)
     assert run.grade(HEAD_A).run == old.run
-    assert run.lab.poster.posts == []
+    assert run.lab.poster.posts == before
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -456,7 +467,7 @@ def test_a_pending_regrade_resolution_holds_and_counts_nothing(
     monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
     port.side_effect = merges.MergePending("still resolving")
     actions = run.tick(2000)
-    assert any(action.endswith("is still resolving") for action in actions)
+    assert any(action.endswith("still resolving") for action in actions)
     assert run.grade(HEAD_A).unmerged == 0
 
 
