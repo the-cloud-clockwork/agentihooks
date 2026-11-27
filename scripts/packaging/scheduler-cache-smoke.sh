@@ -6,7 +6,7 @@ name="scheduler-cache-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 cache_volume="${name}-cache"
 proof_volume="${name}-proof"
 cleanup() {
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker rm -fv "$name" >/dev/null 2>&1 || true
   docker volume rm "$cache_volume" "$proof_volume" >/dev/null
 }
 docker volume create "$cache_volume" >/dev/null

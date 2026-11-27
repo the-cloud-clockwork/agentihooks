@@ -22,7 +22,8 @@ def child(name: str) -> int:
             time.sleep(0.02)
 
 
-def breach(environ: Mapping[str, str], _interval: float, _passes: int) -> int:
+def breach(environ: Mapping[str, str], interval_s: float, passes: int) -> int:
+    del interval_s, passes
     proof = Path("/proof")
     processes = [
         subprocess.Popen([sys.executable, __file__, "child", name], start_new_session=detached)
@@ -51,7 +52,8 @@ def breach(environ: Mapping[str, str], _interval: float, _passes: int) -> int:
     raise RuntimeError("cache policy did not terminate PID one")
 
 
-def restart(environ: Mapping[str, str], _interval: float, _passes: int) -> int:
+def restart(environ: Mapping[str, str], interval_s: float, passes: int) -> int:
+    del interval_s, passes
     store = Path(environ["CI_LAB_MIRROR_STORE"])
     assert not (store.parent / ".invalid").exists()
     assert list(store.iterdir()) == []
@@ -61,7 +63,8 @@ def restart(environ: Mapping[str, str], _interval: float, _passes: int) -> int:
     return 0
 
 
-def reused(environ: Mapping[str, str], _interval: float, _passes: int) -> int:
+def reused(environ: Mapping[str, str], interval_s: float, passes: int) -> int:
+    del interval_s, passes
     assert (Path(environ["CI_LAB_MIRROR_STORE"]) / "healthy").read_text() == "retained"
     print("healthy same-Pod cache retained", flush=True)
     return 0
