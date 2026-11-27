@@ -305,12 +305,9 @@ def test_the_table_prints_a_row_per_head_and_the_rule_counts() -> None:
         "lab verdict first 1 of at least 3\n"
         "rule fails\n"
     )
-    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1, "merge_group")).splitlines()[
-        0
-    ] == ("gate lint event merge_group")
-    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1, "merge_group")).endswith(
-        "lab verdict first 1 of at least 1\nrule holds\n"
-    )
+    one = shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1, "merge_group"))
+    assert one.splitlines()[0] == "gate lint event merge_group"
+    assert one.endswith("lab verdict first 1 of at least 1\nrule holds\n")
 
 
 @pytest.mark.feature("lab-shadow-acceptance-report")
@@ -343,6 +340,9 @@ def test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_second
         "aaaaaaaaaaaa  pass     pass     first  match",
     ]
     assert unwaited.endswith("lab verdict first 3 of at least 5\nrule fails\n")
+    half_a_second_late = waited(HEAD, at(20) + timedelta(milliseconds=500), at(0))
+    assert shadow_report.inside(half_a_second_late) is False
+    assert shadow_report.timed(half_a_second_late) == "aaaaaaaaaaaa  pass     pass     first  match      1201"
 
 
 @pytest.mark.feature("lab-shadow-acceptance-report")

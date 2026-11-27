@@ -240,10 +240,11 @@ def line(found: Head) -> str:
 
 
 def timed(found: Head) -> str:
-    """Return one head's row ending with the whole seconds from the start of its lab-verdict job to its lab verdict,
-    or its plain row when the head lacks either."""
+    """Return one head's row ending with the seconds from the start of its lab-verdict job to its lab verdict, rounded
+    up so a row reads the wait or less only when its verdict is inside it, or its plain row when the head lacks
+    either."""
     taken = waited(found)
-    return line(found) if taken is None else SECONDS.format(line(found), taken // timedelta(seconds=1))
+    return line(found) if taken is None else SECONDS.format(line(found), math.ceil(taken / timedelta(seconds=1)))
 
 
 def render(gate: str, event: str, heads: Sequence[Head], window: Rule) -> str:

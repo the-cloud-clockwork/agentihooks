@@ -213,7 +213,7 @@ leaves the last two columns empty. The last line is `rule holds` with exit code 
 with exit code 1. An argument error exits 2.
 
 A pull request report adds a `seconds` column, the seconds from the start of the head's
-`lab-verdict` job to its lab verdict, empty when the head lacks either, and the line
+`lab-verdict` job to its lab verdict, rounded up and empty when the head lacks either, and the line
 `lab verdict inside the wait <n> of at least <m>` after the `lab verdict first` line. A merge group report
 keeps the five columns and three counts above.
 
