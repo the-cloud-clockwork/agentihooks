@@ -134,6 +134,12 @@ def test_an_event_log_consumer_reports_its_durable_creation_time(bus: nats.NatsB
     assert bus.events.consumer("watcher", "swarm.>").created == first.created
 
 
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_consumer_reports_no_created_time_until_its_durable_creation_is_set() -> None:
+    consumer = nats.NatsConsumer(mock.Mock(), mock.Mock(), mock.Mock(), LOG_POLICY, "queue.work")
+    assert consumer.created is None
+
+
 def test_a_durable_without_an_inactive_threshold_stays_and_one_with_it_is_reaped_once_idle(bus):
     bus.events.consumer("kept", "swarm.>", LOG_POLICY)
     bus.events.consumer("idle", "swarm.>", QueuePolicy(max_deliver=3, ack_wait_ms=1_000, inactive_ms=500))

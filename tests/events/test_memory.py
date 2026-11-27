@@ -78,8 +78,8 @@ def test_a_memory_consumer_keeps_the_wall_clock_time_it_was_created_at() -> None
 
 @pytest.mark.feature("swarm-review-trigger")
 def test_open_bus_stamps_consumers_from_the_wall_clock_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(memory.time, "time_ns", lambda: 9_000_500_000)
-    assert memory.open_bus(BusConfig()).events.consumer("d", "swarm.>").created == 9_000
+    monkeypatch.setattr(memory.time, "time_ns", lambda: 1_700_000_000_000_500_000)
+    assert memory.open_bus(BusConfig()).events.consumer("d", "swarm.>").created == 1_700_000_000_000
 
 
 @pytest.mark.parametrize(
