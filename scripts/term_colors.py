@@ -28,3 +28,7 @@ def yellow(text: str, stream: TextIO | None = None, environ: Mapping[str, str] |
 
 def red(text: str, stream: TextIO | None = None, environ: Mapping[str, str] | None = None) -> str:
     return paint(text, RED, stream, environ)
+
+
+def bright(color: str) -> str:
+    return str(int(color) + 60)

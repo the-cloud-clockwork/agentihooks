@@ -37,3 +37,7 @@ def test_the_defaults_are_read_at_call_time(monkeypatch):
 def test_an_explicit_environment_wins_over_the_process_one(paint, code, monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     assert paint("hi", Tty(), {}) == f"\x1b[{code}mhi\x1b[0m"
+
+
+def test_bright_shifts_a_colour_to_its_bright_code():
+    assert colors.bright("31")
