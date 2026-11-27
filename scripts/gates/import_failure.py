@@ -26,7 +26,7 @@ STAMPS = "import-alerts.json"
 ITEM = "gate-import-"
 LOCK_TRIES = 20
 LOCK_PAUSE = 0.05
-SEND_ERRORS = (ImportError, LookupError, OSError, RuntimeError, SystemExit, TypeError, ValueError)
+SEND_ERRORS = (AttributeError, ImportError, LookupError, OSError, RuntimeError, SystemExit, TypeError, ValueError)
 
 
 @dataclass(frozen=True)

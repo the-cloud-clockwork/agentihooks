@@ -315,7 +315,15 @@ def test_a_long_import_error_is_cut_to_the_alert_limit(world: World, monkeypatch
 
 @pytest.mark.feature("gate-import-failure-alerts")
 @pytest.mark.parametrize(
-    "error", [ImportError("gone"), KeyError("revision"), OSError("down"), RuntimeError("refused"), SystemExit("no url")]
+    "error",
+    [
+        AttributeError("get"),
+        ImportError("gone"),
+        KeyError("revision"),
+        OSError("down"),
+        RuntimeError("refused"),
+        SystemExit("no url"),
+    ],
 )
 def test_any_send_failure_frees_the_hour_and_says_so(
     world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: BaseException
