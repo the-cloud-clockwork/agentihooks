@@ -22,7 +22,7 @@
     "tests/swarm/test_prompt_carried.py::test_a_carried_task_renders_the_same_prompt_and_trace_as_the_whole_task",
     "tests/swarm/test_prompt_carried.py::test_a_task_carried_twice_keeps_the_seat_recap_count",
     "tests/swarm/test_prompt_carried.py::test_a_carried_task_keeps_only_the_learned_notes_its_prompt_counts",
-    "tests/swarm/test_prompt_carried.py::test_a_seat_with_only_the_shown_recaps_counts_none_kept",
-    "tests/swarm/test_prompt_carried.py::test_a_seat_with_one_recap_past_the_shown_ones_counts_it_kept"
+    "tests/swarm/test_prompt_carried.py::test_a_seat_with_only_the_shown_recaps_names_the_seat_brief_instead_of_them",
+    "tests/swarm/test_prompt_carried.py::test_a_seat_with_one_recap_past_the_shown_ones_prompts_the_same_as_one_without"
   ]
 }
