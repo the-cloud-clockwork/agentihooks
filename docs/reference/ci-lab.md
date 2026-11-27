@@ -219,6 +219,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
+| `CI_LAB_SERVED_REPOSITORIES` | yes | no | Repository URLs the scheduler serves, separated by commas or white space; unset or empty, it serves the one repository `CI_LAB_REPOSITORY` names. Intake ignores a head of any other repository |
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset. Also the image the lab wants: a worker whose pod names a floating tag and runs another digest is answered `426` on its next lease and restarts in place, see [Worker executors](#worker-executors) |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
@@ -2679,6 +2680,15 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
   to a grade ref, the close starts from the live grades of the closed head that name the lane,
   and the lane keeps naming the grade it names.
+- A new head of a repository the scheduler does not serve gets no grade. Before anything else, intake
+  compares the head's repository with the served set by owner and name, with no `.git` suffix and
+  case folded, and prints `ignored <head>: <repository> is not a served repository`: it holds no
+  waiting entry, checks no actor, resolves no plant base, expands nothing and posts no check. Work
+  already stored for such a repository is not swept: each held head gets one more start, and when
+  it cannot be expanded there the release step drops it and posts its failed required check on
+  its commit. The service serves the
+  repositories `CI_LAB_SERVED_REPOSITORIES` lists, or else the one `CI_LAB_REPOSITORY` names. The
+  trust list and the shadow recorder stay those of the repository `CI_LAB_REPOSITORY` names.
 - A push that named no branch gets no promotion grade. Intake holds no head of the promotion class
   that has no grade ref and whose lane is its own head, and prints `ignored <head>: a push that
   named no branch asks for no grade`. On its first pass a scheduler retires what is stored that
