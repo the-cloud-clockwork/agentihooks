@@ -65,7 +65,7 @@ def test_a_release_regrades_a_live_frame_without_posting_failed_required(
     plan = scheduler.frame(scheduler.Priority.PULL_REQUEST, TREE, BASE, {"lint": (unit(1),)}, plant=plant)
     run = lab({HEAD_A: plan})
     request = scheduler.GradeRequest(REPO, HEAD_A, BASE, scheduler.Priority.PULL_REQUEST, "trusted", False, plant=plant)
-    run.engine._start(request, "feature", "", 1000)
+    run.engine._start(request, "feature", "", 1000, name="")
     run.tick(1000)
     old = run.grade(HEAD_A)
     grant = run.lease(ttl_ms=10000)[0]
@@ -157,11 +157,11 @@ def test_stale_intake_regrades_once_and_reuses_the_matching_replacement(
     assert old.conclusion == "success"
     _release(run, monkeypatch)
     request = run.lab.expander.seen[0]
-    action = run.engine._start(request, "feature", "", 2000)
+    action = run.engine._start(request, "feature", "", 2000, name="")
     assert action.startswith("grading ")
     replacement = next(grade for grade in run.grades() if grade.run != old.run)
     assert replacement.units[old.gates["lint"][0]].outcome == "passed"
-    assert run.engine._start(request, "feature", "", 3000) == f"already graded {replacement.run}"
+    assert run.engine._start(request, "feature", "", 3000, name="") == f"already graded {replacement.run}"
     assert len(run.grades()) == 2
 
 
@@ -173,7 +173,7 @@ def test_a_legacy_grade_derives_required_from_its_stored_gates(
     plan = scheduler.frame(tier, TREE, BASE, {"lint": (unit(1),)})
     run = lab({HEAD_A: plan})
     request = scheduler.GradeRequest(REPO, HEAD_A, BASE, tier, "trusted", False)
-    run.engine._start(request, "feature", "", 1000)
+    run.engine._start(request, "feature", "", 1000, name="")
     old = run.grade(HEAD_A)
     document = json.loads(run.lab.client.get(scheduler.GRADES + old.run))
     document.pop("required", None)
@@ -196,7 +196,7 @@ def test_a_matching_frame_keeps_existing_grade_reuse_and_success(lab: Callable[.
     old = run.grade(HEAD_A)
     assert old.conclusion == "success"
     request = run.lab.expander.seen[0]
-    assert run.engine._start(request, "feature", "", 2000) == f"already graded {old.run}"
+    assert run.engine._start(request, "feature", "", 2000, name="") == f"already graded {old.run}"
     assert len(run.grades()) == 1
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "success")
 
@@ -270,10 +270,10 @@ def test_matching_full_scope_intake_keeps_its_grade_live(lab: Callable[..., Run]
     plan = scheduler.frame(scheduler.Priority.PULL_REQUEST, TREE, BASE, {"lint": (unit(1),)}, plant=True)
     run = lab({HEAD_A: plan})
     request = scheduler.GradeRequest(REPO, HEAD_A, BASE, scheduler.Priority.PULL_REQUEST, "trusted", False, plant=True)
-    run.engine._start(request, "feature", "", 1000)
+    run.engine._start(request, "feature", "", 1000, name="")
     run.tick(1000)
     old = run.grade(HEAD_A)
-    assert run.engine._start(request, "feature", "", 2000) == f"already graded {old.run}"
+    assert run.engine._start(request, "feature", "", 2000, name="") == f"already graded {old.run}"
     current = run.engine.grade(old.run)
     assert current is not None and not current.superseded
     assert run.lab.client.sismember(scheduler.LIVE, old.run)
@@ -292,9 +292,9 @@ def test_stale_intake_does_not_reuse_another_heads_lane_grade(
     _release(run, monkeypatch)
     run.lab.expander.plans[HEAD_B] = pull_plan({"lint": (unit(3),)})
     other = scheduler.GradeRequest(REPO, HEAD_B, BASE, scheduler.Priority.PULL_REQUEST, "trusted", False)
-    run.engine._start(other, "feature", "", 1500)
+    run.engine._start(other, "feature", "", 1500, name="")
     request = run.lab.expander.seen[0]
-    action = run.engine._start(request, "feature", "", 2000)
+    action = run.engine._start(request, "feature", "", 2000, name="")
     assert action.startswith("grading ")
     replacement = run.engine.grade(f"{old.run}-2000")
     assert replacement is not None and replacement.head == HEAD_A
@@ -305,7 +305,7 @@ def test_stale_intake_does_not_reuse_another_heads_lane_grade(
 def test_a_replacement_carries_only_unfinished_admitted_jobs(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: pull_plan({"lint": tuple(unit(index) for index in range(1, 6))})})
     request = scheduler.GradeRequest(REPO, HEAD_A, BASE, scheduler.Priority.PULL_REQUEST, "trusted", False)
-    run.engine._start(request, "feature", "", 1000)
+    run.engine._start(request, "feature", "", 1000, name="")
     state = run.grade(HEAD_A)
     refs = list(state.units)
     slots = list(state.units.values())
@@ -341,6 +341,8 @@ def test_a_release_reuses_cached_failed_verdicts_without_bypassing_them(
     assert replacement.units[cached].outcome == "failed"
     assert replacement.units[cached].job == ""
     assert replacement.units[pending].job == old.units[pending].job
+    assert replacement.units[replacement.gates["release-job"][0]].held
+    run.tick(2100)
     assert set(run.engine.queue.pending()) == {
         old.units[pending].job,
         replacement.units[replacement.gates["release-job"][0]].job,

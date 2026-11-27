@@ -1523,7 +1523,7 @@ class Scheduler:
             request = GradeRequest(
                 state.repo, state.head, state.base, Priority(state.tier), "scheduler", False, plant=scope == "full"
             )
-            return [self._start(request, state.lane, state.ref, now_ms)]
+            return [self._start(request, state.lane, state.ref, now_ms, name="")]
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
