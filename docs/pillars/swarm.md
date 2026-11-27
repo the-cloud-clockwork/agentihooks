@@ -44,14 +44,14 @@ panes to its right, ordered left to right: three engineers by default and four a
 at most with the master (`--agents 2` to `--agents 5`). Every
 agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
 says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a seat with no
-account free, fails `quick up`, which names it and leaves it pending for the next round. A seat's agent starts only
-on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
+account free, fails `quick up`, which names it and leaves it pending for the next round. Without an authentication
+option, an engineer starts on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
 when the shell left in a reused pane never loaded it, and a launch whose agent was not routed fails and leaves the
 seat pending instead of ready.
 
 | Piece | Where it lives |
 |---|---|
-| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state |
+| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state, authentication mode and safe account reference |
 | Seat notes | `seats/<seat>/` holds `plan.md` (checkbox stages), `notes.md`, `learned.md` and `handoff.md` |
 | Culture | `culture.md`, read into every seat's injected block |
 | Room | `room/chat.jsonl`, chat between seats that share no native channel |
@@ -91,6 +91,48 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   from a live session, records that session and its pane as the seat's occupant; it never takes a launching seat,
   a seat whose recorded pane herdr shows running an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
+
+### Saved local commands
+
+Use `quick up --command` with a JSON argument list for all engineers, or repeat
+`--engineer-command` with `N=JSON` to override engineer N. Numbers start at one
+and exclude the master. For example, `--harness claude,codex,program` can combine
+two native wrappers and a local watcher. A `program` seat requires a command.
+The executable is resolved against the selected directory and caller's `PATH`;
+spaces and shell characters in arguments remain literal. Credentials belong in
+the program's environment or an existing named native authentication reference.
+
+Wrappers retain native authentication, profile setup, opening prompt and session
+binding. The wrapper receives its saved argv prefix followed by generated native
+CLI arguments, and `AGENTIHOOKS_QUICK_PROMPT_FILE` names its opening prompt file.
+It must forward the arguments and environment to the declared native CLI.
+Ordinary programs use recorded process identity instead of hook acknowledgements;
+the tick never types agent prompts into them. They have no agent hooks or
+automatic conversational handoff. Room messages stay stored.
+
+Initial launch, retry and manual or forced relaunch reuse the saved argv and
+native authentication choice. Status and master context show safe command
+identity and lifecycle capabilities. See [the CLI examples](../reference/cli-commands.md#agentihooks-quick).
+
+### Native quick authentication
+
+`quick up --auth default` starts native engineers on each CLI's ordinary local
+login outside automatic quota tiers. `--auth named:reference` chooses an existing
+account suffix or token environment variable name for that harness. Pass a
+reference, never a credential value. A missing or incompatible named reference
+is refused before panes are created.
+
+One choice applies to every engineer. A comma separated list gives one choice
+per engineer in pane order, including mixed Claude and Codex seats. Omitted
+`--auth` keeps routed behavior. The master keeps its current authentication;
+engineer selection changes no global login.
+
+The registry and `quick status` retain the safe `auth` mode and `account`
+reference. The master context identifies explicit modes as outside automatic
+tiers. Handoff, forced relaunch and automatic retry reuse the saved choice even
+when the caller's environment changes. Default and named engineers keep native
+sign in and session binding checks; unavailable authentication leaves a seat
+pending. Quota driven switching remains active for routed seats.
 
 ## Event driven engine
 
@@ -1316,7 +1358,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, review, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 15; a swarm that stored another value keeps it. The host room guard still refuses a spawn when load or available memory leaves no room, whatever N allows. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
 | `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
-| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
+| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. The Helm chart's controller sets `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES` to 0, so a swarm it runs takes no automatic snapshot unless it sets `snapshot-minutes`. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, in the pane herdr restored for it when that pane waits at a bare shell with the agent's conversation and in a new pane otherwise, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -1371,7 +1413,7 @@ In every mode the cutoff publishes a final handoff as a Handoff v2 body: window 
 ### Templates
 
 A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`
-(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lane templates are `eng`, `ci`, `plan` and `review`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`; `agentihooks claude` then passes `--allow-dangerously-skip-permissions`, since `--dangerously-skip-permissions` would override the named mode) and leaves it with no pane prompt: the PermissionRequest hook allows its `ExitPlanMode` with the plan as the updated input and sets the session back to bypass, because Claude Code keeps the proceed prompt for a bare allow and would otherwise fall back to manual mode. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner launches under a `planner` permissions profile instead (`-c permissions.planner=…` with `-c default_permissions="planner"`): it extends `:read-only`, turns network on and grants write only to the ledger folder (`LEDGER_DIR`, default `~/development-ledger`), `~/.agentihooks/swarm` and `~/scratchpad`. The repository stays read only while `agentihooks ledger` and Redis calls work; `ledger task add` needs the ledger folder because it takes a lock file there. The `trace-plan` and `build` gates stay the second line. Per lane:
+(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lane templates are `eng`, `ci`, `plan` and `review`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`; `agentihooks claude` then passes `--allow-dangerously-skip-permissions`, since `--dangerously-skip-permissions` would override the named mode) and leaves it with no pane prompt: the PermissionRequest hook allows its `ExitPlanMode` with the plan as the updated input and sets the session back to bypass, because Claude Code keeps the proceed prompt for a bare allow and would otherwise fall back to manual mode. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner launches under a `planner` permissions profile instead (`-c permissions.planner=…` with `-c default_permissions="planner"`): it extends `:read-only`, turns network on and grants write only to the ledger folder (`LEDGER_DIR`, default `~/development-ledger`), `~/.agentihooks/swarm`, `~/scratchpad`, the ledger exports folder, the launch checkout's git common dir, the worktree root (`WORKTREE_ROOT`, default `~/dev/worktrees`) and the launch temp folder. The checkout working tree stays read only while `agentihooks ledger`, Redis calls, `wt.sh new` and temp files work; `ledger task add` needs the ledger folder because it takes a lock file there. The managed agentibrain server carries `default_tools_approval_mode = "approve"`, so brain tools answer under approval `never`. The `trace-plan` and `build` gates stay the second line. Per lane:
 
 | Field | Meaning |
 |---|---|
@@ -5140,9 +5182,9 @@ When the `recover` attempt falls due, the pass reads the pull request again and 
 | A red check | Reopened for repair. | `task <id> reopened, <url> has red checks` |
 | Still unmergeable, or checks not all resolved green | The attempt counts; the next one is due later. | `<url> for task <id> is not yet mergeable and green; it retries later` |
 | Mergeable and green on the same head | Queued again with the comment `The swarm queued <url> again: its unmergeable state cleared on the unchanged green head.` The record returns to the merge wait described above. | `queued <url> for task <id>` |
-| Mergeable and green, but the queue call fails | A `requeue` ledger alert `The swarm could not queue <url> again for task <id> after a transient unmergeable state: <error>`; the attempt counts. | `could not requeue <url> for task <id>: <error>` |
+| Mergeable and green, but the queue call fails | A `merge` ledger alert `The swarm could not queue <url> again for task <id> after a transient unmergeable state: <error>`; the attempt counts. | `could not requeue <url> for task <id>: <error>` |
 
-The backoff doubles from one minute: attempts fall due 1, 2, 4, 8 and 16 minutes apart, so within a first unmergeable episode the fresh reads come at about 1, 3, 7, 15 and 31 minutes after the dequeue, each on the first tick past its due time. The attempt count is kept in the record's `recoveries` field and lasts as long as the ready record, so it counts across episodes of one release: each attempt, failed or successful, adds one, and a later episode starts its backoff from that count. A reopen deletes the record, and the next `swarm ready` starts the count at zero. When an attempt would take the count to five (`QUEUE_TRIES`), or a new episode starts with five successful requeues already counted, the pass raises the `requeue` alert `The swarm gave up queueing <url> again for task <id>: it stayed unmergeable or not green; reopened.` and reopens the task with `awaiting` set to `fix` and the cause `stayed unmergeable after leaving the merge queue`. The `recoveries` count is separate from the `requeues` count of green queue exits.
+The backoff doubles from one minute: attempts fall due 1, 2, 4, 8 and 16 minutes apart, so within a first unmergeable episode the fresh reads come at about 1, 3, 7, 15 and 31 minutes after the dequeue, each on the first tick past its due time. The attempt count is kept in the record's `recoveries` field and lasts as long as the ready record, so it counts across episodes of one release: each attempt, failed or successful, adds one, and a later episode starts its backoff from that count. A reopen deletes the record, and the next `swarm ready` starts the count at zero. When an attempt would take the count to five (`QUEUE_TRIES`), or a new episode starts with five successful requeues already counted, the pass raises the `merge` alert `The swarm gave up queueing <url> again for task <id>: it stayed unmergeable or not green; reopened.` and reopens the task with `awaiting` set to `fix` and the cause `stayed unmergeable after leaving the merge queue`. The `recoveries` count is separate from the `requeues` count of green queue exits.
 
 The `recover` wait lives in the swarm's ready record in Redis, and its due time is an absolute timestamp, so a restarted timer, or a tick from a new process, continues the same backoff. While it holds, the [stall watchdog](#stall-watchdog) treats the task as waiting and does not reopen it as dropped from the queue. A reopen for any cause above still releases the task only when no owner of it is live.
 
@@ -5173,7 +5215,7 @@ From the merge of pull request 5049 to 23 October, the ledgers hold six `its unm
 |---|---|
 | A green pull request left the queue and its task kept its claim | Expected during a `recover` wait; read `retry_at` and `recoveries` in the ready record. |
 | A task reopened with `stayed unmergeable after leaving the merge queue` | Five attempts were spent across its episodes. Read the pull request's queue state with `agentihooks swarm <id> merge state <url>`; when it is mergeable and green, queue it with `agentihooks swarm <id> merge queue <url>`. |
-| A `requeue` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
+| A `merge` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
 | A dequeue left no journal record | The record write failed on that machine; the tick process printed `merge queue record not written: <error>` on stderr. |
 
 #### Merge pass hold lines
@@ -7196,6 +7238,10 @@ export AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES=60
 
 The first form snapshots every 15 minutes, the second turns automatic snapshots off for that swarm, and the third
 sets the default for swarms with no `snapshot-minutes` setting. With neither, the interval is 30 minutes.
+The Helm chart's controller sets `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES` to 0. Its `~/.agentihooks` sits in the container
+layer on the node's system disk, which no volume covers and which is lost with the pod, so a snapshot there restores
+nothing. Leave `snapshot-minutes` unset or at 0 on a swarm the hosted controller runs: a nonzero setting wins over
+the chart default and writes the snapshot back into that layer every interval.
 `agentihooks swarm my-swarm status` shows the outcome on its `snapshots` line:
 
 ```text
@@ -9209,7 +9255,7 @@ Two commands publish one:
 | Command | What it sends |
 |---|---|
 | `agentihooks api --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
-| `agentihooks api --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+| `agentihooks api --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. With `--task <id>` in place of `--phase` it publishes the plan for one task that has no phase: the plan carries one slice marker, the task gets the stored plan link and that slice, and `plan read` prints its chunk; it prints `"task"` and `"plan_slice"` in place of `"phases"`. |
 
 ### Where the artifact check runs
 
@@ -9562,7 +9608,7 @@ agentihooks msg inbox --of eng-6@<slug>
 | A requeue notice is still open as work, wakes a pane or escalates | It was sent before [pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798) reached the code the swarm runs. Pull dev into the checkout the tick and the master run from, then close the old item with `agentihooks msg close <id> done` |
 | The Doctor reports an inbox past window seat wait on a requeue notice | Same cause as above; a current notice is information only and never qualifies |
 | An owner expected a notice and got none | Check the task: no claimant, state `done`, or released to the merge watcher (`pr` awaiting `merge`) all send none by design. Check the queue journal for the entry's requeue |
-| A displaced pull request is missing from the queue | The notice does not drive the requeue. Read the `merge-priority-requeue:<url>` ledger alert and the queue journal for the reason |
+| A displaced pull request is missing from the queue | The notice does not drive the requeue. Read the `merge` ledger alert naming the pull request and the queue journal for the reason |
 
 [Pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798)
 made the requeue notice information only and skipped released and done tasks;
@@ -10090,10 +10136,10 @@ Each path runs the check against the head it is about to admit, before it enqueu
 | `agentihooks swarm <slug> ready <doc>` | The command fails with the message. The owner keeps the seat and the task. |
 | `agentihooks swarm <slug> merge queue <url>` | The command fails with the message. No queue intent is recorded and nothing is enqueued. |
 | The `ready` merge pass, once the released pull request's checks pass | The task reopens with the comment `Reopened by the swarm: its pull request <url> could not be queued: staged compatibility: <reason>. The next engineer continues it from the handoff its engineer left.` |
-| The merge pass requeue after a transient unmergeable exit | The `requeue` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
+| The merge pass requeue after a transient unmergeable exit | The `merge` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
 | `agentihooks swarm <slug> merge priority <url>` for the pull request | The priority is refused before any entry leaves the queue. |
 | Restoring an entry that `merge priority` or the automatic priority on queue entry displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. For the automatic priority the result is `priority.errors` in the `merge queue` output, and the new entry stays queued. |
-| The requeue of an entry left out by an interrupted `merge priority` | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
+| The requeue of an entry left out by an interrupted `merge priority` | The `merge` ledger alert names the pull request and the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
 | `python -m scripts.ci_requeue` | That pull request's row reads `refused: staged compatibility: <reason>` and the sweep continues. |
 
 #### Refusals and fixes

@@ -1,11 +1,17 @@
 import json
 import os
+import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+
+import tomlkit
+from tomlkit.container import Container
+from tomlkit.items import InlineTable, Item, SingleKey, Table
 
 from scripts.profiles import binding, homes
 from scripts.routing import envs, native_login
+from scripts.targets.codex_hook_trust import rebase_state
 
 
 def _configuration(source: Path, home: Path) -> None:
@@ -20,6 +26,65 @@ def _configuration(source: Path, home: Path) -> None:
                 target.symlink_to(entry.resolve())
         else:
             shutil.copy2(entry, target)
+
+
+def _rename_trust_key(key: SingleKey, value: Item, source: str, target: str) -> None:
+    original = key.as_string()
+    if key.delimiter == "'" and any(char in "'\x7f" or ord(char) < 32 for char in target):
+        replacement = original.replace(original.strip(), SingleKey(target + key.key.removeprefix(source)).as_string())
+    else:
+        encoded_source = source
+        encoded_target = target
+        if key.delimiter == '"':
+            tokens = re.findall(r"\\(?:u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)|[^\\]", original.strip()[1:-1])
+            encoded_source = "".join(tokens[: len(source)])
+            encoded_target = SingleKey(target).as_string()[1:-1]
+        replacement = original.replace(encoded_source, encoded_target, 1)
+    setattr(key, "_original", replacement)
+    if isinstance(value, Table) and value.display_name is not None:
+        value.display_name = value.display_name.replace(original.strip(), replacement.strip())
+
+
+def _trust_entries(container: Container, prefix: tuple[str, ...]) -> Iterator[tuple[Container, SingleKey, Item]]:
+    for key, value in container.body:
+        if key is None:
+            continue
+        names = (*prefix, *(part.key for part in key))
+        if names[:-1] == ("hooks", "state") and isinstance(key, SingleKey):
+            yield container, key, value
+        elif isinstance(value, (Table, InlineTable)):
+            yield from _trust_entries(value.value, names)
+
+
+def _remove_trust_entries(entries: list[tuple[Container, SingleKey, Item]]) -> None:
+    for container, key, _ in entries:
+        if key.key in container:
+            container.remove(key)
+
+
+def _codex_trust(source: Path, home: Path) -> None:
+    config = home / "config.toml"
+    if not config.is_file():
+        return
+    doc = tomlkit.parse(config.read_bytes().decode())
+    entries: dict[str, list[tuple[Container, SingleKey, Item]]] = {}
+    for container, key, value in _trust_entries(doc, ()):
+        entries.setdefault(key.key, []).append((container, key, value))
+    source_hooks = source / "hooks.json"
+    target_hooks = home / "hooks.json"
+    destinations: set[str] = set()
+    for path in dict.fromkeys((source_hooks, source_hooks.resolve())):
+        source_prefix = f"{path}:"
+        for name, group in rebase_state(entries, path, target_hooks).items():
+            if name in destinations:
+                _remove_trust_entries(group)
+                continue
+            destinations.add(name)
+            for _, key, value in group:
+                target_prefix = name.removesuffix(key.key.removeprefix(source_prefix))
+                _rename_trust_key(key, value, source_prefix, target_prefix)
+    if destinations:
+        config.write_bytes(tomlkit.dumps(doc).encode())
 
 
 def _binding(agent: str, source: Path, home: Path, environ: Mapping[str, str]) -> None:
@@ -49,6 +114,8 @@ def prepare(agent: str, environ: Mapping[str, str]) -> dict[str, str]:
     home = root / agent
     home.mkdir(mode=0o700)
     _configuration(source, home)
+    if agent == "codex":
+        _codex_trust(source, home)
     shutil.copy2(login, home / credential)
     (home / credential).chmod(0o600)
     _binding(agent, source, home, environ)
@@ -71,4 +138,11 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         raise RoutingError(str(error)) from error
     _write_route_report(report, status="routed", account="default", placement="forced")
     print("[agenti] account=default route=default", flush=True)
-    execute("claude", "default", child, lambda env: os.execvpe(binary, _claude_command(binary, args), env))
+    from scripts.quick.recipe import execute_native
+
+    execute(
+        "claude",
+        "default",
+        child,
+        lambda env: execute_native("claude", _claude_command(binary, args), env, execvpe=os.execvpe),
+    )

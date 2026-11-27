@@ -49,6 +49,36 @@ def test_published_view_carries_telemetry_without_local_readers(store):
     assert json.loads(store.redis.get(store.key("sw", "published")))["workspaces"]["t"]["latest_proof"] == "green"
 
 
+@pytest.mark.feature("swarm-published-status-bounded")
+def test_publish_keeps_the_newest_hundred_transfers_and_every_other_status_key(store: RedisStore) -> None:
+    rows = [{"id": f"r{i}", "at": i, "handoff": "body"} for i in range(250)]
+    handoffs = [{"seat": "eng-1@sw", "reason": "recycle"}]
+
+    commands.publish(store, "sw", {"transfers": rows, "handoffs": handoffs, "history": [{"at": 1}]}, {})
+
+    stored = json.loads(store.redis.get(store.key("sw", "published")))["status"]
+    assert stored["transfers"] == rows[-100:]
+    assert stored["handoffs"] == handoffs
+    assert stored["history"] == [{"at": 1}]
+
+
+@pytest.mark.feature("swarm-published-status-bounded")
+def test_view_reads_the_published_status_once(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands.publish(store, "sw", {"task_revisions": {"t1": 3}}, {})
+    key, reads, get = store.key("sw", "published"), [], store.redis.get
+
+    def counted(name: str) -> str | None:
+        reads.append(name)
+        return get(name)
+
+    monkeypatch.setattr(store.redis, "get", counted)
+
+    view = commands.view(store, "sw")
+
+    assert reads.count(key) == 1
+    assert view["task_revisions"] == {"t1": 3}
+
+
 def test_failed_controls_remain_visible_after_twenty_new_acknowledgements(store):
     commands.bind(store, "sw", "home")
     failed = commands.submit(store, "sw", "swarm", ["pause"])

@@ -1,0 +1,15 @@
+{
+  "id": "shard-verifier-small-job-pages",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-shard-verifier-api-errors",
+  "behaviour": "The unit shard verifier reads a run attempt's jobs ten per page through the shared jobs reader, which halves the page on a server error or timeout, so it passes once every planned shard passed even when a 100 job page of a rerun attempt answers HTTP 502, because on 27 November every per page 100 read of Tests run 45928450389 attempts two and three answered HTTP 502 after about eleven seconds and the shard check failed with every unit shard green.",
+  "seam": "scripts.ci_gate_shards.watch and its attempt jobs read through scripts.ci_budget.jobs.read_jobs, run by the Wait for every planned shard step of the Tests workflow shard-check job",
+  "rules": [
+    "shard-verifier-full-jobs-page"
+  ],
+  "tests": [
+    "tests/test_ci_gate_shards.py::test_watch_passes_every_planned_shard_although_a_full_jobs_page_answers_bad_gateway",
+    "tests/test_ci_gate_shards.py::test_watch_reads_attempt_jobs_ten_per_page_and_never_a_hundred",
+    "tests/test_ci_gate_shards.py::test_wait_polls_only_the_jobs_page_until_every_shard_passes"
+  ]
+}

@@ -6,12 +6,15 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+import scripts.ci_budget.jobs
 from scripts.ci_budget import rate_limit
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[bytes]]", rate_limit.gh_api)
+read_jobs = cast("Callable[[str, int], list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
 
 RETRY_DELAYS = (5, 10, 20, None)
 POLL_SECONDS = 15
+JOB_PAGE = 10
 WAIT_SECONDS = 300
 NOT_LISTED = "not listed"
 UNKNOWN = "unknown"
@@ -69,10 +72,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
     pending: list[str] = []
     while (now := time.monotonic()) < deadline:
         polls += 1
-        pages = cast(
-            "list[dict[str, Any]]", api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
-        )
-        jobs = [job for page in pages for job in page["jobs"]]
+        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)
         pending = waiting(jobs, shards)
         print(
             f"Poll {polls} at {now - start:.0f} s: {len(shards) - len(pending)} of {len(shards)} planned shards"

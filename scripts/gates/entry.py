@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from collections import ChainMap
-from collections.abc import Callable, Iterator, MutableMapping
+from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol
@@ -106,13 +106,28 @@ def main(
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
     named = ChainMap(HOST_GATES, GATES)
-    gates = [named.get(first) for name in argv for first in (*BEFORE.get(name, ()), name)]
-    if not gates or None in gates:
+    names = [first for name in argv for first in (*BEFORE.get(name, ()), name)]
+    if not names or not all(name in named for name in names):
         print(f"agentihooks gate: name one gate of: {', '.join(sorted(named))}", file=sys.stderr)
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
+    gates = [gate for name in names if (gate := _resolve(named, name, call, environ, home)) is not None]
     return next((code for gate in gates if (code := evaluate(gate, call, environ, home))), 0)
+
+
+def _resolve(
+    named: Mapping[str, Gate], name: str, call: Call, environ: Mapping[str, str] | None, home: Path | str | None
+) -> Gate | None:
+    """The named gate, or None once a gate whose implementation cannot be imported is reported and let through."""
+    try:
+        return named[name]
+    except ImportError as exc:
+        from scripts.gates import import_failure
+
+        failure = import_failure.Failure(name, f"{type(exc).__name__}: {exc}", sys.executable, call.tool)
+        import_failure.report(failure, environ, home)
+        return None
 
 
 def _brain_metric(gate, call, who, result):
@@ -151,10 +166,12 @@ def evaluate(gate, call, environ=None, home=None):
     return 2
 
 
-def native(name, operation, environ=None):
+def native(name: str, operation: str, environ: MutableMapping[str, str] | None = None) -> int:
     from scripts.inbox.seen import receiving_session
 
-    return evaluate(HOST_GATES[name], Call(operation, session=receiving_session(environ)), environ)
+    call = Call(operation, session=receiving_session(environ))
+    gate = _resolve(HOST_GATES, name, call, environ, None)
+    return 0 if gate is None else evaluate(gate, call, environ)
 
 
 def _decide(gate: Gate, call: Call, who: Who, home: Path | str | None, mode: str = "enforce") -> Decision:

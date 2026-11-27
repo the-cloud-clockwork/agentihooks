@@ -42,10 +42,11 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 |---|---|---|
 | `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
 | `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
-| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | `python -m scripts.ci_lab_smoke` in the built swarm image cannot import a module the `scripts.ci_lab` package walk finds, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
-`docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
-built CI lab image. It then starts the worker as the lab chart runs it, as user and group 1001 with
+`docker/ci-lab/smoke.sh` also runs `python -m scripts.ci_lab_smoke` inside the built CI lab image,
+which imports every module the `scripts.ci_lab` package walk finds, then pytest, xdist, redis,
+nats, yaml and boto3. It then starts the worker as the lab chart runs it, as user and group 1001 with
 a read only root filesystem, every capability dropped and no network, on a work root owned by root
 that holds a sealed tree, a locked folder and a file. The smoke fails when the worker does not reach
 its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, each within
@@ -2841,6 +2842,13 @@ On dev, `python -m scripts.ci_lab.static_gates --root .` lists 31 gate steps:
 | `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
 | `test-count` | The `test-count` job of `test.yml` | 1 |
+
+The `type-gate` gate step carries `TYPE_GATE_DIRECT_IMPORTERS: "1"` in its own step env, so this
+gate and the lab unit `discover` builds from it grade only a pull request's changed files and
+their direct importers. A separate `type-gate-tree` job grades the whole tree against its own
+committed baseline at promotion; it runs on a push to `dev`, and on a `workflow_dispatch` whose
+`admission` job succeeded (a plant proof), outside `STATIC_JOBS`, so the lab never discovers or
+runs it, and its verdict stays with Actions.
 
 The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
 `github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier

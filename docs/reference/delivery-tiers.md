@@ -468,7 +468,7 @@ An entry the priority dequeued and could not queue again stays in the swarm's di
 | Closed, merged, no longer into `dev`, or already back in the queue | Dropped from the set with no record |
 | A draft, a moved head or a conflict with `dev` | Left out: a `priority-requeue-skipped` record carrying `reason`, one inbox notice to its owner, and dropped from the set |
 | Anything else | Queued again at its recorded head once its staged compatibility check passes: a `priority-requeue` record |
-| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises the ledger alert `merge-priority-requeue:<url>` naming the error |
+| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises a `merge` ledger alert naming the pull request and the error |
 
 While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
 

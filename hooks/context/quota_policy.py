@@ -237,10 +237,11 @@ def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
 
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
+    from scripts.quick.member import explicit_authentication
     from scripts.routing import reservation
     from scripts.swarm_v2.quota import fleet_observations
 
-    if os.environ.get("AH_ROUTE_API"):
+    if os.environ.get("AH_ROUTE_API") or explicit_authentication(session_id, os.environ):
         return None
     windows = _session_windows(session_id)
     if windows is None:
@@ -547,8 +548,11 @@ def _warning_text(account: str, window: str, used: float, reset: float | None, h
 def early_warning(session_id: str) -> str | None:
     """Warn a Codex session outside a swarm once per account, window and reset."""
     from hooks.context.account_sessions import API_ACCOUNT, agent_pid, session_account
+    from scripts.quick.member import explicit_authentication
 
     if os.environ.get("AGENTIHOOKS_TARGET") != "codex" or os.environ.get("AGENTIHOOKS_SWARM"):
+        return None
+    if explicit_authentication(session_id, os.environ):
         return None
     windows = None if os.environ.get("AH_ROUTE_API") else _session_windows(session_id)
     if windows is None:

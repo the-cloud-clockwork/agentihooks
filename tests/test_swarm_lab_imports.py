@@ -8,10 +8,11 @@ import pytest
 import yaml
 
 import scripts.ci_lab
+from scripts import ci_lab_smoke
 
 
-def _smoke_code(root: Path) -> str:
-    """Return the Python program the swarm image smoke step runs inside the built image."""
+def _smoke_extras(root: Path) -> list[str]:
+    """Return the extra module names the swarm image smoke step hands the lab smoke builder inside the image."""
     workflow = yaml.safe_load((root / ".github/workflows/swarm-smoke.yml").read_text())
     step = next(
         step
@@ -20,15 +21,16 @@ def _smoke_code(root: Path) -> str:
     )
     argv = shlex.split(step["run"])
     assert argv[:7] == ["docker", "run", "--rm", "--network", "none", "--entrypoint", "python"]
-    return argv[argv.index("-c") + 1]
+    assert argv[8:10] == ["-m", "scripts.ci_lab_smoke"]
+    return argv[10:]
 
 
 @pytest.mark.feature("swarm-image-lab-dependencies")
 @pytest.mark.parametrize("missing", [None, "executors", "expand_mutation", "future_module"])
 def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency(
-    missing: str | None,
+    missing: str | None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = _smoke_code(Path(__file__).parents[1])
+    extras = _smoke_extras(Path(__file__).parents[1])
     names = ["scripts.ci_lab.executors", "scripts.ci_lab.expand_mutation", "scripts.ci_lab.future_module"]
     imported: list[str] = []
 
@@ -44,12 +46,14 @@ def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_mis
 
     modules = [SimpleNamespace(name=name) for name in names]
     with patch("pkgutil.walk_packages", return_value=iter(modules)), patch("importlib.import_module", side_effect=load):
-        if missing is not None:
-            with pytest.raises(ModuleNotFoundError, match=missing):
-                exec(code)
-        else:
-            exec(code)
-            assert imported == sorted(names)
+        returned = ci_lab_smoke.main(extras)
+    if missing is not None:
+        assert returned == 1
+        assert f"scripts.ci_lab.{missing} does not import" in capsys.readouterr().err
+        assert imported == names[: names.index(f"scripts.ci_lab.{missing}")]
+    else:
+        assert returned == 0
+        assert imported == sorted(names)
 
 
 @pytest.mark.feature("swarm-image-lab-dependencies")
@@ -70,6 +74,6 @@ def test_swarm_image_smoke_reaches_every_lab_module_on_disk() -> None:
         return None
 
     with patch("importlib.import_module", side_effect=load):
-        exec(_smoke_code(Path(__file__).parents[1]))
+        assert ci_lab_smoke.main(_smoke_extras(Path(__file__).parents[1])) == 0
     assert {"scripts.ci_lab.executors", "scripts.ci_lab.expand_mutation"} <= set(imported)
     assert imported == expected

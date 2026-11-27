@@ -144,6 +144,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:review-tasks",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
+                    f"~{ROOT}:seat-learned:*",
                     f"~{ROOT}:seat-of:*:exit",
                 ),
                 "channels": (f"{ROOT}:*",),
@@ -246,7 +247,13 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
 
     patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
 
-    for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
+    memory = SeatMemory(None)
+    for key in (
+        dev_red.key("proof"),
+        memory.key("eng-1@proof", "learned"),
+        memory.learned_index("proof"),
+        f"{memory.learned_index('proof')}:listed",
+    ):
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
 
 

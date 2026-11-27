@@ -572,6 +572,7 @@ def test_init_agent_runs_the_init_agent_module_with_exact_argv_and_kwargs(monkey
     ]
 
 
+@pytest.mark.feature("quick-swarm")
 def test_start_all_launches_every_engineer_with_its_own_prompt_file_and_command(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -584,6 +585,7 @@ def test_start_all_launches_every_engineer_with_its_own_prompt_file_and_command(
             registry.Seat(3, "eng-2", "w1:p3", "claude", "n2"),
         ),
     )
+    registry.save(tmp_path, swarm)
     opened: list[launch.Member] = []
 
     def fake_write_opening(found: launch.Member) -> Path:

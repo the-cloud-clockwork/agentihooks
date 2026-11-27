@@ -225,7 +225,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
         **os.environ,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "http.https://lab.example/origin.git.extraheader",
-        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
 
@@ -251,6 +251,15 @@ def test_fetch_passes_the_same_timeout_to_the_lab_remote_fallback_fetch(
     [fallback] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.lab.url in argv]
     assert primary["timeout"] == 7.5
     assert fallback["timeout"] == 7.5
+
+
+@pytest.mark.feature("lab-remote-basic-scheme")
+def test_a_lab_fetch_header_is_the_exact_basic_credential_the_lab_remote_accepts() -> None:
+    environ = worktrees.Lab("http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git", "lab-token").environ()
+    name, _, value = environ["GIT_CONFIG_VALUE_0"].partition(": ")
+    assert environ["GIT_CONFIG_KEY_0"] == "http.http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git.extraheader"
+    assert name.lower() == "authorization"
+    assert value.encode() == b"Basic " + base64.b64encode(b"lab:lab-token")
 
 
 @pytest.mark.feature("lab-remote-heads")

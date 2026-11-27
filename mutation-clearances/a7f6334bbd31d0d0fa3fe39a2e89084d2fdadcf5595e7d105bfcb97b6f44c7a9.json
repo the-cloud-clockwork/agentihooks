@@ -1,0 +1,6 @@
+{
+  "scripts/gates/import_failure.py:scripts.gates.import_failure.x__read:e515e2b5ccd8d6fea4e4de04a1b07ed6db7121d73a35795c7079e3a9efb4df30": {
+    "reader": "standards-reader",
+    "reason": "typing.cast does not evaluate or validate the decorated type string. It returns held unchanged, preserving every dictionary item, timestamp filter and subsequent reporting decision."
+  }
+}
