@@ -7,12 +7,16 @@ import pytest
 import yaml
 
 from scripts import ci_wiring, size_limits, type_gate
+from scripts.ci_lab import expand_tests
 from scripts.ci_lab.static_gates import STATIC_JOBS
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 WIRING_PLANT = "lint.check-every-pull-request-job-is-a-need-of-gate-required"
+COUNT_PLANT = "test-count.hold-the-base-revision-s-test-count"
+LIFECYCLE = "tests/fixtures/phase_lifecycle.json"
+LIFECYCLE_READER = "tests/swarm/test_phase_state.py"
 
 
 def _load_plant(name: str) -> dict[str, Any]:
@@ -128,3 +132,23 @@ def test_the_wiring_plant_keeps_the_gate_s_needs() -> None:
     base_needs = ci_wiring.load(ROOT)["test.yml"]["jobs"]["gate-required"]["needs"]
     planted_needs = _patched_workflows(spec["edits"])["test.yml"]["jobs"]["gate-required"]["needs"]
     assert planted_needs == base_needs
+
+
+@pytest.mark.feature("lab-static-plants-turn-only-their-own-gate")
+def test_the_test_count_plant_edits_no_test_module() -> None:
+    spec = _load_plant(COUNT_PLANT)
+    assert [edit["path"] for edit in spec["edits"] if expand_tests.is_test_module(edit["path"])] == []
+
+
+@pytest.mark.feature("lab-static-plants-turn-only-their-own-gate")
+def test_the_test_count_plant_removes_one_case_of_a_parametrized_test() -> None:
+    spec = _load_plant(COUNT_PLANT)
+    assert [edit["path"] for edit in spec["edits"]] == [LIFECYCLE]
+    edit = spec["edits"][0]
+    text = (ROOT / LIFECYCLE).read_text()
+    assert text.count(edit["before"]) == 1
+    cases = json.loads(text)
+    assert json.loads(text.replace(edit["before"], edit["after"])) == cases[:-1]
+    reader = (ROOT / LIFECYCLE_READER).read_text()
+    assert 'LIFECYCLE_CASES = json.loads((Path(__file__).parents[1] / "fixtures" / "phase_lifecycle.json")' in reader
+    assert '@pytest.mark.parametrize("case", LIFECYCLE_CASES)\ndef test_lifecycle_row(' in reader
