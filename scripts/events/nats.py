@@ -173,10 +173,17 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
 
 
 async def _pull(
-    js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool, legacy: str | None = None
-):
+    js: JetStreamContext,
+    stream: str,
+    durable: str,
+    subject: str,
+    policy: QueuePolicy,
+    provision: bool,
+    legacy: str | None = None,
+) -> tuple[JetStreamContext.PullSubscription, int | None]:
     durable = await existing_consumer(js, stream, durable, durable if legacy is None else legacy)
     wanted = legacy_filters(subject) if stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"} else [subject]
+    info: api.ConsumerInfo | None = None
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
@@ -192,8 +199,9 @@ async def _pull(
             config.filter_subject, config.filter_subjects = None, wanted
         if stream.endswith(("-DEAD", "_DEAD")):
             config.max_deliver = policy.max_deliver
-        await js.add_consumer(stream, config=config)
-    return await js.pull_subscribe_bind(durable=durable, stream=stream)
+        info = await js.add_consumer(stream, config=config)
+    subscription = await js.pull_subscribe_bind(durable=durable, stream=stream)
+    return subscription, None if info is None else int(info.created.timestamp() * 1000)
 
 
 def _attempt(message: Msg) -> int:
@@ -254,7 +262,7 @@ class NatsConsumer:
         identity: str,
         swarm: str | None = None,
         credentials: str | None = None,
-    ):
+    ) -> None:
         self._loop = loop
         self._subscription = subscription
         self._js = js
@@ -262,6 +270,7 @@ class NatsConsumer:
         self._identity = identity
         self._swarm = swarm
         self._credentials = credentials
+        self.created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         return self._loop.run(self._fetch(batch, timeout_ms))
@@ -415,17 +424,14 @@ class NatsEventLog:
         policy = policy or self._policy
         if self._policies.setdefault(durable, policy) != policy:
             raise ValueError(f"durable consumer {durable!r} already has another policy")
-        return NatsConsumer(
-            self._loop,
-            self._loop.run(
-                _pull(self._js, self._stream, consumer_name(durable), subject, policy, self._provision, durable)
-            ),
-            self._js,
-            policy,
-            f"events.{durable}",
-            self._swarm,
-            self._credentials,
+        subscription, created = self._loop.run(
+            _pull(self._js, self._stream, consumer_name(durable), subject, policy, self._provision, durable)
         )
+        consumer = NatsConsumer(
+            self._loop, subscription, self._js, policy, f"events.{durable}", self._swarm, self._credentials
+        )
+        consumer.created = created
+        return consumer
 
 
 @dataclass(frozen=True)
@@ -501,7 +507,7 @@ class NatsWorkQueue:
         policy: QueuePolicy,
         config: BusConfig,
         swarm: str | None = None,
-    ):
+    ) -> None:
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
         names = queue_names(name, swarm)
         legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
@@ -518,15 +524,10 @@ class NatsWorkQueue:
             loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
             require_migrated(loop.run(js.stream_info(self._stream)))
-        self._consumer = NatsConsumer(
-            loop,
-            loop.run(_pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)),
-            js,
-            policy,
-            f"queue.{name}",
-            swarm,
-            config.credentials,
+        subscription, _ = loop.run(
+            _pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)
         )
+        self._consumer = NatsConsumer(loop, subscription, js, policy, f"queue.{name}", swarm, config.credentials)
 
     def offer(self, event: Envelope) -> bool:
         if self._swarm is not None:

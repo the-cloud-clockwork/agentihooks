@@ -7,6 +7,7 @@ from scripts.events import factory, memory
 from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateEntry, StateStore, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
+from scripts.events.subjects import subject
 
 pytestmark = pytest.mark.unit
 
@@ -60,6 +61,25 @@ def test_open_bus_defaults_to_the_monotonic_millisecond_clock(monkeypatch):
     assert queue.take(0) is None
     monkeypatch.setattr(memory.time, "monotonic_ns", lambda: 7_001_000_000)
     assert queue.take(0).attempt == 2
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_memory_consumer_keeps_the_wall_clock_time_it_was_created_at() -> None:
+    wall = Clock()
+    opened = memory.open_bus(BusConfig(), wall=wall)
+    first = opened.events.consumer("d", "swarm.>")
+    wall.now = 2_000
+    assert first.created == 1_000
+    assert opened.events.consumer("d", "swarm.>").created == 1_000
+    assert opened.events.consumer("e", "swarm.>").created == 2_000
+    scoped = memory.open_bus(BusConfig(scoped=True), wall=wall)
+    assert scoped.for_swarm("s").events.consumer("d", subject("s", "pull", "opened")).created == 2_000
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_open_bus_stamps_consumers_from_the_wall_clock_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(memory.time, "time_ns", lambda: 1_700_000_000_000_500_000)
+    assert memory.open_bus(BusConfig()).events.consumer("d", "swarm.>").created == 1_700_000_000_000
 
 
 @pytest.mark.parametrize(

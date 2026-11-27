@@ -1,0 +1,12 @@
+{
+  "id": "lab-static-plants-turn-only-their-own-gate",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+  "behaviour": "Every static plant fixture outside the type gate job that edits a Python file under hooks or scripts keeps that file's strict type error count within tests/TYPE_BASELINE.json, and the plant for a pull request job outside the gate makes scripts.ci_wiring report its own diagnostic and leaves the needs of the gate-required job unchanged.",
+  "seam": "scripts.type_gate.measure over a copy of the tracked hooks, scripts and tests trees with a plant's edits applied; scripts.ci_wiring.check over the workflows of this checkout with the edits of lint.check-every-pull-request-job-is-a-need-of-gate-required applied; the needs of the gate-required job of .github/workflows/test.yml with and without that plant's edits",
+  "tests": [
+    "tests/ci_lab/test_static_plant_collisions.py::test_every_static_plant_outside_the_type_gate_job_keeps_its_file_s_baseline",
+    "tests/ci_lab/test_static_plant_collisions.py::test_the_wiring_plant_reports_its_own_reason",
+    "tests/ci_lab/test_static_plant_collisions.py::test_the_wiring_plant_keeps_the_gate_s_needs"
+  ]
+}

@@ -2969,6 +2969,27 @@ or an empty log, and the required check show only unit keys.
   workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
+- The scheduler reads the grader tree with the discovery code of its image, which is built from
+  `main`. A change to how gates are read that lands on `dev` together with the tree that needs it
+  is misread until a release holds it: after the job split the released scheduler graded the step
+  `Install dependencies` as a unit of test count and of type gate. The `lint-actions` step `Hold
+  the static gates the released lab reads equal to the gates the head reads` refuses such a head.
+  `python -m scripts.ci_lab.discovery_parity --released DIR --base DIR --head DIR` reads the gates
+  a lab grades three times, each as the names the discovery command line of a code folder prints
+  for a tree, less a gate that misses a context name and the names the catalog reader of that
+  same code finds in the tree's exclusion catalog: the `scripts` folder of `main` over the head,
+  the head's own code over the head, and the `scripts` folder of `main` over the base. The lab
+  reads the base tree for a hotfix, pull request or merge group head and the head tree for a
+  promotion or backfill head, so the head tree stands for what the lab grades once the head is on `dev`:
+  every later pull request has it as base and its own promotion grade reads it. The command exits
+  1 when the first reading differs from both others, and names the gates only one side grades; a
+  released code that cannot read the head while it reads the base is refused without gate names,
+  and so is a head its own code cannot read. A head whose tree both codes read alike passes and
+  prints the count of gates; a head the released code reads unlike the head's code but as it
+  reads the base, as when a head changes only how gates are read, or that it cannot read as it
+  cannot read the base, passes with a notice and no count. Land the change to how gates are read first, and the tree that
+  needs it once a release holds that change. The step runs the module from the grader copy, and
+  from the head copy only on the pull request that introduces it, whose grader holds none.
 
 #### Verify
 
