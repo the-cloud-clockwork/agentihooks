@@ -315,15 +315,6 @@ def grade(
     return errors
 
 
-def grade_tree(base: dict[str, int], head: dict[str, int]) -> list[str]:
-    """Return every file of the whole tree whose errors grew past its own committed baseline entry.
-
-    Every graded source is measured and growth is shared with ``grade``; no drift is graded and no baseline
-    rewrite is ever asked for.
-    """
-    return _growth(base, head, None)
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Return the command line parser for the gate."""
     parser = argparse.ArgumentParser()
@@ -335,16 +326,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _grade_tree(head: Path) -> int:
-    """Measure every graded source of the whole tree, grade it against its own baseline, and print the result."""
-    base = load(head) or {}
-    counts = measure(head, None)
-    errors = grade_tree(base, counts)
-    summary = f"{sum(counts.values())} type errors in {len(counts)} files, {sum(base.values())} allowed, "
-    print(f"{summary}{len(errors)} errors")
+def _report(head: dict[str, int], base: dict[str, int], errors: list[str]) -> int:
+    """Print the gate's summary line and every error, then return its exit code."""
+    print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
     return 1 if errors else 0
+
+
+def _grade_tree(head: Path) -> int:
+    """Measure every graded source of the whole tree and grade it against its own committed baseline.
+
+    A tree with no committed baseline allows no error in any file: every path defaults to zero allowed, so any
+    measured error is growth.
+    """
+    base = load(head) or {}
+    counts = measure(head, None)
+    return _report(counts, base, _growth(base, counts, None))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -383,10 +381,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
         base = recorded or {}
     errors = grade(base, head, recorded, touched)
-    print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
-    for error in errors:
-        print(f"::error::{error}")
-    return 1 if errors else 0
+    return _report(head, base, errors)
 
 
 if __name__ == "__main__":
