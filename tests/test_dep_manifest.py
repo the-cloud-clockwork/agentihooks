@@ -357,6 +357,73 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
 
 
+@pytest.mark.feature("manifest-build-storage")
+def test_the_manifest_job_preserves_records_and_releases_coverage(tmp_path: Path) -> None:
+    source = tmp_path / "hooks" / "sample.py"
+    source.parent.mkdir()
+    source.write_text("def double(value):\n    return value * 2\n\n\ndef increment(value):\n    return value + 1\n")
+    config = tmp_path / ".github" / "coverage" / "coverage.ini"
+    config.parent.mkdir(parents=True)
+    config.write_text((ROOT / ".github" / "coverage" / "coverage.ini").read_text())
+    first = "tests/test_fixture.py::test_first"
+    second = "tests/test_fixture.py::test_second"
+    shards = tmp_path / ".coverage-shards"
+    reports = []
+    databases = []
+    for name, test, line in [
+        ("coverage-3.12-0", first, 2),
+        ("coverage-3.12-1/reused-coverage", second, 6),
+        ("coverage-3.12-2", first, 2),
+    ]:
+        folder = shards / name
+        folder.mkdir(parents=True)
+        database = folder / ".coverage"
+        data = CoverageData(str(database))
+        data.set_context(f"{test}|run")
+        data.add_arcs({str(source): [(-1, line), (line, -1)]})
+        data.write()
+        databases.append(database)
+        report = folder / "dep-inputs" / "inputs.jsonl"
+        report.parent.mkdir()
+        report.write_text(json.dumps({"test": test, "files": ["docs/input.json"], "escapes": False}) + "\n")
+        reports.append(report)
+    sentinel = shards / "unrelated.txt"
+    sentinel.write_text("keep")
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    build = _step("dep-manifest", "Build the test dependency manifest")
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", build["run"]],
+        cwd=tmp_path,
+        env=dict(
+            os.environ,
+            PYTHONPATH=str(ROOT),
+            RUNNER_TEMP=str(runner),
+            GITHUB_SHA="fixture",
+            ENVIRONMENT="py3.12-fixture",
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = {
+        "version": 2,
+        "commit": "fixture",
+        "environment": "py3.12-fixture",
+        "units": ["hooks/sample.py::<module>", "hooks/sample.py::double", "hooks/sample.py::increment"],
+        "tests": {
+            first: {"units": [0, 1], "files": ["docs/input.json"], "escapes": False},
+            second: {"units": [0, 2], "files": ["docs/input.json"], "escapes": False},
+        },
+        "lines": {first: {"hooks/sample.py": [2]}, second: {"hooks/sample.py": [6]}},
+    }
+    output = runner / "dep-manifest"
+    assert (output / "manifest.json").read_text() == json.dumps(expected, separators=(",", ":"))
+    assert dep_manifest.unpack(json.loads((output / "packed.json").read_text())) == expected
+    assert sentinel.read_text() == "keep"
+    assert all(report.is_file() for report in reports)
+
+
 @pytest.mark.parametrize("torn", ["", "line", "database"])
 def test_a_torn_shard_download_is_caught_and_downloaded_again_before_the_build(tmp_path: Path, torn: str) -> None:
     steps = _job("dep-manifest")["steps"]
