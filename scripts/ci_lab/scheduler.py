@@ -624,11 +624,9 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
 
 
 def _lost(slots: Sequence[Slot]) -> str:
-    """Return the line a check's summary adds for the units that ended without a verdict, empty when none did: how
-    many, their keys and that a rerequest of the check grades them again."""
+    """Return the line the summary of a check that concludes neutral adds for its units that ended without a
+    verdict: how many, their keys and that a rerequest of the check grades them again."""
     keys = [slot.key for slot in slots if slot.outcome in UNGRADED]
-    if not keys:
-        return ""
     listed = ", ".join(keys)
     return (
         f"\n{len(keys)} units ended without a verdict, lost by the lab: {listed}. "

@@ -174,6 +174,7 @@ def test_main_verdict_fails_a_gate_the_lab_lost_a_unit_of_and_names_the_rereques
         return lambda check: listings[check]
 
     monkeypatch.setattr(verdict, "fetcher", fetcher)
+    monkeypatch.setattr(verdict, "WAIT_S", 0.0)
     authoritative = '{"lint": true, "test-count": true, "type-gate": true}'
     args = ["verdict", str(grader), authoritative, "org/repo", "abc", LAB]
 
