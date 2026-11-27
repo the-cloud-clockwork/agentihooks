@@ -115,7 +115,6 @@ def herdr_runtime(tmp_path, monkeypatch, panes=None, run=None):
 
     runtime = HerdrRuntime(home=tmp_path, run=run or started, herdr=herdr, choose=lambda *_: ("claude", "open"))
     runtime.end = lambda name, pid, homes, start=0: reaper.Outcome()
-    runtime.hold = lambda name: 0
     return runtime, calls
 
 
