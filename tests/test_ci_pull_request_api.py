@@ -320,6 +320,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
+        "scripts/ci_lab/discovery_parity.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))

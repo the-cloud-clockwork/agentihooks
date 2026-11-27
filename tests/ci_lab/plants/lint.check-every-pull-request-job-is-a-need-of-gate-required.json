@@ -1,11 +1,16 @@
 {
   "gate": "lint/check-every-pull-request-job-is-a-need-of-gate-required",
-  "reason": "runs on pull requests but is not a need of Gate: Gate Required drops the docs need, so the early queue gate no longer preserves the reviewed graded inventory",
+  "reason": "runs on pull requests but is not a need of Gate: a job that runs on pull requests is added outside the needs of Gate \u2014 Required",
   "edits": [
     {
       "path": ".github/workflows/test.yml",
-      "before": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n",
-      "after": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n"
+      "before": "  gate-required:\n",
+      "after": "  plant-outside-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n\n  gate-required:\n"
+    },
+    {
+      "path": ".github/runner-classes.json",
+      "before": "  \"test.yml/mutation-stats-seed\": \"light\",\n  \"test.yml/promotion-ready\": \"hosted\",\n",
+      "after": "  \"test.yml/mutation-stats-seed\": \"light\",\n  \"test.yml/plant-outside-gate\": \"light\",\n  \"test.yml/promotion-ready\": \"hosted\",\n"
     }
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.xǁQueueǁdrain:7972e32295ac1cd8f460204aa651dcb83db20b83d530656d24facf61e9d7407c": {
+    "reader": "standards_reader",
+    "reason": "MULTI/EXEC returns the same DRAIN results in order, so the sum and every key and value are unchanged; only atomicity of the batch differs, which no caller or output observes."
+  }
+}

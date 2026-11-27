@@ -1,0 +1,11 @@
+{
+  "id": "role-skill-command-parity",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-skill-review-post",
+  "behaviour": "Every package role skill names only the close and post commands some launch prompt of its role names, and the reviewer skill's post step runs review post with the same options the review record refusal names, so a reviewer that follows its skill records the findings that swarm done and the queue gate count.",
+  "seam": "The SKILL.md files under profiles/package/roles read against scripts.swarm.prompt build for each lane, kind and autonomy level of the role, and the reviewer post step command parsed by scripts.review.cli parser beside the command in scripts.review.record done_refusal",
+  "tests": [
+    "tests/swarm/test_role_skill_command_parity.py::test_role_skill_close_and_post_commands_match_its_launch_prompt",
+    "tests/swarm/test_role_skill_command_parity.py::test_reviewer_post_step_passes_the_review_record_refusal_options"
+  ]
+}
