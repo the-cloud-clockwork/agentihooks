@@ -289,7 +289,11 @@ def test_five_starts_in_a_row_cut_short_by_a_stop_count_up_and_the_sixth_pass_re
     run, heads = backlog(lab, 1)
     head = heads[0]
 
+    begun: list[str] = []
+
     def expand(request: GradeRequest) -> scheduler.Plan:
+        begun.append(request.head)
+        assert len(begun) <= scheduler.CUT_SHORT_STARTS
         raise KeyboardInterrupt
 
     monkeypatch.setattr(run.lab.expander, "expand", expand)
@@ -308,6 +312,7 @@ def test_five_starts_in_a_row_cut_short_by_a_stop_count_up_and_the_sixth_pass_re
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert any(f"{scheduler.CUT_SHORT_STARTS} starts" in action for action in actions)
     assert run.lab.poster.moves(head, scheduler.REQUIRED) == [("completed", "failure")]
+    assert begun == [head] * scheduler.CUT_SHORT_STARTS
 
 
 @pytest.mark.feature("lab-scheduler-release-keeps-a-cut-short-head")
