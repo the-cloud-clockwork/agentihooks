@@ -10,6 +10,8 @@ from typing import Any, cast
 import pytest
 
 type Key = tuple[str, int]
+EXTERNAL: Key = ("", -1)
+UNKNOWN: Key = ("", -2)
 
 __all__ = ["candidate_tests", "pytest_addoption", "pytest_collection_modifyitems"]
 
@@ -55,13 +57,15 @@ def names_in(node: ast.AST, assignments: Mapping[str, ast.AST]) -> set[str] | No
 
 
 def lookup_names(tree: ast.AST, argument: ast.AST) -> set[str] | None:
-    assignments = {
-        target.id: node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        for target in node.targets
-        if isinstance(target, ast.Name)
-    }
+    assignments: dict[str, ast.expr] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    prior = assignments.get(target.id)
+                    assignments[target.id] = (
+                        ast.Tuple(elts=[prior, node.value], ctx=ast.Load()) if prior is not None else node.value
+                    )
     if isinstance(argument, ast.Name):
         for node in ast.walk(tree):
             if not isinstance(node, (ast.For, ast.AsyncFor)) or not (
@@ -89,6 +93,7 @@ class Reach:
         self.invalid: set[Key] = set()
         self.arguments: dict[Key, dict[str, set[Key]]] = defaultdict(dict)
         self.dirty: set[Key] = set()
+        self.fields: dict[Key, dict[str, list[tuple[Key, ast.AST]]]] = defaultdict(lambda: defaultdict(list))
 
     def module_path(self, module: str) -> str | None:
         parts = module.split(".")
@@ -151,9 +156,18 @@ class Reach:
             return
         if value is not None:
             for target in targets:
-                for name in ast.walk(target):
-                    if isinstance(name, ast.Name):
-                        self.bindings[scope].setdefault(name.id, []).append(value)
+                self.bind_target(scope, target, value)
+
+    def bind_target(self, scope: Key, target: ast.AST, value: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            self.bindings[scope].setdefault(target.id, []).append(value)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                self.bind_target(scope, item, value)
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            owner = self.parents.get(scope)
+            if owner is not None and isinstance(self.nodes[owner], ast.ClassDef) and target.value.id in ("self", "cls"):
+                self.fields[owner][target.attr].append((scope, value))
 
     def imports(self, scope: Key, node: ast.Import | ast.ImportFrom) -> None:
         package = scope[0].removesuffix(".py").split("/")[:-1]
@@ -172,7 +186,7 @@ class Reach:
         if member and (child := self.module_path(f"{module}.{member}")) is not None:
             return {self.read(child)}
         if path is None:
-            return {("", -1)}
+            return {EXTERNAL}
         key = self.read(path)
         return self.binding(key, member) if member else {key}
 
@@ -197,6 +211,9 @@ class Reach:
         if name in self.arguments[scope]:
             return self.arguments[scope][name]
         node = self.nodes[scope]
+        owner = self.parents.get(scope)
+        if name in ("self", "cls") and owner is not None and isinstance(self.nodes[owner], ast.ClassDef):
+            return {owner}
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
             arguments.extend(value for value in (node.args.vararg, node.args.kwarg) if value is not None)
@@ -204,13 +221,13 @@ class Reach:
                 if argument.arg == name:
                     if argument.annotation is not None:
                         return self.annotation(scope, argument.annotation)
-                    return {("", -1 if name == "request" or node.name.startswith("pytest_") else -2)}
+                    return {EXTERNAL if name == "request" or node.name.startswith("pytest_") else UNKNOWN}
         if scope in self.parents:
             return self.binding(self.parents[scope], name)
         if name in vars(__import__("builtins")) or name in ("__name__", "__file__", "__package__"):
-            return {("", -1)}
+            return {EXTERNAL}
         hook = self.bindings[scope].get("__getattr__", ())
-        return {(scope[0], cast(Any, value).lineno) for value in hook} or {("", -2)}
+        return {(scope[0], cast(Any, value).lineno) for value in hook} or {UNKNOWN}
 
     def annotation(self, scope: Key, node: ast.AST) -> set[Key]:
         if isinstance(node, ast.Subscript):
@@ -218,9 +235,9 @@ class Reach:
         if isinstance(node, ast.BinOp):
             return self.annotation(scope, node.left) | self.annotation(scope, node.right)
         if isinstance(node, ast.Constant):
-            return {("", -1)} if node.value is None else {("", -2)}
+            return {EXTERNAL} if node.value is None else {UNKNOWN}
         if isinstance(node, ast.Name) and node.id in ("Any", "object"):
-            return {("", -2)}
+            return {UNKNOWN}
         return self.value(self.parents.get(scope, scope), node)
 
     def value(self, scope: Key, node: ast.AST) -> set[Key]:
@@ -239,10 +256,10 @@ class Reach:
         if isinstance(node, ast.Subscript):
             return self.subscript(scope, node)
         if isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr, ast.Dict, ast.Compare, ast.UnaryOp)):
-            return {("", -1)}
+            return {EXTERNAL}
         if isinstance(node, ast.Lambda):
-            return {("", -2)}
-        return {("", -2)}
+            return {UNKNOWN}
+        return {UNKNOWN}
 
     def attribute(self, owners: set[Key], name: str) -> set[Key]:
         result: set[Key] = set()
@@ -251,7 +268,9 @@ class Reach:
                 result.add(owner)
             elif owner[1] == 0 or isinstance(self.nodes[owner], ast.ClassDef):
                 members = self.bindings[owner].get(name)
-                if members:
+                if name in self.fields[owner]:
+                    result.update(self.field_value(owner, name))
+                elif members:
                     for member in members:
                         result.update(self.value(owner, member))
                 elif name in self.aliases[owner]:
@@ -259,32 +278,41 @@ class Reach:
                 else:
                     result.update(self.missing_attribute(owner, name))
             else:
-                result.add(("", -2))
+                result.add(UNKNOWN)
+        return result
+
+    def field_value(self, owner: Key, name: str) -> set[Key]:
+        token = owner, f"<field:{name}>"
+        if token in self.active:
+            return {UNKNOWN}
+        self.active.add(token)
+        result = set[Key]().union(*(self.value(scope, value) for scope, value in self.fields[owner][name]))
+        self.active.remove(token)
         return result
 
     def missing_attribute(self, owner: Key, name: str) -> set[Key]:
         node = self.nodes[owner]
         if isinstance(node, ast.ClassDef):
             bases = set[Key]().union(*(self.value(self.parents[owner], base) for base in node.bases))
-            return self.attribute(bases, name) if bases else {("", -2)}
+            return self.attribute(bases, name) if bases else {UNKNOWN}
         exports = self.bindings[owner].get("__getattr__", ())
-        return {(owner[0], cast(Any, value).lineno) for value in exports} or {("", -2)}
+        return {(owner[0], cast(Any, value).lineno) for value in exports} or {UNKNOWN}
 
     def call_value(self, scope: Key, node: ast.Call) -> set[Key]:
         kind = self.lookup_kind(scope, node.func)
         if kind in ("getattr", "hasattr"):
             if len(node.args) < 2:
-                return {("", -2)}
+                return {UNKNOWN}
             owners = self.value(scope, node.args[0])
             names = lookup_names(self.nodes[scope], node.args[1])
             if names is None:
-                return {("", -2)}
+                return {UNKNOWN}
             return set[Key]().union(*(self.attribute(owners, name) for name in names))
         if kind in ("import_module", "__import__"):
             names = lookup_names(self.nodes[scope], node.args[0]) if node.args else None
-            return set[Key]().union(*(self.imported(name, "") for name in names)) if names else {("", -2)}
+            return set[Key]().union(*(self.imported(name, "") for name in names)) if names else {UNKNOWN}
         if kind:
-            return {("", -2)}
+            return {UNKNOWN}
         functions = self.value(scope, node.func)
         result: set[Key] = set()
         for key in functions:
@@ -297,14 +325,14 @@ class Reach:
     def returns(self, key: Key) -> set[Key]:
         token = key, "<return>"
         if token in self.active:
-            return {("", -2)}
+            return {UNKNOWN}
         self.active.add(token)
         values = [
             node.value
             for node in self.executed(key)
             if isinstance(node, (ast.Return, ast.Yield)) and node.value is not None
         ]
-        result = set[Key]().union(*(self.value(key, value) for value in values)) if values else {("", -1)}
+        result = set[Key]().union(*(self.value(key, value) for value in values)) if values else {EXTERNAL}
         self.active.remove(token)
         return result
 
@@ -331,9 +359,9 @@ class Reach:
                 prefix = str(node.slice.values[0].value)
                 names = {name for name in self.bindings[module] if name.startswith(prefix)}
                 return set[Key]().union(*(self.binding(module, name) for name in names))
-            return {("", -2)}
+            return {UNKNOWN}
         owners = self.value(scope, node.value)
-        return owners if all(not key[0] for key in owners) else {("", -2)}
+        return owners if all(not key[0] for key in owners) else {UNKNOWN}
 
     def executed(self, key: Key) -> list[ast.AST]:
         root = self.nodes[key]
@@ -355,6 +383,8 @@ class Reach:
     def import_edges(self, key: Key, node: ast.Import | ast.ImportFrom) -> set[Key]:
         result: set[Key] = set()
         for alias in node.names:
+            if isinstance(node, ast.Import):
+                result.update(self.module_keys(alias.name))
             name = alias.asname or alias.name.split(".")[0]
             for module, member in self.aliases[key].get(name, ()):
                 result.update(self.module_keys(module))
@@ -387,7 +417,7 @@ class Reach:
                     "eval",
                     "exec",
                 ):
-                    result.add(("", -2))
+                    result.add(UNKNOWN)
         return result
 
     def call_edges(self, key: Key, node: ast.Call) -> set[Key]:
@@ -396,7 +426,7 @@ class Reach:
             return set()
         if kind in ("getattr", "hasattr"):
             if not node.args:
-                return {("", -2)}
+                return {UNKNOWN}
             owners = self.value(key, node.args[0])
             result = {owner for owner in owners if not owner[0]}
             for owner in owners:
@@ -406,12 +436,20 @@ class Reach:
         if kind in ("import_module", "__import__"):
             return self.call_value(key, node)
         if kind:
-            return {("", -2)}
+            return {UNKNOWN}
+        return self.callables(key, node) | self.patch_imports(key, node)
+
+    def callables(self, key: Key, node: ast.Call) -> set[Key]:
         functions = self.value(key, node.func)
+        for function in list(functions):
+            if function[0] and isinstance(self.nodes[function], ast.ClassDef):
+                functions.update(self.bindings_to_keys(function, "__init__"))
+                functions.update(self.bindings_to_keys(function, "__new__"))
         for function in functions:
-            if function[0] and isinstance(self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self.associate(key, function, node)
-        return functions | self.patch_imports(key, node)
+            if function[0] and isinstance(definition := self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if definition.name not in ("__init__", "__new__"):
+                    self.associate(key, function, node)
+        return functions
 
     def patch_imports(self, key: Key, node: ast.Call) -> set[Key]:
         parts = dotted(node.func)
@@ -422,7 +460,7 @@ class Reach:
         if isinstance(argument, ast.JoinedStr) and isinstance(argument.values[0], ast.Constant):
             names = {str(argument.values[0].value).rsplit(".", 1)[0] + ".member"}
         if names is None:
-            return set() if not isinstance(argument, (ast.Constant, ast.JoinedStr)) else {("", -2)}
+            return set() if not isinstance(argument, (ast.Constant, ast.JoinedStr)) else {UNKNOWN}
         result: set[Key] = set()
         for name in names:
             if "." in name:
@@ -469,7 +507,7 @@ class Reach:
                 self.unknown.discard(key)
             edges = self.references(key)
             self.edges[key] = {edge for edge in edges if edge[0]}
-            if ("", -2) in edges:
+            if UNKNOWN in edges:
                 self.unknown.add(key)
             pending.extend(self.edges[key] - self.edges.keys())
             changed = True
@@ -569,6 +607,7 @@ def candidate_tests(items: list[pytest.Item], root: Path, changes: dict[str, lis
         for name, hook in hooks.items():
             if name.startswith("pytest_runtest") or name in (
                 "pytest_pyfunc_call",
+                "pytest_assertion_pass",
                 "pytest_fixture_setup",
                 "pytest_fixture_post_finalizer",
                 "pytest_exception_interact",
@@ -578,6 +617,10 @@ def candidate_tests(items: list[pytest.Item], root: Path, changes: dict[str, lis
                 implementations: list[Any] = hook.get_hookimpls()
                 for implementation in implementations:
                     if reach.reaches(implementation.function):
+                        print(
+                            f"Mutation stats candidates retained for hook {implementation.function.__qualname__}",
+                            flush=True,
+                        )
                         return items
     for item in items:
         reach.keep(item)

@@ -160,7 +160,9 @@ print(json.dumps({'split': split, 'key': split_key(split), 'workers': workers, '
     selected = set(split_data["split"][0])
     measured = {
         function: sorted({entry for bucket in part["results"] for entry in bucket["tests"].get(function, [])})
-        for function in inputs["mapping"]
+        for function in (
+            set(inputs["mapping"]) | {function for bucket in part["results"] for function in bucket["tests"]}
+        )
     }
     expected = {function: sorted(set(entries) & selected) for function, entries in inputs["mapping"].items()}
     (reports / "mapping.json").write_text(json.dumps({"expected": expected, "measured": measured}, indent=2))
