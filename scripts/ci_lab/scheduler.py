@@ -624,12 +624,14 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
     return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
+def _scope(state: State) -> str:
+    return state.outputs.get("select", {}).get("scope", "none")
+
+
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
-    if not state.superseded and state.required != list(
-        _frame_required(state.tier, state.outputs.get("select", {}).get("scope", "none"))
-    ):
+    if not state.superseded and state.required != list(_frame_required(state.tier, _scope(state))):
         return {}
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
@@ -685,7 +687,7 @@ def _quiet(state: State, revision: int) -> _Quiet:
         hold=state.hold,
         final=all(slot.outcome for slot in slots),
         required=tuple(state.required),
-        scope=state.outputs.get("select", {}).get("scope", "none"),
+        scope=_scope(state),
     )
 
 
@@ -1334,7 +1336,7 @@ class Scheduler:
         if old is None:
             return {}
         if old.head == request.head:
-            if old.required != list(_frame_required(old.tier, old.outputs.get("select", {}).get("scope", "none"))):
+            if old.required != list(_frame_required(old.tier, _scope(old))):
                 return self._replace_frame(old)
             return {}
         dropped = set(self.queue.supersede(old.head))
@@ -1451,7 +1453,7 @@ class Scheduler:
         queued = [slot for slot in state.units.values() if not (slot.outcome or slot.held) and slot.job]
         for slot, job in zip(queued, self.queue.jobs([slot.job for slot in queued])):
             self._collect(slot, job, tiers, state)
-        scope = state.outputs.get("select", {}).get("scope", "none")
+        scope = _scope(state)
         if not state.superseded and state.required != list(_frame_required(state.tier, scope)):
             self._keep(state)
             request = GradeRequest(
