@@ -711,6 +711,65 @@ def test_a_launch_waiting_for_room_reports_no_failure(rig):
     rig.tasks.failed.assert_not_called()
 
 
+@pytest.mark.feature("admitted-account-capacity-wait")
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "No account slot available",
+        "no signed in Codex account has a fresh reading and a free session",
+        "no codex account has placeable quota seats",
+    ],
+    ids=["atomic-slot", "router-seats", "quota-seats"],
+)
+def test_confirmed_account_capacity_keeps_the_admitted_work(rig: SimpleNamespace, detail: str) -> None:
+    import json
+
+    from scripts.hive.spoke import claim_key
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome(
+        "spawn", Status.UNAVAILABLE, "local", {"failure_class": "account_capacity", "harness": "codex"}, detail
+    )
+
+    assert rig.spoke.poll() == "account_wait"
+
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.failed.assert_not_called()
+    work = json.loads(rig.bus.state("spoke-work").get(claim_key(rig.event)).value)
+    assert work["state"] == "account_wait"
+    assert work["owner"] == "hive-a"
+    assert work["name"] == "agent-a"
+    assert work["execution_id"] == "execution-a"
+    assert work["execution_generation"] == 7
+    assert work["claim_generation"] == 3
+    pending = json.loads(rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value)
+    assert pending["event"] == rig.event.to_dict()
+    assert pending["attempt"] == 1
+
+
+@pytest.mark.feature("admitted-account-capacity-wait")
+@pytest.mark.parametrize(
+    "status,detail,metadata",
+    [
+        ("unavailable", "no room", {"harness": "codex"}),
+        ("refused", "mounted profile canary did not validate", {"harness": "codex"}),
+        ("refused", "provider refused the account", {"error_class": "account_refused", "harness": "codex"}),
+        ("unavailable", "model at capacity", {"harness": "codex"}),
+    ],
+    ids=["generic-unavailable", "canary", "provider-auth", "model-capacity"],
+)
+def test_unconfirmed_capacity_preserves_failed_launch_reopening(
+    rig: SimpleNamespace, status: str, detail: str, metadata: dict[str, str]
+) -> None:
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.runtime.spawn.return_value = Outcome("spawn", Status(status), "local", metadata, detail)
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.reopen.assert_called_once_with(rig.event)
+
+
 @pytest.mark.parametrize("value", [None, {"pane_id": "w1:p1"}])
 def test_a_launch_failure_naming_no_harness_is_reported_without_one(rig, value):
     from scripts.swarm_v2.runtime.base import Outcome, Status

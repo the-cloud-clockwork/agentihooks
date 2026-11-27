@@ -3503,6 +3503,17 @@
       ]
     },
     {
+      "id": "admitted-account-capacity-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2924",
+      "behaviour": "A confirmed account capacity refusal before a working launch preserves the admitted task claim, seat and execution until an eligible account launches it once. Generic unavailable, canary, model and provider authorization failures retain ordinary cleanup.",
+      "seam": "Runtime capacity outcome, Spoke polling and durable admission recovery",
+      "tests": [
+        "tests/hive/test_spoke.py::test_confirmed_account_capacity_keeps_the_admitted_work",
+        "tests/hive/test_spoke.py::test_unconfirmed_capacity_preserves_failed_launch_reopening"
+      ]
+    },
+    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
