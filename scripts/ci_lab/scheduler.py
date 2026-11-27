@@ -65,7 +65,7 @@ from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRef
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
-from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -168,7 +168,9 @@ INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
 LOOKED_AT_PER_PASS = 24
+DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
+CUT_SHORT_STARTS = 5
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
@@ -433,11 +435,13 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit and how long a settled job's record
+    outlives its settling."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    retention_ms: int = RETENTION_MS
 
 
 @dataclass
@@ -716,6 +720,11 @@ def summary(state: State) -> dict[str, Any]:
     }
 
 
+class CutShort(ValueError):
+    """A head whose start was begun and not finished `CUT_SHORT_STARTS` times in a row, by a process stopped or
+    killed while it checked or expanded the head."""
+
+
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
@@ -736,14 +745,22 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
+        self._undrained: list[str] = []
+        self._drained = False
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
-        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
-        live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
+        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, drain a batch
+        of the old global done set, refresh the live grade summaries, enqueue the held units the budget admits, then
+        advance every live grade, counting each finished job in the most urgent tier of the live grades holding it."""
         swept = self._sweep()
-        actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._drain(),
+        ]
         self._survey()
         actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
@@ -1025,9 +1042,11 @@ class Scheduler:
         whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
         such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
         the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
-        next waiting head instead of stalling on it. Starting a head, retiring it or dropping it after its last
-        expansion failure each take one of those `STARTS_PER_PASS` places, since each is the pass's last word on
-        that head."""
+        next waiting head instead of stalling on it. A head keeps its waiting entry while it is checked and
+        expanded, with the count of starts begun and not finished in it, so a pass stopped inside a start finds the
+        head again; a head that already counts `CUT_SHORT_STARTS` such starts is refused instead of started.
+        Starting a head, retiring it, refusing it or dropping it after its last expansion failure each take one of
+        those `STARTS_PER_PASS` places, since each is the pass's last word on that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -1041,37 +1060,50 @@ class Scheduler:
             ):
                 continue
             looked_at += 1
-            self.client.hdel(WAITING, name)
             ref = held.get("ref", "")
-            try:
-                actions.append(self._start(request, held["lane"], ref, now_ms))
+            starts = held.get("starts", 0)
+            if starts >= CUT_SHORT_STARTS:
                 started += 1
-            except FetchPending as error:
-                self.client.hset(WAITING, name, raw)
-                actions.append(f"holding {request.head}: {error}")
-            except FetchUnanswered as error:
-                fetches = held.get("unanswered", 0) + 1
-                if fetches < UNANSWERED_FETCHES:
-                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
-                    actions.append(f"holding {request.head}: {error}")
-                else:
+                self.client.hdel(WAITING, name)
+                refusal = CutShort(f"{starts} starts of {request.head} in a row were begun and not finished")
+                actions.append(f"cannot expand {request.head}: {refusal}")
+                actions.extend(self._refuse(request, ref, refusal, now_ms))
+            else:
+                self.client.hset(WAITING, name, json.dumps({**held, "starts": starts + 1}))
+                try:
+                    actions.append(self._start(request, held["lane"], ref, now_ms, name))
                     started += 1
-                    refusal = FetchRefused(
-                        f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
-                    )
-                    actions.append(f"cannot expand {request.head}: {refusal}")
-                    actions.extend(self._refuse(request, ref, refusal, now_ms))
-            except (
-                subprocess.CalledProcessError,
-                ValueError,
-                KeyError,
-                SyntaxError,
-                yaml.YAMLError,
-                jsonschema.ValidationError,
-            ) as error:
-                started += 1
-                actions.append(f"cannot expand {request.head}: {error}")
-                actions.extend(self._refuse(request, ref, error, now_ms))
+                except FetchPending as error:
+                    self.client.hset(WAITING, name, raw)
+                    actions.append(f"holding {request.head}: {error}")
+                except FetchUnanswered as error:
+                    fetches = held.get("unanswered", 0) + 1
+                    if fetches < UNANSWERED_FETCHES:
+                        self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+                        actions.append(f"holding {request.head}: {error}")
+                    else:
+                        started += 1
+                        self.client.hdel(WAITING, name)
+                        refusal = FetchRefused(
+                            f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
+                        )
+                        actions.append(f"cannot expand {request.head}: {refusal}")
+                        actions.extend(self._refuse(request, ref, refusal, now_ms))
+                except (
+                    subprocess.CalledProcessError,
+                    ValueError,
+                    KeyError,
+                    SyntaxError,
+                    yaml.YAMLError,
+                    jsonschema.ValidationError,
+                ) as error:
+                    started += 1
+                    self.client.hdel(WAITING, name)
+                    actions.append(f"cannot expand {request.head}: {error}")
+                    actions.extend(self._refuse(request, ref, error, now_ms))
+                except Exception:
+                    self.client.hdel(WAITING, name)
+                    raise
             if started == STARTS_PER_PASS or looked_at == LOOKED_AT_PER_PASS:
                 break
         return actions
@@ -1231,14 +1263,18 @@ class Scheduler:
             self._forget(run)
         return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
-        to a grade ref, which the lab remote serves."""
+        to a grade ref, which the lab remote serves. The waiting field of `name` comes out of the hash only once this
+        start cannot be repeated: before the retirement, and right after the expansion returns, before the first
+        grade write."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
+            self.client.hdel(WAITING, name)
             return self._retire(request, now_ms)
         plan = self.ports.expander.expand(request)
+        self.client.hdel(WAITING, name)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
         if self.client.exists(GRADES + run):
@@ -1337,11 +1373,29 @@ class Scheduler:
         actions: list[str] = []
         for expired in self.queue.expired(now_ms):
             job = self.queue.job(expired)
-            if job is not None and (state := self.queue.reap(job, now_ms, self.settings.retries.lost)):
+            if job is not None and (
+                state := self.queue.reap(job, now_ms, self.settings.retries.lost, self.settings.retention_ms)
+            ):
                 self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
                 release(self.queue, self.ports.pods, job.worker)
         return actions
+
+    def _drain(self) -> list[str]:
+        """Give the jobs the old global done set names the retention, at most DRAINED_PER_PASS a pass, until a read
+        finds it empty; the set is read whole once its last read is drained, since the lab's Redis user may not pop
+        or scan a set, and is never read again in this process once it reads empty."""
+        if self._drained:
+            return []
+        if not self._undrained:
+            self._undrained = self.queue.undrained()
+        batch = self._undrained[-DRAINED_PER_PASS:]
+        del self._undrained[-DRAINED_PER_PASS:]
+        if not batch:
+            self._drained = True
+            return []
+        settled = self.queue.drain(batch, self.settings.retention_ms)
+        return [f"drained {len(batch)} jobs of the old done set, {settled} settled, {len(self._undrained)} left"]
 
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
@@ -2235,6 +2289,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         manifests,
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
+        scheduler.settings.retention_ms,
         shed=lambda: spending.status().shed,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)

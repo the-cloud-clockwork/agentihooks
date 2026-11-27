@@ -3,13 +3,13 @@
 import hashlib
 from importlib import import_module
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
-from scripts.events.memory import MemoryBus, open_bus
+from scripts.events.memory import MemoryBus, MemoryConsumer, open_bus
 from scripts.events.subjects import subject
 from scripts.review import record
 from scripts.swarm.ledger_client import LedgerRefused
@@ -172,6 +172,48 @@ def test_events_from_before_the_replay_window_queue_nothing() -> None:
 def test_an_event_at_the_edge_of_the_replay_window_still_queues() -> None:
     bus, ledger = open_bus(BusConfig()), Ledger()
     publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().REPLAY_MS)
+    assert len(run(bus, ledger)) == 1
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_backlog_older_than_the_replay_window_queues_when_the_consumer_is_older_still() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().REPLAY_MS - 60_000), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().REPLAY_MS - 1)
+    assert len(run(bus, ledger)) == 1
+    assert ledger.added[0][1]["task"] == review().review_task("pr", {"url": PULL}, doc())["task"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_an_event_older_than_the_window_and_the_consumer_queues_nothing() -> None:
+    created = NOW - review().REPLAY_MS - 60_000
+    bus, ledger = open_bus(BusConfig(), wall=lambda: created), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, created - 1)
+    assert run(bus, ledger) == []
+    assert ledger.added == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_consumer_with_no_created_time_keeps_the_replay_window_rule() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().REPLAY_MS - 60_000), Ledger()
+    consumer = bus.events.consumer(review()._durable(SLUG, "pr"), subject(SLUG, "pull", "opened"))
+    cast(MemoryConsumer, consumer).created = None
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().REPLAY_MS - 1)
+    assert run(bus, ledger) == []
+    assert ledger.added == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_backlog_older_than_the_cap_queues_nothing_even_when_the_consumer_is_older_still() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().BACKLOG_MS - 60_000), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().BACKLOG_MS - 1)
+    assert run(bus, ledger) == []
+    assert ledger.added == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_backlog_event_at_the_cap_still_queues() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().BACKLOG_MS - 60_000), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().BACKLOG_MS)
     assert len(run(bus, ledger)) == 1
 
 
