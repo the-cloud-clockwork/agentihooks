@@ -224,7 +224,7 @@ def _advance(before: str | None, status: str, conclusion: str | None) -> None:
     if status not in STATUSES:
         raise ValueError(f"Unknown check run status: {status}")
     if before is not None and STATUSES.index(status) <= STATUSES.index(before):
-        raise ValueError(f"A check run moves forward only, not from {before} to {status}")
+        raise MoveRefused(f"A check run moves forward only, not from {before} to {status}")
     if (status == "completed") != (conclusion is not None):
         raise ValueError("A check run carries a conclusion exactly when it is completed")
     if conclusion is not None and conclusion not in CONCLUSIONS:
