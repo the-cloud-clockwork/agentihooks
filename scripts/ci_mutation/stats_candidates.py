@@ -89,6 +89,7 @@ class Reach:
         self.edges: dict[Key, set[Key]] = {}
         self.wanted: set[Key] = set()
         self.active: set[tuple[Key, str]] = set()
+        self.resolving: dict[tuple[Key, str], set[Key]] = {}
         self.unknown: set[Key] = set()
         self.invalid: set[Key] = set()
         self.arguments: dict[Key, dict[str, set[Key]]] = defaultdict(dict)
@@ -193,9 +194,11 @@ class Reach:
     def binding(self, scope: Key, name: str) -> set[Key]:
         token = scope, name
         if token in self.active:
-            return self.parameter(scope, name)
+            resolved = self.resolving.get(token, set())
+            return {EXTERNAL} if resolved == {EXTERNAL} else self.parameter(scope, name)
         self.active.add(token)
         result: set[Key] = set()
+        self.resolving[token] = result
         if name in self.bindings[scope]:
             for node in self.bindings[scope][name]:
                 result.update(self.value(scope, node))
@@ -205,6 +208,7 @@ class Reach:
         else:
             result.update(self.parameter(scope, name))
         self.active.remove(token)
+        self.resolving.pop(token)
         return result
 
     def parameter(self, scope: Key, name: str) -> set[Key]:

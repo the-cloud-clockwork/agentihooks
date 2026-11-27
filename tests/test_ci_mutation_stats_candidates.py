@@ -179,6 +179,16 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         ),
         (
             "from pathlib import Path\n"
+            "def helper():\n"
+            "    setter = Path('absent').exists\n"
+            "    setter = getattr(setter, 'untraced', setter)\n"
+            "    return setter()\n"
+            "def test_unrelated():\n    assert not helper()\n"
+            "def test_reaches():\n    assert target(1) == 2\n",
+            ["test_reaches"],
+        ),
+        (
+            "from pathlib import Path\n"
             "def test_file_unrelated():\n"
             "    with Path('runs.txt').open('a') as stream:\n"
             "        stream.write('run\\n')\n"
@@ -207,6 +217,7 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "constructor-reach",
         "context-manager-reach",
         "property-reach",
+        "known-external-reassignment",
         "unrelated-file-methods",
     ],
 )
