@@ -3,6 +3,7 @@ import functools
 import json
 import re
 import subprocess
+import urllib.error
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ from scripts.swarm_ledger import (
     ledger_publish,
     ledger_tasks,
     ledger_workspace,
+    plan_read,
 )
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
@@ -594,6 +596,200 @@ def test_publish_plan_parser_names_its_options():
     plan = next(a for a in commands["task"]._actions if a.dest == "plan")
     assert plan.help == "link to the published plan; default the phase's plan link"
     assert parser.parse_args(["--slug", "s", "--as", "m", "task", "add", "t1", "Build"]).plan == ""
+
+
+TASK_PLAN = (
+    "# Document the ledger\n"
+    + "".join(f"Context {n}\n" for n in range(1, 13))
+    + "<!-- slice: ledger-docs -->\n## Ledger docs\nWrite the page\nLink it\n"
+)
+
+
+def join(slug):
+    core.sync(slug, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
+
+
+def task_rows(monkeypatch, plans=()):
+    def resource(slug, path, collection=False):
+        if collection:
+            return list(plans)
+        found = next((t for t in core.sync(slug)[0]["tasks"] if f"tasks/{t['id']}" == path), None)
+        if found is None:
+            raise urllib.error.HTTPError(path, 404, "missing", None, None)
+        return found
+
+    monkeypatch.setattr(ledger, "resource", resource)
+
+
+def publish_for_task(monkeypatch, slug, tmp_path, task_id, text=TASK_PLAN):
+    plan = tmp_path / f"{task_id}.md"
+    plan.write_text(text, encoding="utf-8")
+    file = ledger_artifacts.store(slug, plan.name, plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    task_rows(monkeypatch)
+    cli(monkeypatch, slug, "publish-plan", str(plan), "--task", task_id)
+    return f"{ledger.BASE}/artifacts/{slug}/{file['id']}"
+
+
+def test_publish_plan_with_neither_a_phase_nor_a_task_is_refused_naming_both(capsys):
+    parser = ledger.build_parser()
+    with pytest.raises(SystemExit) as raised:
+        parser.parse_args(["--slug", "s", "--as", "planner", "publish-plan", "plan.md"])
+    assert raised.value.code == 2
+    assert "one of the arguments --phase --task is required" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--phase", "p1", "--task", "t1"]
+        )
+    assert "not allowed with argument" in capsys.readouterr().err
+    args = parser.parse_args(["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--task", "t1"])
+    assert (args.task, args.phase) == ("t1", None)
+
+
+@pytest.mark.feature("plan-publish-task")
+def test_publish_plan_for_a_phaseless_task_links_its_plan_and_slice_and_plan_read_prints_it(
+    plan_ledger, tmp_path, monkeypatch, capsys
+):
+    add(plan_ledger, "doc", phase="")
+    join(plan_ledger)
+    url = publish_for_task(monkeypatch, plan_ledger, tmp_path, "doc")
+    state = core.sync(plan_ledger)[0]
+    doc = task(state, "doc")
+    assert (doc["phase"], doc["plan_url"], doc["plan_slice"], doc["plan_lines"]) == ("", url, "ledger-docs", "15-17")
+    assert [(row["artifact"], row["url"], row["title"]) for row in state["plans"]] == [
+        (url, url, "Document the ledger")
+    ]
+    assert all("plan" not in phase for phase in state["phases"])
+    assert json.loads(capsys.readouterr().out) == {
+        "plan_url": url,
+        "published_to": "artifact",
+        "task": "doc",
+        "plan_slice": "ledger-docs",
+    }
+    printed = plan_read.read(state, plan_ledger, "doc", None)
+    assert printed == "".join(f"{row}\n" for row in TASK_PLAN.splitlines()[4:])
+    assert "Context 3\n" not in printed
+
+
+@pytest.mark.feature("plan-publish-task")
+def test_two_phaseless_tasks_whose_plans_span_the_same_lines_both_publish(plan_ledger, tmp_path, monkeypatch):
+    add(plan_ledger, "doc", phase="")
+    add(plan_ledger, "guide", phase="")
+    join(plan_ledger)
+    first = publish_for_task(monkeypatch, plan_ledger, tmp_path, "doc")
+    second = publish_for_task(
+        monkeypatch, plan_ledger, tmp_path, "guide", TASK_PLAN.replace("ledger-docs", "guide-docs")
+    )
+    state = core.sync(plan_ledger)[0]
+    assert first != second
+    assert [(task(state, t)["plan_url"], task(state, t)["plan_lines"]) for t in ("doc", "guide")] == [
+        (first, "15-17"),
+        (second, "15-17"),
+    ]
+
+
+def test_phaseless_tasks_share_a_slice_only_on_the_same_plan_and_phase_tasks_on_the_same_lines():
+    doc = {
+        "tasks": [
+            {"id": "a", "phase": "", "plan_lines": "3-5", "plan_url": f"{PLAN}/a"},
+            {"id": "b", "phase": "", "plan_lines": "3-5", "plan_url": f"{PLAN}/b"},
+            {"id": "c", "phase": "", "plan_lines": "3-5", "plan_url": f"{PLAN}/a"},
+            {"id": "d", "phase": "p1", "plan_lines": "3-5", "plan_url": f"{PLAN}/a"},
+            {"id": "e", "phase": "p1", "plan_lines": "3-5"},
+        ]
+    }
+    assert plan_read.sharers(doc, doc["tasks"][0]) == ["c"]
+    assert plan_read.sharers(doc, doc["tasks"][3]) == ["e"]
+
+
+def test_publish_plan_refuses_an_unknown_or_phased_task_before_publishing(plan_ledger, tmp_path, monkeypatch, capsys):
+    add(plan_ledger, "phased")
+    plan = tmp_path / "plan.md"
+    plan.write_text(TASK_PLAN, encoding="utf-8")
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    task_rows(monkeypatch)
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--task", "nope")
+    assert raised.value.code == "publish-plan names an unknown task"
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--task", "phased")
+    assert (
+        raised.value.code
+        == "publish-plan --task takes a task with no phase: task phased is in phase p1, use --phase p1"
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_publish_plan_passes_on_a_task_read_failure_other_than_a_missing_task(tmp_path, monkeypatch):
+    def unavailable(slug, path, collection=False):
+        raise urllib.error.HTTPError(path, 503, "unavailable", None, None)
+
+    monkeypatch.setattr(ledger, "resource", unavailable)
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--task", "t1"]
+    )
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == 503
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["# Plan\n## Docs\nWrite\n", "# Plan\n<!-- slice: one -->\n## One\n<!-- slice: two -->\n## Two\n"],
+)
+def test_publish_plan_for_a_task_needs_exactly_one_slice_marker(plan_ledger, tmp_path, monkeypatch, text):
+    add(plan_ledger, "doc", phase="")
+    plan = tmp_path / "plan.md"
+    plan.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    task_rows(monkeypatch)
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--task", "doc")
+    assert raised.value.code == (
+        "publish-plan --task needs exactly one slice marker, <!-- slice: name --> on its own line above the "
+        "task's section"
+    )
+
+
+def test_a_refused_task_publish_closes_its_issue_unless_a_plan_links_it(tmp_path, monkeypatch, plans, closed):
+    titles = []
+    seen = []
+    stub_publish(monkeypatch, titles)
+
+    def publish(path, title, repo, artifact, issue_title):
+        seen.append((title, issue_title))
+        artifact(path, title)
+        return PLAN, "issue"
+
+    monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    plan = tmp_path / "plan.md"
+    plan.write_text("<!-- slice: docs -->\n## Docs\nWrite\n", encoding="utf-8")
+    rows = {"tasks/doc": {"id": "doc", "title": "Write the docs", "phase": ""}}
+    monkeypatch.setattr(
+        ledger, "resource", lambda slug, path, collection=False: list(plans) if collection else rows[path]
+    )
+    sent = []
+    refused = {"rejected": ["x"], "_meta": {"warnings": ["task refused"]}}
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or refused)
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--task", "doc"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == "task refused"
+    assert seen == [("Write the docs", "Write the docs")]
+    assert titles == closed
+    [ops] = sent
+    stored = f"{ledger.BASE}/artifacts/s/{'d' * 64}.md"
+    assert [o["op"] for o in ops] == ["artifact_add", "plan_add", "task_update"]
+    assert (ops[2]["item"], ops[2]["fields"]) == ("tasks/doc", {"plan_url": stored, "plan_slice": "docs"})
+    assert (ops[1]["artifact"], ops[1]["url"], ops[1]["title"]) == (stored, PLAN, "Write the docs")
 
 
 def test_task_cli_passes_an_explicit_plan_link(monkeypatch, capsys):

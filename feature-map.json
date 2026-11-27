@@ -7975,6 +7975,17 @@
       ]
     },
     {
+      "id": "plan-publish-task",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-plan-phaseless",
+      "behaviour": "publish-plan with a task target publishes the plan for one phaseless task like the phase form, links the stored plan and its one slice on that task so plan read prints the slice chunk, and a second phaseless plan spanning the same lines is not refused as a shared slice.",
+      "seam": "agentihooks ledger publish-plan PATH --task ID, then agentihooks plan read --task ID",
+      "tests": [
+        "tests/swarm_ledger/test_plan_publish.py::test_publish_plan_for_a_phaseless_task_links_its_plan_and_slice_and_plan_read_prints_it",
+        "tests/swarm_ledger/test_plan_publish.py::test_two_phaseless_tasks_whose_plans_span_the_same_lines_both_publish"
+      ]
+    },
+    {
       "id": "plan-links",
       "origin": "inventory",
       "behaviour": "A task added to a phase with a plan carries its plan link, and a planner's slice is refused while a slice task lacks it.",
