@@ -168,8 +168,11 @@ def _finish(path: Path, row: dict) -> None:
         verdict = dict(NO_CHANGES)
     if not verdict or verdict["needs_documentation"] is None:
         verdict = documentation.classify(evidence)
-    if source.get("profile") == "documentation" or (
-        not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"])
+    if (
+        source.get("profile") == "documentation"
+        or source.get("lane") == "plan"
+        or source.get("kind") == "plan"
+        or (not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"]))
     ):
         verdict["needs_documentation"] = False
     row.update(verdict=verdict)
