@@ -440,6 +440,40 @@ def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
     assert not ledger_load.RELAYS
 
 
+@pytest.mark.feature("load-gate-stops-started-servers")
+@pytest.mark.parametrize(
+    "failure",
+    [
+        SystemExit("ledger server exited with 1 before listening; its stderr:\nread server refused"),
+        FileNotFoundError(2, "No such file or directory"),
+    ],
+    ids=["exits_before_listening", "cannot_spawn"],
+)
+def test_a_failed_read_server_start_stops_the_started_api_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: BaseException
+) -> None:
+    api = subprocess.Popen(["sleep", "60"])
+    started: list[tuple[Path, int, object]] = []
+
+    def start(folder: Path, port: int, log: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        started.append((folder, port, log))
+        if len(started) > 1:
+            raise failure
+        return api
+
+    monkeypatch.setattr(ledger_load, "start_server", start)
+    try:
+        with (tmp_path / "server.log").open("w") as log, (tmp_path / "server-read.log").open("w") as read_log:
+            with pytest.raises(type(failure)) as exited:
+                ledger_load.start_servers(tmp_path, 8101, 8102, log, read_log)
+            assert exited.value is failure
+            assert started == [(tmp_path, 8101, log), (tmp_path, 8102, read_log)]
+        assert api.poll() is not None
+    finally:
+        api.kill()
+        api.wait()
+
+
 def resource_samples(threads=0, memory=0):
     return [(float(n), 12 + threads * n, 100_000 + memory * n) for n in range(91)]
 
