@@ -46,6 +46,7 @@ from scripts.ci_lab import (
     control,
     evidence,
     expand_tests,
+    git_auth,
     interaction,
     lease_api,
     metrics,
@@ -76,7 +77,7 @@ from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer, Delivery
-from scripts.github_app import GitAuthRefused
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 from scripts.swarm import metrics_outbox
 
 __all__ = [
@@ -1140,7 +1141,7 @@ class Scheduler:
         for repo in sorted({origin["repo"] for origin in groups.values()}):
             try:
                 carried = self.ports.expander.groups(repo)
-            except subprocess.SubprocessError as error:
+            except (subprocess.SubprocessError, GitAuthRefused) as error:
                 actions.append(f"cannot list the merge groups of {repo}: {error}")
                 continue
             for run, origin in groups.items():
@@ -1728,9 +1729,16 @@ class MirrorExpander:
         self.verdicts = verdicts
         self.lab = lab
 
+    def _environment(self, repo: str) -> dict[str, str] | None:
+        if self.auth is None or not repo.startswith(git_auth.GITHUB):
+            return None
+        return git_auth.environ(self.auth(repo))
+
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
-        return Mirror(self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab)
+        return Mirror(
+            self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab, environ=self._environment(repo)
+        )
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -1760,7 +1768,11 @@ class MirrorExpander:
         """Return the repository's dev branch head as the remote lists it, fetched into the mirror; git fails when the
         remote lists no dev branch."""
         listing = subprocess.run(
-            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"],
+            env=mirror.environ,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
@@ -1784,7 +1796,11 @@ class MirrorExpander:
         repository names it, or the dev branch head, fetched into the mirror, descends from it. The head itself is
         never fetched, since GitHub may no longer serve a head no ref reaches."""
         listing = subprocess.run(
-            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"],
+            env=self._environment(repo),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         if head in {line.split()[0] for line in listing.stdout.splitlines()}:
             return True
@@ -1798,7 +1814,9 @@ class MirrorExpander:
         """Return the head of every merge group ref the repository lists; git fails when it cannot list them within
         GROUPS_TIMEOUT_S."""
         argv = ["git", "ls-remote", repo, MERGE_GROUPS]
-        listing = subprocess.run(argv, capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S)
+        listing = subprocess.run(
+            argv, env=self._environment(repo), capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S
+        )
         return frozenset(line.split()[0] for line in listing.stdout.splitlines())
 
     def trusted(self, repo: str) -> frozenset[str]:
@@ -2034,7 +2052,16 @@ def build(
     the scheduler's registry; without it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))
+    credentials: dict[str, GitHubAppAuth] = {}
+
+    def auth(repo: str) -> Token:
+        if repo not in credentials:
+            credentials[repo] = GitHubAppAuth(f"github.com/{_slug(repo)}", permissions={"contents": "read"})
+        return credentials[repo]
+
+    expander = MirrorExpander(
+        node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ), auth=auth
+    )
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:

@@ -92,7 +92,7 @@ class Mirror:
     remote: str
     lab: Lab | None = None
     repository: str | None = None  # pragma: no mutate
-    environ: Mapping[str, str] | None = None
+    environ: Mapping[str, str] | None = field(default=None, repr=False)
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
@@ -107,7 +107,7 @@ class Mirror:
             return False
         ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref, env=self.environ)
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
