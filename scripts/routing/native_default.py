@@ -40,7 +40,7 @@ def _rename_trust_key(key: SingleKey, value: Item, source: str, target: str) -> 
             encoded_source = "".join(tokens[: len(source)])
             encoded_target = SingleKey(target).as_string()[1:-1]
         replacement = original.replace(encoded_source, encoded_target, 1)
-    key._original = replacement  # pyright: ignore[reportPrivateUsage]
+    setattr(key, "_original", replacement)
     if isinstance(value, Table) and value.display_name is not None:
         value.display_name = value.display_name.replace(original.strip(), replacement.strip())
 
@@ -61,13 +61,16 @@ def _codex_trust(source: Path, home: Path) -> None:
     if not config.is_file():
         return
     doc = tomlkit.parse(config.read_bytes().decode())
-    entries = {key.key: (key, value) for key, value in _trust_entries(doc, ())}
+    entries: dict[str, list[tuple[SingleKey, Item]]] = {}
+    for key, value in _trust_entries(doc, ()):
+        entries.setdefault(key.key, []).append((key, value))
     source_hooks = source / "hooks.json"
     target_hooks = home / "hooks.json"
     rebased = [
         (path, key, value)
         for path in dict.fromkeys((source_hooks, source_hooks.resolve()))
-        for key, value in rebase_state(entries, path, target_hooks).values()
+        for group in rebase_state(entries, path, target_hooks).values()
+        for key, value in group
     ]
     for path, key, value in rebased:
         _rename_trust_key(key, value, f"{path}:", f"{target_hooks}:")

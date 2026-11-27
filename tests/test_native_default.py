@@ -440,7 +440,8 @@ def test_codex_native_default_preserves_configuration_without_matching_trust(
 
 @pytest.mark.feature("native-default-codex-hook-trust")
 @pytest.mark.parametrize(
-    "layout", ["escaped-suffix", "escaped-prefix", "interleaved", "whole-inline", "apostrophe", "newline"]
+    "layout",
+    ["escaped-suffix", "escaped-prefix", "interleaved", "whole-inline", "apostrophe", "newline", "delete-control"],
 )
 def test_codex_native_default_preserves_lexical_hook_trust(tmp_path: Path, layout: str) -> None:
     import tomllib
