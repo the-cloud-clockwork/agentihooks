@@ -17090,6 +17090,20 @@
       ]
     },
     {
+      "id": "swarm-gates-platform-invocation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-watch-flake",
+      "behaviour": "Swarm guards skip Windows and enforce Linux claim ownership before context recycling at each call, regardless of the platform during the first import.",
+      "seam": "hooks.context.swarm_gates.pretool",
+      "rules": [
+        "platform-chosen-at-import"
+      ],
+      "tests": [
+        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call",
+        "tests/test_claim_watch.py::test_windows_runs_neither_swarm_gate_at_the_call"
+      ]
+    },
+    {
       "id": "hub-tracks-pull-requests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2910",
