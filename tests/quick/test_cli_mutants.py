@@ -39,7 +39,8 @@ def test_parser_declares_every_subcommand_with_its_exact_help_and_options() -> N
         "Engineer harness, or one per engineer: claude,codex,program",
     )
     command = up._option_string_actions["--command"]
-    assert (command.default, command.help) == (
+    assert (command.dest, command.default, command.help) == (
+        "command_argv",
         "",
         "JSON argument list every engineer runs instead of its built in launch",
     )

@@ -69,8 +69,8 @@ def start_command(
     """
     env = environ(base, folder, swarm, seat)
     exports = {name: env[name] for name in (QUICK_ENV, SEAT_ENV, DIR_ENV)}
-    if recipe.kind(seat) != recipe.PROGRAM:
-        exports[recipe.PROMPT_ENV] = str(prompt_file)
+    if "PATH" in base:
+        exports["PATH"] = base["PATH"]
     seat_dir = paths.seat_dir(folder, seat.seat)
     recipe.forget(seat_dir)
     launcher = seat_dir / recipe.LAUNCHER
@@ -82,7 +82,7 @@ def start_command(
 def start_seat(folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: Mapping[str, str], start: Start) -> int:
     """Open the seat's agent, or run its saved command, in its pane with its opening prompt."""
     prompt_file = _write_opening(Member(folder, swarm, seat))
-    if seat.command:
+    if recipe.kind(seat) == recipe.PROGRAM:
         return start_command(folder, swarm, seat, base, prompt_file)
     return start(argv(swarm, seat, prompt_file), environ(base, folder, swarm, seat))
 
@@ -98,6 +98,9 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
             if registry.take(folder, seat.seat, seat.state, registry.LAUNCHING) is None:
                 continue
             taken[seat.seat] = seat
+            if recipe.kind(seat) == recipe.PROGRAM:
+                codes[seat.seat] = start_seat(folder, swarm, seat, base, init_agent)
+                continue
             prompt_file = _write_opening(Member(folder, swarm, seat))
             command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
             running[seat.seat] = subprocess.Popen(command, env=environ(base, folder, swarm, seat))
@@ -106,7 +109,12 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
         return codes
     finally:
         for name, seat in taken.items():
-            state = registry.READY if codes.get(name) == 0 and _recorded(folder, seat) else registry.PENDING
+            recorded = codes.get(name) == 0 and (
+                ready(folder, seat, sleep=time.sleep)
+                if recipe.kind(seat) == recipe.PROGRAM
+                else _recorded(folder, seat)
+            )
+            state = registry.READY if codes.get(name) == 0 and recorded else registry.PENDING
             registry.set_state(folder, name, state)
 
 
@@ -145,10 +153,13 @@ def bound(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]
 
 
 def ready(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]) -> bool:
-    """Whether the seat's new occupant is ready: a bound session for an agent, the recorded live process for a program."""
-    if recipe.kind(before) == recipe.PROGRAM:
-        return recipe.alive(paths.seat_dir(folder, before.seat))
-    return bound(folder, before, sleep=sleep)
+    if recipe.kind(before) != recipe.PROGRAM:
+        return bound(folder, before, sleep=sleep)
+    for _ in range(round(SETTLE_S / POLL_S)):
+        if recipe.alive(paths.seat_dir(folder, before.seat)):
+            return True
+        sleep(POLL_S)
+    return recipe.alive(paths.seat_dir(folder, before.seat))
 
 
 def relaunch(
@@ -221,7 +232,10 @@ def force(
     if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.LAUNCHING) is None:
         return "launching"
     try:
-        end(seat.name)
+        if recipe.kind(seat) == recipe.PROGRAM:
+            recipe.stop(paths.seat_dir(folder, seat.seat))
+        else:
+            end(seat.name)
     finally:
         registry.set_state(folder, seat_name, registry.PENDING)
     return relaunch(folder, seat_name, base, bare=bare, start=start, sleep=sleep)

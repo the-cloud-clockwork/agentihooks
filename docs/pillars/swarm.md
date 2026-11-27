@@ -92,6 +92,28 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   a seat whose recorded pane herdr shows running an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
 
+### Saved local commands
+
+Use `quick up --command` with a JSON argument list for all engineers, or repeat
+`--engineer-command` with `N=JSON` to override engineer N. Numbers start at one
+and exclude the master. For example, `--harness claude,codex,program` can combine
+two native wrappers and a local watcher. A `program` seat requires a command.
+The executable is resolved against the selected directory and caller's `PATH`;
+spaces and shell characters in arguments remain literal. Credentials belong in
+the program's environment or an existing named native authentication reference.
+
+Wrappers retain native authentication, profile setup, opening prompt and session
+binding. The wrapper receives its saved argv prefix followed by generated native
+CLI arguments, and `AGENTIHOOKS_QUICK_PROMPT_FILE` names its opening prompt file.
+It must forward the arguments and environment to the declared native CLI.
+Ordinary programs use recorded process identity instead of hook acknowledgements;
+the tick never types agent prompts into them. They have no agent hooks or
+automatic conversational handoff. Room messages stay stored.
+
+Initial launch, retry and manual or forced relaunch reuse the saved argv and
+native authentication choice. Status and master context show safe command
+identity and lifecycle capabilities. See [the CLI examples](../reference/cli-commands.md#agentihooks-quick).
+
 ### Native quick authentication
 
 `quick up --auth default` starts native engineers on each CLI's ordinary local

@@ -38,7 +38,11 @@
         "tests/quick/test_recipe.py::test_a_program_cannot_claim_a_reused_pid_on_its_first_observation",
         "tests/quick/test_recipe.py::test_a_program_identity_is_recorded_before_the_first_observer",
         "tests/quick/test_recipe.py::test_command_lookup_is_saved_from_the_selected_directory_and_path",
-        "tests/quick/test_recipe.py::test_master_context_reports_command_identity_and_capabilities"
+        "tests/quick/test_recipe.py::test_master_context_reports_command_identity_and_capabilities",
+        "tests/quick/test_recipe.py::test_the_real_launcher_delivers_literal_arguments_and_its_directory",
+        "tests/quick/test_recipe.py::test_a_forced_program_stop_targets_only_its_verified_process",
+        "tests/quick/test_recipe.py::test_a_program_with_a_common_named_choice_needs_no_native_account",
+        "tests/quick/test_recipe.py::test_a_command_option_keeps_the_up_subcommand"
       ],
       "rules": [
         "quick-program-busy-refusal"

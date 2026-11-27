@@ -29,7 +29,10 @@ def parser() -> argparse.ArgumentParser:
     up.add_argument("--agents", type=int, default=layout.DEFAULT_AGENTS, help="Agents with the master, 2 to 5")
     up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex,program")
     up.add_argument(
-        "--command", default="", help="JSON argument list every engineer runs instead of its built in launch"
+        "--command",
+        dest="command_argv",
+        default="",
+        help="JSON argument list every engineer runs instead of its built in launch",
     )
     up.add_argument(
         "--engineer-command",
@@ -79,7 +82,9 @@ def _swarm_for(
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
     policies = selections(args.auth, harnesses, environ)
-    commands = recipe.recipes(args.command, args.engineer_command or [], harnesses, environ)
+    commands = recipe.recipes(
+        args.command_argv, args.engineer_command or [], harnesses, {**environ, "PWD": str(directory)}
+    )
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -124,7 +129,7 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
         registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
     for seat in _launch_registry(folder).seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+        print(json.dumps(_status_row(seat)))
     if failed:
         print(f"agentihooks quick: {', '.join(failed)} did not start; the next round retries it", file=sys.stderr)
     return 1 if failed else 0
@@ -140,7 +145,7 @@ def _member(environ: Mapping[str, str]) -> member.Member:
 def _status_row(seat: registry.Seat) -> dict[str, object]:
     row: dict[str, object] = {key: value for key, value in dataclasses.asdict(seat).items() if key != "command"}
     if seat.position > 1:
-        row["automatic_tiers"] = seat.auth == "routed"
+        row["automatic_tiers"] = recipe.kind(seat) != recipe.PROGRAM and seat.auth == "routed"
     return {**row, "identity": recipe.identity(seat), "capabilities": recipe.capabilities(seat)}
 
 

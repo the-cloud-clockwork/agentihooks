@@ -4,6 +4,8 @@ import json
 import os
 import shlex
 import shutil
+import signal
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -43,17 +45,22 @@ def _override(text: str, engineers: int) -> tuple[int, tuple[str, ...]]:
     return int(number), parse(argv)
 
 
-def _found(executable: str, environ: Mapping[str, str]) -> bool:
+def _found(executable: str, environ: Mapping[str, str]) -> str | None:
+    directory = Path(environ.get("PWD", os.getcwd()))
     if "/" in executable:
-        return Path(executable).is_file() and os.access(executable, os.X_OK)
-    return shutil.which(executable, path=environ.get("PATH")) is not None
+        candidate = directory / executable
+        return str(candidate.resolve()) if candidate.is_file() and os.access(candidate, os.X_OK) else None
+    search = os.pathsep.join(str(directory / entry) for entry in environ.get("PATH", os.defpath).split(os.pathsep))
+    return shutil.which(executable, path=search)
 
 
-def _check(argv: tuple[str, ...], environ: Mapping[str, str]) -> None:
-    if not _found(argv[0], environ):
-        raise QuickError(f"command program {Path(argv[0]).name} was not found or cannot be run")
+def _check(argv: tuple[str, ...], environ: Mapping[str, str]) -> tuple[str, ...]:
     if any(secrets.scan(item) for item in argv):
         raise QuickError("a command argument looks like a credential; let the program read it from its own environment")
+    executable = _found(argv[0], environ)
+    if executable is None:
+        raise QuickError(f"command program {Path(argv[0]).name} was not found or cannot be run")
+    return (executable, *argv[1:])
 
 
 def recipes(
@@ -64,11 +71,11 @@ def recipes(
     for text in overrides:
         number, argv = _override(text, len(harnesses))
         commands[number - 1] = argv
-    for harness, argv in zip(harnesses, commands, strict=True):
+    for index, (harness, argv) in enumerate(zip(harnesses, commands, strict=True)):
         if harness == PROGRAM and not argv:
             raise QuickError("a program engineer needs a command")
         if argv:
-            _check(argv, environ)
+            commands[index] = _check(argv, environ)
     return commands
 
 
@@ -93,12 +100,13 @@ def identity(seat: Seat) -> dict[str, str | int]:
 
 
 def script(argv: Sequence[str], exports: Mapping[str, str], pid_file: Path, directory: str) -> str:
-    """The seat launcher: export the quick variables, enter the directory, record the process and exec ``argv``."""
+    recorder = "from pathlib import Path; import sys; from scripts.quick.recipe import record; record(Path(sys.argv[1]), int(sys.argv[2]))"
     lines = [
         "#!/usr/bin/env bash",
+        "set -euo pipefail",
         *(f"export {name}={shlex.quote(value)}" for name, value in sorted(exports.items())),
         f"cd -- {shlex.quote(directory)}",
-        f'echo "$$" > {shlex.quote(str(pid_file))}',
+        f'{shlex.join([sys.executable, "-c", recorder, str(pid_file)])} "$$"',
         f"exec {shlex.join(argv)}",
     ]
     return "\n".join(lines) + "\n"
@@ -111,26 +119,32 @@ def forget(seat_dir: Path) -> None:
 
 
 def alive(seat_dir: Path, proc_root: Path = Path("/proc")) -> bool:
-    """Whether the launcher's recorded process runs as the process first seen: its pid and its start time.
-
-    The first look records that identity, so a later process that reuses the pid never reads as the seat's program.
-    """
     try:
         pid = int((seat_dir / PID).read_text().strip())
+        seen = (seat_dir / SEEN).read_text()
     except (OSError, ValueError):
         return False
     found = proc.processes(proc_root).get(pid)
-    if found is None:
-        return False
-    seen = f"{pid} {found.start_time}"
-    mark = seat_dir / SEEN
-    if not mark.exists():
-        mark.write_text(seen)
-    return mark.read_text() == seen
+    return found is not None and found.state not in ("Z", "X") and seen == f"{pid} {found.start_time}"
 
 
 def record(pid_file: Path, pid: int) -> None:
-    pass
+    process = proc.processes(Path("/proc"))[pid]
+    pid_file.with_name(SEEN).write_text(f"{pid} {process.start_time}")
+    pid_file.write_text(str(pid))
+
+
+def stop(seat_dir: Path) -> None:
+    try:
+        pid = int((seat_dir / PID).read_text())
+        descriptor = os.pidfd_open(pid)
+    except (OSError, ValueError):
+        return
+    try:
+        if alive(seat_dir):
+            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+    finally:
+        os.close(descriptor)
 
 
 def execute_native(
@@ -140,4 +154,11 @@ def execute_native(
     *,
     execvpe: Callable[[str, list[str], Mapping[str, str]], object] = os.execvpe,
 ) -> None:
-    pass
+    from scripts.quick import member, paths
+
+    found = member.find(environ)
+    child = dict(environ)
+    if found is not None and found.seat.harness == harness and kind(found.seat) == "wrapper":
+        command = [*found.seat.command, *command[1:]]
+        child[PROMPT_ENV] = str(paths.opening(found.folder, found.seat.seat))
+    execvpe(command[0], command, child)

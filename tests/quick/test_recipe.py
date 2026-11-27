@@ -45,7 +45,7 @@ class Panes:
     def run(self, pane_id: str, launcher: Path) -> bool:
         self.runs.append((pane_id, launcher))
         if self.write_pid:
-            (launcher.parent / recipe.PID).write_text(f"{os.getpid()}\n")
+            recipe.record(launcher.parent / recipe.PID, os.getpid())
         return True
 
 
@@ -121,7 +121,7 @@ def test_an_executable_is_found_on_the_callers_path_or_refused(tmp_path: Path) -
     tool = tmp_path / "my tool"
     tool.write_text("#!/bin/sh\n")
     tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
-    assert recipe.recipes('["my tool"]', [], ["program"], {"PATH": str(tmp_path)}) == [("my tool",)]
+    assert recipe.recipes('["my tool"]', [], ["program"], {"PATH": str(tmp_path)}) == [(str(tool),)]
     with pytest.raises(QuickError):
         recipe.recipes('["my tool"]', [], ["program"], {"PATH": str(tmp_path / "empty")})
 
@@ -162,7 +162,7 @@ def test_the_launcher_keeps_every_argument_literal_and_records_its_process(tmp_p
     assert lines[0] == "#!/usr/bin/env bash"
     assert "export AGENTIHOOKS_QUICK_SEAT='eng 1'" in lines
     assert f"cd -- {shlex.quote('/work dir')}" in lines
-    assert f'echo "$$" > {shlex.quote(str(tmp_path / "pid file"))}' in lines
+    assert any("record" in line and shlex.quote(str(tmp_path / "pid file")) in line for line in lines)
     assert lines[-1] == f"exec {shlex.join(argv)}"
     assert shlex.split(lines[-1].removeprefix("exec ")) == list(argv)
 
@@ -171,7 +171,7 @@ def test_the_launcher_keeps_every_argument_literal_and_records_its_process(tmp_p
 def test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    swarm = _swarm(tmp_path, (TOOL, "two words"), harness="claude")
+    swarm = _swarm(tmp_path, (TOOL, "two words"), harness="program")
     panes = Panes()
     monkeypatch.setattr(tick, "LiveHerdr", panes)
 
@@ -182,7 +182,7 @@ def test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent(
     [(pane, launcher)] = panes.runs
     text = launcher.read_text()
     assert pane == "w1:p2" and os.access(launcher, os.X_OK)
-    assert f"export {recipe.PROMPT_ENV}={shlex.quote(str(paths.opening(tmp_path, 'eng-1')))}" in text
+    assert recipe.PROMPT_ENV not in text
     assert "export AGENTIHOOKS_QUICK_SEAT=eng-1" in text and f"export AGENTIHOOKS_QUICK_DIR={tmp_path}" in text
     assert text.splitlines()[-1] == f"exec {shlex.join((TOOL, 'two words'))}"
 
@@ -215,6 +215,7 @@ def test_start_all_starts_command_and_native_engineers_each_their_own_way(
     swarm = _swarm(tmp_path, (TOOL,))
     native = registry.Seat(3, "eng-2", "w1:p3", "codex", "quick-abc-eng-2")
     swarm = registry.Swarm(swarm.quick_id, swarm.directory, (*swarm.seats, native))
+    registry.save(tmp_path, swarm)
     paths.create(tmp_path, ["eng-2"])
     panes = Panes()
     monkeypatch.setattr(tick, "LiveHerdr", panes)
@@ -272,18 +273,30 @@ def test_a_relaunched_wrapper_still_waits_for_its_native_session(
 ) -> None:
     _swarm(tmp_path, (TOOL,), harness="claude")
     registry.set_state(tmp_path, "eng-1", registry.PENDING)
-    panes = Panes()
-    monkeypatch.setattr(tick, "LiveHerdr", panes)
+    calls: list[list[str]] = []
+
+    def start(arguments: list[str], environ: dict[str, str]) -> int:
+        calls.append(arguments)
+        return 0
+
     shells = iter([True])
     outcome = launch.relaunch(
-        tmp_path, "eng-1", {}, bare=lambda pane: next(shells, False), sleep=lambda seconds: None, wait_s=0.0
+        tmp_path,
+        "eng-1",
+        {},
+        bare=lambda pane: next(shells, False),
+        start=start,
+        sleep=lambda seconds: None,
+        wait_s=0.0,
     )
-    assert outcome == "unbound" and len(panes.runs) == 1
+    assert outcome == "unbound" and len(calls) == 1
+    assert calls[0][calls[0].index("--agent") + 1] == "claude"
 
 
 @pytest.mark.feature("quick-local-command")
 def test_force_and_relaunch_reuse_the_saved_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _swarm(tmp_path, (TOOL, "keep me"))
+    monkeypatch.setattr(recipe, "stop", lambda folder: None)
     panes = Panes()
     monkeypatch.setattr(tick, "LiveHerdr", panes)
     outcome = launch.force(
@@ -449,3 +462,62 @@ def test_master_context_reports_command_identity_and_capabilities(tmp_path: Path
     assert "agent hooks unavailable" in text
     assert "automatic handoff unavailable" in text
     assert "prompt typing unavailable" in text
+
+
+@pytest.mark.feature("quick-local-command")
+def test_the_real_launcher_delivers_literal_arguments_and_its_directory(tmp_path: Path) -> None:
+    import subprocess
+
+    directory = tmp_path / "work folder"
+    directory.mkdir()
+    result = tmp_path / "received.json"
+    code = "import json, os, sys; from pathlib import Path; Path(sys.argv[1]).write_text(json.dumps([sys.argv[2:], os.getcwd(), os.getenv('AGENTIHOOKS_QUICK_SEAT')]))"
+    arguments = ("two words", "$HOME;literal", "'quoted'", "*")
+    launcher = tmp_path / "command.sh"
+    launcher.write_text(
+        recipe.script(
+            (sys.executable, "-c", code, str(result), *arguments),
+            {member.SEAT_ENV: "eng-1"},
+            tmp_path / recipe.PID,
+            str(directory),
+        )
+    )
+    completed = subprocess.run(["bash", str(launcher)], capture_output=True, check=False, timeout=15)
+    assert completed.returncode == 0, completed.stderr.decode()
+    assert json.loads(result.read_text()) == [list(arguments), str(directory), "eng-1"]
+    assert (tmp_path / recipe.SEEN).read_text().startswith((tmp_path / recipe.PID).read_text() + " ")
+    assert not recipe.alive(tmp_path)
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("live", [True, False])
+def test_a_forced_program_stop_targets_only_its_verified_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live: bool
+) -> None:
+    (tmp_path / recipe.PID).write_text("7")
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(recipe.os, "pidfd_open", lambda pid: calls.append(("open", pid)) or 9)
+    monkeypatch.setattr(recipe, "alive", lambda folder: live)
+    monkeypatch.setattr(recipe.signal, "pidfd_send_signal", lambda fd, sig: calls.append(("signal", fd)))
+    monkeypatch.setattr(recipe.os, "close", lambda fd: calls.append(("close", fd)))
+    recipe.stop(tmp_path)
+    assert calls == [("open", 7), *([("signal", 9)] if live else []), ("close", 9)]
+
+
+@pytest.mark.feature("quick-local-command")
+def test_a_program_with_a_common_named_choice_needs_no_native_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.quick import authentication
+
+    monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+    assert authentication.selections("named:external", ["program"], {}) == [("default", "")]
+
+
+@pytest.mark.feature("quick-local-command")
+def test_a_command_option_keeps_the_up_subcommand() -> None:
+    from scripts.quick import cli
+
+    found = cli.parser().parse_args(["up", "--command", '["/usr/bin/env"]'])
+    assert found.command == "up"
+    assert found.command_argv == '["/usr/bin/env"]'

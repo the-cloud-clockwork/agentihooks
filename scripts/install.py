@@ -5329,6 +5329,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     )
     from scripts.hive.account_slots import execute
     from scripts.master_claude_login import _token_lock
+    from scripts.quick.recipe import execute_native
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5374,7 +5375,9 @@ def cmd_claude(extra_args: list[str]) -> None:
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
+            execute(
+                "claude", "unrouted", os.environ, lambda env: execute_native("claude", cmd, env, execvpe=os.execvpe)
+            )
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
@@ -5390,7 +5393,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         "claude",
         decision.account,
         launch_environment(decision, os.environ),
-        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+        lambda env: execute_native("claude", _claude_command(claude_bin, extra_args), env, execvpe=os.execvpe),
     )
 
 
