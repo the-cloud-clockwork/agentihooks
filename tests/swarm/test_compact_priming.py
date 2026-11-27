@@ -120,6 +120,35 @@ def test_a_seatless_transfer_with_a_handoff_keeps_its_history_without_a_confirma
 
 
 @pytest.mark.feature("seat-brief")
+def test_an_unseated_transfer_keeps_its_inline_handoff_after_the_exact_confirmation() -> None:
+    transfer = _task("eng", "claude")["transfer"]
+    assert transfers.priming("sw", transfer, seated=False) == (
+        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
+        f"agentihooks swarm sw confirm-handoff transfer-fixed --next {shlex.quote(ACTION)}\n{transfer['handoff']}"
+    )
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize("key", ["recaps", "learned"])
+def test_a_seat_with_only_recaps_or_learned_notes_carries_history(key: str) -> None:
+    lines = prompt.priming_lines({"seat": "eng-1@sw", key: [{"occupant": "earlier", "text": "x", "maturity": "note"}]})
+    assert lines == ["Your seat eng-1@sw carries what earlier occupants left.", prompt.SEAT_BRIEF]
+
+
+@pytest.mark.feature("seat-brief")
+def test_an_envelope_alone_still_prints_its_runtime_metadata_and_orders() -> None:
+    envelope = {"reason": "compact", "orders": ["Finish the outstanding order."]}
+    lines = prompt.priming_lines({"seat": "eng-1@sw", "handoff_envelope": envelope})
+    assert lines[1:] == [
+        "Handoff runtime envelope:",
+        '{\n  "reason": "compact"\n}',
+        *prompt.order_lines(envelope),
+        prompt.SEAT_BRIEF,
+    ]
+    assert "Finish the outstanding order." in lines
+
+
+@pytest.mark.feature("seat-brief")
 def test_deferred_bodies_are_not_traced_as_delivered_inline() -> None:
     task = _task("eng", "claude")
     assert priming_trace.rows("sw", task) == []

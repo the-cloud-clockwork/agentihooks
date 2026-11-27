@@ -449,7 +449,7 @@ def priming_lines(task: dict[str, Any]) -> list[str]:
     if transfer and task.get("seat"):
         from scripts.handoff import transfers
 
-        lines.append(transfers.priming(task["seat"].rsplit("@", 1)[1], transfer))
+        lines.append(transfers.priming(task["seat"].rpartition("@")[2], transfer))
     if task.get("handoff") or task.get("handoff_envelope") or transfer:
         lines += handoff_lines(task)
     return [*lines, SEAT_BRIEF]

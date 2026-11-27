@@ -233,7 +233,8 @@ def test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff(
     runtime = ResumingRuntime()
     restore(store, runtime)
     text = runtime.resumed[0][2]
-    assert text.startswith(resume.restored_text("sw", agent(seat="eng-1@sw"), snapshot.ledger_source("sw")))
+    restored = resume.restored_text("sw", agent(seat="eng-1@sw"), snapshot.ledger_source("sw"))
+    assert text.startswith(f"{restored}\n{prompt.SEAT_BRIEF}\n")
     assert text.count(prompt.SEAT_BRIEF) == 1
     assert "resume-body-sentinel" not in text
     assert "agentihooks swarm sw confirm-handoff " in text
@@ -313,7 +314,10 @@ def test_an_unseated_resume_retains_its_inline_handoff_without_a_seat_brief(
     outcomes = resume.reopen(store, "sw", {worker.name: str(tmp_path)}, runtime, 1_000, ledger, has_quota=always)
     assert outcomes[0].outcome == resume.RESUMED
     ((_, _, text),) = runtime.resumed
-    assert text.startswith(resume.restored_text("sw", worker, ledger))
+    assert text.startswith(
+        f"{resume.restored_text('sw', worker, ledger)}\nRead this handoff before continuing. Confirm you read it and "
+        "will take its first Next action by running agentihooks swarm sw confirm-handoff "
+    )
     assert prompt.SEAT_BRIEF not in text
     assert handoff in text
     transfer, flag, action = shlex.split(text.split("confirm-handoff ", 1)[1].splitlines()[0])
