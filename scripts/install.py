@@ -5386,7 +5386,6 @@ def cmd_claude(extra_args: list[str]) -> None:
         f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
     execute(
         "claude",
         decision.account,
