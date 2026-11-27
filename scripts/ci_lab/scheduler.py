@@ -680,10 +680,10 @@ def _lost(slots: Sequence[Slot]) -> str:
 
 
 def _fallback(state: State) -> str:
-    """Return the line the summary of a fallback grade's required check adds: that GitHub held no test merge of
-    the head and the lab graded it against its event base instead."""
+    """Return the line the summary of a fallback grade's required check adds: that the lab got no test merge of
+    the head from GitHub within the bound of tries and graded the head itself against its event base."""
     return (
-        f"\nGitHub held no test merge of {state.head} with that head as its second parent, so the lab graded "
+        f"\nThe lab got no test merge of {state.head} from GitHub within {UNMERGED_TRIES} tries, so it graded "
         "the head itself against its event base."
     )
 
@@ -789,8 +789,9 @@ def _slug(repo: str) -> str:
 
 def summary(state: State) -> dict[str, Any]:
     """Return a grade as GET /grades/<sha> shows it: what it grades, its class and lane, how many of its units are
-    final, its conclusion once it closed, each check run's last post, the test merge GitHub built for a pull
-    request grade, if resolved, and whether it gave up waiting for one and graded the bare head instead."""
+    final, its conclusion once it closed, each check run's last post, and, for a pull request grade that resolved
+    the test merge GitHub built for it or gave up waiting for one, the graded commit or the fallback flag; every
+    other grade carries neither key, as it did before either existed."""
     checks = {
         check: {"status": status, "conclusion": conclusion} for check, (status, conclusion) in state.posted.items()
     }
@@ -807,8 +808,8 @@ def summary(state: State) -> dict[str, Any]:
         "superseded": state.superseded,
         "units": {"total": len(state.units), "final": sum(1 for slot in state.units.values() if slot.outcome)},
         "checks": checks,
-        "graded_commit": state.graded_commit or None,
-        "merge_fallback": state.merge_fallback,
+        **({"graded_commit": state.graded_commit} if state.graded_commit else {}),
+        **({"merge_fallback": True} if state.merge_fallback else {}),
     }
 
 
@@ -1192,7 +1193,7 @@ class Scheduler:
                         )
                         actions.append(f"cannot expand {request.head}: {refusal}")
                         actions.extend(self._refuse(request, ref, refusal, now_ms))
-                except (Unmerged, merges.MergeUnanswered) as error:
+                except (Unmerged, merges.MergeRefused) as error:
                     self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
                     actions.append(f"holding {request.head}: {error}")
                 except (
@@ -1375,9 +1376,10 @@ class Scheduler:
     def _merge_resolution(self, request: GradeRequest, tries: int) -> tuple[GradeRequest, bool]:
         """Resolve the test merge GitHub built for a pull request or hotfix request that is not a plant: with the
         merge, the request graded on it and no fallback; with none yet and `tries` under `UNMERGED_TRIES`, raise
-        Unmerged, MergeUnanswered or MergePending for the caller to hold and spend one more try on; at the bound,
-        the request bare with its fallback remembered. A request naming no pull request, or a plant, resolves
-        nothing and starts bare with no fallback."""
+        Unmerged, or let a refused, unanswered or still pending resolution raise its own `merges.MergeRefused`
+        family, for the caller to hold and spend one more try on; at the bound, the request bare with its
+        fallback remembered. A request naming no pull request, or a plant, resolves nothing and starts bare
+        with no fallback."""
         if not (request.pull_number and not request.plant):
             return request, False
         if tries >= UNMERGED_TRIES:
@@ -1392,13 +1394,13 @@ class Scheduler:
 
     def _regrade(self, state: State, request: GradeRequest, now_ms: int) -> list[str]:
         """Start a required-frame regrade of state's head, holding it on a manifest fetch or merge resolution still
-        pending; an unmerged resolution also counts as one of its tries, kept on the grade document across passes
-        and restarts."""
+        pending; any other failed merge resolution also counts as one of its tries, kept on the grade document
+        across passes and restarts."""
         try:
             return [self._start(request, state.lane, state.ref, now_ms, name="", tries=state.unmerged)]
         except (FetchPending, FetchUnanswered, merges.MergePending) as error:
             return [f"holding the required-frame regrade of {state.head}: {error}"]
-        except (Unmerged, merges.MergeUnanswered) as error:
+        except (Unmerged, merges.MergeRefused) as error:
             state.unmerged += 1
             self._keep(state)
             return [f"holding the required-frame regrade of {state.head}: {error}"]
@@ -1494,12 +1496,15 @@ class Scheduler:
         return None if run is None else self.grade(run)
 
     def _supersede(self, request: GradeRequest, lane: str) -> dict[str, str]:
-        """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
+        """Drop the pending and held units of the lane's older head, or of its own older grade once a newer merge
+        resolved for the same head and the required frame did not otherwise change, carrying nothing forward from
+        a grade of a different merge since it graded a different tree; return the dropped head's unfinished jobs
+        by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
         if old is None:
             return {}
-        if old.head == request.head:
+        if old.head == request.head and old.graded_commit == request.graded_commit:
             if old.required != list(_frame_required(old.tier, _scope(old))):
                 return self._replace_frame(old)
             return {}
@@ -1509,6 +1514,8 @@ class Scheduler:
             if slot.held:
                 slot.held, slot.outcome = False, DROPPED
         self.save(old)
+        if old.head == request.head:
+            return {}
         return {
             ref: slot.job
             for ref, slot in old.units.items()

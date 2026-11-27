@@ -2762,12 +2762,14 @@ repository's store under its root already holds it.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
-each held under `merges.Background` and reused for `FRESH_S` (30) seconds once resolved or `ABSENT_S` (10)
-seconds once found absent, so a pass asking again soon after rarely repeats the GitHub read. A head whose merge
-GitHub has not built yet, whose read was refused or unanswered, or whose resolution ran past `merges.BOUND_S`
-(45) seconds, waits out its quiet window again with the try counted in its waiting entry; at the `UNMERGED_TRIES`
-(4) one the lab stops asking and grades the bare head against its event base instead, as it did before this
-merge resolution existed, and the grade's required check names that it did. A live grade whose `required` frame
+each held under `merges.Background` and reused for `FRESH_S` (30) seconds once resolved, so a pass asking
+again soon after a found merge rarely repeats the GitHub read; an absent answer or a failed resolution is read
+once and forgotten, so the next pass that asks always reads GitHub again. A head whose merge GitHub has not
+built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose
+resolution ran past `merges.BOUND_S` (45) seconds, waits out its quiet window again with the try counted in its
+waiting entry; at the `UNMERGED_TRIES` (4) one the lab stops asking and grades the bare head against its event
+base instead, as it did before this merge resolution existed, and the grade's required check names that the lab
+got no test merge within that many tries, true of every one of those causes. A live grade whose `required` frame
 goes stale (a release requirement changed after it started) regrades through the same bound: the regrade keeps
 its own count of tries on the grade document across passes and restarts, so a pull request or hotfix regrade
 whose merge has not resolved again yet holds rather than failing the check, and reaches the same bare-head

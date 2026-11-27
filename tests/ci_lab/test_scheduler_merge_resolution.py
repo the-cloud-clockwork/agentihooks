@@ -7,6 +7,7 @@ only when its second parent is the head. While GitHub has none yet, the head is 
 
 import threading
 from collections.abc import Callable
+from concurrent.futures import wait as wait_futures
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -70,6 +71,27 @@ def test_a_resolved_merge_grades_the_merge_commit_with_the_head_on_every_check_r
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_summary_carries_the_graded_commit_key_of_a_resolved_grade_and_the_fallback_key_of_one(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    resolved = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    resolved.engine.ports = replace(resolved.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    _push(resolved, HEAD_A, 41)
+    resolved.tick(1000)
+    assert scheduler.summary(resolved.grade(HEAD_A))["graded_commit"] == MERGE
+    assert "merge_fallback" not in scheduler.summary(resolved.grade(HEAD_A))
+
+    fallen_back = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    fallen_back.engine.ports = replace(fallen_back.engine.ports, merges=Mock(return_value=None))
+    _push(fallen_back, HEAD_A, 41)
+    for _ in range(scheduler.UNMERGED_TRIES + 1):
+        fallen_back.tick(1000)
+    assert scheduler.summary(fallen_back.grade(HEAD_A))["merge_fallback"] is True
+    assert "graded_commit" not in scheduler.summary(fallen_back.grade(HEAD_A))
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
@@ -130,6 +152,7 @@ def test_a_required_frame_regrade_with_no_merge_yet_holds_then_falls_back_at_the
     replacement = next(grade for grade in run.grades() if grade.run != old.run)
     assert replacement.merge_fallback is True
     assert replacement.graded_commit == ""
+    assert port.call_count == scheduler.UNMERGED_TRIES + 1
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -152,6 +175,23 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_hotfix_head_with_no_merge_yet_spends_one_real_read_per_try(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    run.lab.fixes.add(HEAD_A)
+    port = Mock(return_value=None)
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    for i in range(scheduler.UNMERGED_TRIES):
+        run.tick(1000 + i * 2000)
+        assert run.grades() == []
+    actions = run.tick(1000 + scheduler.UNMERGED_TRIES * 2000)
+    assert actions[-1].startswith("grading ")
+    assert run.grade(HEAD_A).merge_fallback is True
+    assert port.call_count == scheduler.UNMERGED_TRIES
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
@@ -164,6 +204,107 @@ def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound
     assert actions[0].startswith("grading ")
     assert run.grade(HEAD_A).merge_fallback is True
     assert port.call_count == scheduler.UNMERGED_TRIES
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_refused_pull_request_read_holds_the_head_and_posts_no_failed_check(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    port = Mock(side_effect=merges.MergeRefused("GET pulls/41 answered 404"))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    actions = run.tick(1000)
+    assert actions[-1].startswith(f"holding {HEAD_A}: GET pulls/41 answered 404")
+    assert run.grades() == []
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_an_arbitrary_resolver_error_through_background_holds_the_head_and_posts_no_failed_check(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+
+    def broken(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        raise RuntimeError("boom")
+
+    background = merges.Background(broken)
+    run.engine.ports = replace(run.engine.ports, merges=background)
+    _push(run, HEAD_A, 41)
+    held = run.tick(1000)
+    assert held[-1].endswith("is still resolving")
+    wait_futures([future for _, future in background.resolutions.values()])
+    actions = run.tick(1100)
+    assert actions[-1].startswith(f"holding {HEAD_A}: the merge of {REPO}#41 for {HEAD_A} failed: boom")
+    assert run.grades() == []
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_refused_pull_request_read_holds_the_required_frame_regrade(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    port.side_effect = merges.MergeRefused("GET pulls/41 answered 404")
+    actions = run.tick(2000)
+    assert any("holding the required-frame regrade" in action for action in actions)
+    assert run.grade(HEAD_A).run == old.run
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_an_unanswered_pull_request_read_holds_the_required_frame_regrade(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    port.side_effect = merges.MergeUnanswered("GET pulls/41 answered 500")
+    actions = run.tick(2000)
+    assert any("holding the required-frame regrade" in action for action in actions)
+    assert run.grade(HEAD_A).run == old.run
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_an_arbitrary_resolver_error_holds_the_required_frame_regrade(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+
+    def broken(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        raise RuntimeError("boom")
+
+    background = merges.Background(broken)
+    run.engine.ports = replace(run.engine.ports, merges=background)
+    held = run.tick(2000)
+    assert any(action.endswith("is still resolving") for action in held)
+    assert run.grade(HEAD_A).run == old.run
+    wait_futures([future for _, future in background.resolutions.values()])
+    actions = run.tick(2100)
+    assert any("failed: boom" in action for action in actions)
+    assert run.grade(HEAD_A).run == old.run
+    assert run.lab.poster.posts == []
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -212,6 +353,29 @@ def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_un
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    other_merge, other_parent = "7" * 40, "6" * 40
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(side_effect=[(MERGE, PARENT), (other_merge, other_parent)])
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    run.cache(unit(1))
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    assert old.graded_commit == MERGE
+    event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested", pull_number=41)
+    run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
+    run.tick(2000)
+    live = [grade for grade in run.grades() if not grade.superseded]
+    assert [grade.head for grade in live] == [HEAD_A]
+    assert live[0].graded_commit == other_merge
+    assert live[0].run != old.run
+    assert any(post[0] == HEAD_A for post in run.lab.poster.posts)
+    assert port.call_count == 2
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_evidence_of_a_resolved_grade_names_its_head_and_graded_commit(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
@@ -250,8 +414,8 @@ def test_a_promotion_grade_resolves_no_merge_and_closes_with_no_fallback(lab: Ca
     assert grade.graded_commit == ""
     assert grade.merge_fallback is False
     assert grade.conclusion == "success"
-    assert scheduler.summary(grade)["graded_commit"] is None
-    assert scheduler.summary(grade)["merge_fallback"] is False
+    assert "graded_commit" not in scheduler.summary(grade)
+    assert "merge_fallback" not in scheduler.summary(grade)
 
 
 def _synthetic_merge(repo: Path, base: str, head: str, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -375,7 +539,9 @@ def test_a_fallback_grades_required_check_names_that_github_held_no_merge(lab: C
     for _ in range(scheduler.UNMERGED_TRIES + 1):
         run.tick(1000)
     output = _required_output(run, HEAD_A)
-    assert f"GitHub held no test merge of {HEAD_A}" in output.summary
+    assert (
+        f"The lab got no test merge of {HEAD_A} from GitHub within {scheduler.UNMERGED_TRIES} tries" in output.summary
+    )
     assert "graded the head itself against its event base" in output.summary
 
 
@@ -388,7 +554,7 @@ def test_a_grade_on_a_resolved_merge_names_no_fallback_on_its_required_check(lab
     _push(run, HEAD_A, 41)
     run.tick(1000)
     output = _required_output(run, HEAD_A)
-    assert "GitHub held no test merge" not in output.summary
+    assert "The lab got no test merge" not in output.summary
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -401,4 +567,4 @@ def test_a_grade_with_no_pull_request_number_names_no_fallback_on_its_required_c
     run.push(HEAD_A, lane=HEAD_A, event="pull_request", action="opened")
     run.tick(1000)
     output = _required_output(run, HEAD_A)
-    assert "GitHub held no test merge" not in output.summary
+    assert "The lab got no test merge" not in output.summary

@@ -192,3 +192,50 @@ def test_background_raises_unanswered_once_a_resolution_runs_past_its_bound() ->
     with pytest.raises(merges.MergeUnanswered, match="did not resolve within 5s"):
         background("example/repo", 41, HEAD)
     held.release.set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_reads_github_again_after_an_absent_answer() -> None:
+    held = Held({("example/repo", 41, HEAD): None})
+    clock = Clock()
+    background = merges.Background(held, clock=clock)
+    with pytest.raises(merges.MergePending):
+        background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    assert background("example/repo", 41, HEAD) is None
+    held.release.clear()
+    with pytest.raises(merges.MergePending):
+        background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
+    assert held.asked == [("example/repo", 41, HEAD), ("example/repo", 41, HEAD)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_wraps_any_other_error_of_the_resolver_as_unanswered() -> None:
+    held = Held({("example/repo", 41, HEAD): RuntimeError("boom")})
+    clock = Clock()
+    background = merges.Background(held, clock=clock)
+    with pytest.raises(merges.MergePending):
+        background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    with pytest.raises(merges.MergeUnanswered, match="boom"):
+        background("example/repo", 41, HEAD)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_passes_a_merge_refused_through_without_wrapping_it() -> None:
+    held = Held({("example/repo", 41, HEAD): merges.MergeRefused("GET pulls/41 answered 404")})
+    clock = Clock()
+    background = merges.Background(held, clock=clock)
+    with pytest.raises(merges.MergePending):
+        background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    with pytest.raises(merges.MergeRefused, match="answered 404"):
+        background("example/repo", 41, HEAD)

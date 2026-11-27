@@ -13,7 +13,9 @@ class Expander:
         self.seen.append(request)
         plan = self.plans[request.head]
         scope = plan.outputs.get("select", {}).get("scope", "none")
-        return replace(plan, required=scheduler._frame_required(int(request.tier), scope))
+        return replace(
+            plan, required=scheduler._frame_required(int(request.tier), scope), graded_commit=request.graded_commit
+        )
 
     def merge_base(self, repo: str, head: str) -> str:
         return self.plans[head].grader

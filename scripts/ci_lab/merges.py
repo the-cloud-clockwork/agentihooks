@@ -3,12 +3,16 @@ mirror.
 
 `resolve` reads one pull request, takes its `merge_commit_sha` and the git parents of that commit, bound by
 `GIT_TIMEOUT` seconds, and returns the merge and its first parent only when the merge's second parent is the head.
-GitHub answering with no merge yet raises nothing; a refused or unanswered request, or a fetch of the merge or a
-read of its parents that fails or runs past its timeout, raises `MergeUnanswered`. `Background` runs those
-resolutions off the scheduler pass on a thread pool, raising its subclass `MergePending` while one still runs
-under `bound_s` and `MergeUnanswered` once it has run past it, each counting as one try of the caller's own.
-`Resolver` keeps one GitHub reader per repository the lab grades, reading the repository's mirror through the
-port the scheduler gives it.
+GitHub answering with no merge yet raises nothing; a refused request raises `MergeRefused`, an unanswered one or
+a fetch of the merge or a read of its parents that fails or runs past its timeout raises the `MergeUnanswered`
+subclass; either is one try the caller may spend again. `Background` runs those resolutions off the scheduler
+pass on a thread pool, raising its subclass `MergePending` while one still runs under `bound_s` and
+`MergeUnanswered` once it has run past it; any other error a resolution thread raised, not already a
+`MergeRefused`, it raises wrapped as `MergeUnanswered` instead, so no error of a resolution ever reaches a
+caller as anything but the `MergeRefused` family. A found merge answers every call until `fresh_s` after it
+started; an absent answer and a failed resolution are each read once and gone, so the next call starts a new
+one. `Resolver` keeps one GitHub reader per repository the lab grades, reading the repository's mirror through
+the port the scheduler gives it.
 """
 
 import subprocess
@@ -24,7 +28,6 @@ from scripts.ci_lab.worktrees import Mirror
 from scripts.github_app import GitAuthRefused, GitHubAppAuth
 
 __all__ = [
-    "ABSENT_S",
     "BOUND_S",
     "FRESH_S",
     "GIT_TIMEOUT",
@@ -48,7 +51,6 @@ OK = 200
 SERVER_ERROR = 500
 WORKERS = 4
 FRESH_S = 30.0
-ABSENT_S = 10.0
 GIT_TIMEOUT = 30.0
 BOUND_S = 45.0
 
@@ -163,10 +165,11 @@ class Resolver:
 class Background:
     """Merge resolutions run off the scheduler pass on at most `workers` threads at once. A call starts the
     resolution of a pull request's head and raises MergePending while it still runs; a failed resolution then
-    raises its error once. A resolution still running past `bound_s` after it started raises MergeUnanswered
-    instead, counting as one try, and keeps running orphaned; a later call starts it again. A resolution that
-    found a merge answers every call until `fresh_s` after it started, so no merge stays in memory longer. One
-    that found none answers until `absent_s` after it started, so the next pass tries again soon."""
+    raises its error once, wrapped as MergeUnanswered when it is not already one of MergeRefused's own. A
+    resolution still running past `bound_s` after it started raises MergeUnanswered instead, counting as one
+    try, and keeps running orphaned; a later call starts it again. A resolution that found a merge answers
+    every call until `fresh_s` after it started, so no merge stays in memory longer; an absent answer is read
+    once and then gone, so the next call starts a new resolution and so reads GitHub again."""
 
     def __init__(
         self,
@@ -174,12 +177,10 @@ class Background:
         workers: int = WORKERS,
         fresh_s: float = FRESH_S,
         clock: Callable[[], float] = time.monotonic,
-        absent_s: float = ABSENT_S,
         bound_s: float = BOUND_S,
     ) -> None:
         self.resolve = resolve
         self.fresh_s = fresh_s
-        self.absent_s = absent_s
         self.clock = clock
         self.bound_s = bound_s
         self.pool = ThreadPoolExecutor(workers)
@@ -189,12 +190,10 @@ class Background:
         """Return the finished resolution of a pull request's head, or raise MergePending while it runs under
         `bound_s`, MergeUnanswered once it has run past it, and its error once it failed."""
         now = self.clock()
-        self.resolutions = {
-            key: (started, future)
-            for key, (started, future) in self.resolutions.items()
-            if not future.done() or now - started < self._kept_s(future)
-        }
         key = (repo, number, head)
+        self.resolutions = {
+            each: entry for each, entry in self.resolutions.items() if each == key or self._fresh(now, entry)
+        }
         if key not in self.resolutions:
             self.resolutions[key] = (now, self.pool.submit(self.resolve, repo, number, head))
         started, future = self.resolutions[key]
@@ -205,12 +204,20 @@ class Background:
                     f"the merge of {repo}#{number} for {head} did not resolve within {self.bound_s:.0f}s"
                 )
             raise MergePending(f"the merge of {repo}#{number} for {head} is still resolving")
-        if future.exception() is not None:
+        error = future.exception()
+        if error is not None:
+            del self.resolutions[key]
+            if isinstance(error, MergeRefused):
+                raise error
+            raise MergeUnanswered(f"the merge of {repo}#{number} for {head} failed: {error}") from error
+        if future.result() is None or now - started >= self.fresh_s:
             del self.resolutions[key]
         return future.result()
 
-    def _kept_s(self, future: Future[tuple[str, str] | None]) -> float:
-        """Return how long after its start a finished resolution keeps answering: the absent window when it found no
-        merge, the fresh window when it found one or failed."""
-        absent = future.exception() is None and future.result() is None
-        return self.absent_s if absent else self.fresh_s
+    def _fresh(self, now: float, entry: tuple[float, Future[tuple[str, str] | None]]) -> bool:
+        """Return whether a resolution not just read keeps answering: not yet finished, or finished with a found
+        merge inside its fresh window."""
+        started, future = entry
+        if not future.done():
+            return True
+        return future.exception() is None and future.result() is not None and now - started < self.fresh_s
