@@ -637,6 +637,7 @@ def publish_for_task(monkeypatch, slug, tmp_path, task_id, text=TASK_PLAN):
     return f"{ledger.BASE}/artifacts/{slug}/{file['id']}"
 
 
+@pytest.mark.feature("plan-publish-task")
 def test_publish_plan_with_neither_a_phase_nor_a_task_is_refused_naming_both(capsys):
     parser = ledger.build_parser()
     with pytest.raises(SystemExit) as raised:
@@ -706,6 +707,13 @@ def test_phaseless_tasks_share_a_slice_only_on_the_same_plan_and_phase_tasks_on_
     }
     assert plan_read.sharers(doc, doc["tasks"][0]) == ["c"]
     assert plan_read.sharers(doc, doc["tasks"][3]) == ["e"]
+
+
+def test_the_plan_pointer_of_a_phaseless_task_names_no_phase():
+    assert plan_read.pointer({"plan_lines": "15-17", "phase": ""}) == (
+        "Plan: run agentihooks plan read to read only your slice of the plan, lines 15-17 "
+        "with ten lines of margin each side."
+    )
 
 
 def test_publish_plan_refuses_an_unknown_or_phased_task_before_publishing(plan_ledger, tmp_path, monkeypatch, capsys):

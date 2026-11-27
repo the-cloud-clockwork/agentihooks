@@ -86,9 +86,10 @@ def linked(source: str, lines: str, margin: int = 0) -> str:
 def pointer(task: dict) -> str:
     if not task.get("plan_lines"):
         return ""
+    whole = f"; add --phase {task['phase']} for the whole phase" if task.get("phase") else ""
     return (
         f"Plan: run {COMMAND} to read only your slice of the plan, lines {task['plan_lines']} "
-        f"with ten lines of margin each side; add --phase {task.get('phase')} for the whole phase."
+        f"with ten lines of margin each side{whole}."
     )
 
 
