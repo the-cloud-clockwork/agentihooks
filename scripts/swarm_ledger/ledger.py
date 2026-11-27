@@ -15,11 +15,10 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       must be marked artifact requested, or ENTRY names his message that asked
                                       (task defaults to your swarm task). Proofs go on the task proof and the PR
   artifact-purge                      delete every artifact and trash row of the ledger with their files
-  publish-plan PATH --phase IDS|--task ID [--title T] [--repo OWNER/NAME]
+  publish-plan PATH --phase IDS [--title T] [--repo OWNER/NAME]
                                       publish an accepted plan: a GitHub issue where the repo has issues, else a
                                       ledger artifact; links it on each phase, comments the phase, and every task
-                                      added to those phases carries the link; --task links the stored plan and its
-                                      one slice on one task with no phase
+                                      added to those phases carries the link
   plan phases PATH                    append a plan's phases (JSON, the init-swarm content phases shape) to the
                                       ledger, planned automatically unless a phase names manual, which waits in
                                       review; a taken phase id refuses them all
