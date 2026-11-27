@@ -232,7 +232,6 @@ def test_reap_requeues_while_attempts_remain_then_marks_lost(jobs: queue.Queue) 
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.token("h1:test:a") == ""
     assert jobs.members("h1", "done") == {"h1:test:a"}
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
     assert jobs.members("h1", "leased") == set()
     assert jobs.pending() == ["h1:test:b"]
 
@@ -264,7 +263,6 @@ def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: 
     assert jobs.pending() == ["h1:test:b", "h1:test:a"]
     assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
     assert jobs.members("h1", "done") == set()
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
     assert jobs.retry(record) is False
 
     assert take(jobs, "h1:test:a", "w2", "t2")
@@ -411,13 +409,11 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     assert keys == {
         "agentihooks-ci:queue:seq",
         "agentihooks-ci:queue:pending",
-        "agentihooks-ci:queue:done",
         "agentihooks-ci:queue:head:h1:pending",
         "agentihooks-ci:queue:head:h1:done",
         "agentihooks-ci:queue:job:h1:test:a",
         "agentihooks-ci:queue:job:h1:test:b",
     }
-    assert client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
 
 
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
