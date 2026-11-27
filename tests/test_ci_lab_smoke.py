@@ -110,17 +110,29 @@ def test_both_image_smokes_import_a_module_planted_in_the_lab_package(
 
 
 @pytest.mark.feature("lab-image-smoke-imports")
+@pytest.mark.parametrize(
+    ("source", "error"),
+    [
+        (
+            "import a_dependency_no_image_installs\n",
+            "ModuleNotFoundError: No module named 'a_dependency_no_image_installs'",
+        ),
+        ("raise SystemExit(0)\n", "SystemExit: 0"),
+    ],
+    ids=["missing-dependency", "exit-at-import"],
+)
 def test_the_builder_names_the_first_module_that_does_not_import_and_stops(
-    plant: Callable[[str, str], str], imported: list[str], capsys: pytest.CaptureFixture[str]
+    source: str,
+    error: str,
+    plant: Callable[[str, str], str],
+    imported: list[str],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    broken = plant("planted_broken", "import a_dependency_no_image_installs\n")
+    broken = plant("planted_broken", source)
     modules = ci_lab_smoke.lab_modules()
     assert ci_lab_smoke.main(["json"]) == 1
     assert imported == modules[: modules.index(broken) + 1]
-    assert capsys.readouterr() == (
-        "",
-        f"{broken} does not import: ModuleNotFoundError: No module named 'a_dependency_no_image_installs'\n",
-    )
+    assert capsys.readouterr() == ("", f"{broken} does not import: {error}\n")
 
 
 @pytest.mark.feature("lab-image-smoke-imports")
