@@ -3,15 +3,17 @@ import error, and raises one setup alert per gate per hour naming the gate and t
 
 import io
 import json
+import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
 
 import pytest
 
-from scripts.gates import entry, log
+from scripts.gates import entry, import_failure, log
 from scripts.gates.base import Decision
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -62,10 +64,14 @@ class Stub:
 
 class World:
     def __init__(self, home: Path) -> None:
-        self.home, self.now, self.sent = home, START, []
+        self.home, self.now, self.sent, self.clients = home, START, [], []
 
     def clock(self) -> float:
         return self.now
+
+    def client(self, slug: str, timeout: float = 10) -> ResourceClient:
+        self.clients.append((slug, timeout))
+        return ResourceClient("http://ledger.invalid", {}, timeout, self.transport)
 
     def transport(self, slug: str, path: str, body: dict | None) -> dict:
         if body is None:
@@ -88,9 +94,7 @@ class World:
 def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
     held = World(tmp_path / "swarm")
     monkeypatch.setattr(time, "time", held.clock)
-    monkeypatch.setattr(
-        ledger, "client", lambda slug, timeout=10: ResourceClient("http://ledger.invalid", {}, timeout, held.transport)
-    )
+    monkeypatch.setattr(ledger, "client", held.client)
     return held
 
 
@@ -246,3 +250,146 @@ def test_separate_processes_share_one_alert_per_gate_per_hour(tmp_path):
     assert sent_items(tmp_path) == ["gate-import-absent", "gate-import-other", "gate-import-absent"]
     rows = log.gate_log_path(SLUG, tmp_path / "swarm").read_text().splitlines()
     assert len(rows) == 9
+
+
+def broken_by(error: BaseException) -> tuple:
+    def factory() -> object:
+        raise error
+
+    return (factory,)
+
+
+def stamps(home: Path) -> dict:
+    return json.loads((log.gates_dir(SLUG, home) / "import-alerts.json").read_text())
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_the_alert_carries_its_whole_text_and_an_operation_id_through_a_bounded_client(world, monkeypatch):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+    assert world.main("absent") == 0
+    op = world.sent[0][1]
+    assert op["text"] == (
+        f"The absent gate cannot import its implementation under {sys.executable} and lets every call through until "
+        "that interpreter is repaired: ModuleNotFoundError: No module named 'scripts.gates.absent_gate_module'"
+    )
+    assert re.fullmatch(r"alert_raise-[0-9a-f]{10}", op["id"])
+    assert world.clients == [(SLUG, 2.0)]
+    assert stamps(world.home) == {"absent": int(START * 1000)}
+    assert world.rows()[0]["at"] == int(START * 1000)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_swarm_member_without_a_name_alerts_as_the_swarm(world, monkeypatch):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+    assert world.main("absent", environ={"AGENTIHOOKS_SWARM": SLUG}) == 0
+    assert [op["by"] for _, op in world.sent] == ["swarm"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_long_import_error_is_cut_to_the_alert_limit(world, monkeypatch):
+    from scripts.swarm_ledger import ledger_alerts
+
+    monkeypatch.setitem(entry.GATES, "absent", broken_by(ImportError("x" * 3000)))
+    assert world.main("absent") == 0
+    assert len(world.sent[0][1]["text"]) == ledger_alerts.MAX_OUTCOME
+    assert world.rows()[0]["reason"].endswith("ImportError: " + "x" * 3000)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.parametrize(
+    "error", [ImportError("gone"), KeyError("revision"), OSError("down"), RuntimeError("refused"), SystemExit("no url")]
+)
+def test_any_send_failure_frees_the_hour_and_says_so(world, monkeypatch, capsys, error):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+
+    def failing(slug: str, path: str, body: dict | None) -> dict:
+        raise error
+
+    monkeypatch.setattr(ledger, "client", lambda slug, timeout=10: ResourceClient("http://x", {}, timeout, failing))
+    assert world.main("absent") == 0
+    assert f"agentihooks gate absent: alert not sent: {type(error).__name__}: " in capsys.readouterr().err
+    assert stamps(world.home) == {}
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_value_error_from_the_client_frees_the_hour(world, monkeypatch):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+
+    def refused(slug: str, timeout: float = 10) -> ResourceClient:
+        raise ValueError("one batch pins alerts to two revisions")
+
+    monkeypatch.setattr(ledger, "client", refused)
+    assert world.main("absent") == 0
+    assert stamps(world.home) == {}
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_unwritable_gate_state_lets_the_call_through_and_names_both_misses(world, monkeypatch, capsys):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+    log.gates_dir(SLUG, world.home).parent.mkdir(parents=True)
+    log.gates_dir(SLUG, world.home).write_text("")
+    assert world.main("absent") == 0
+    err = capsys.readouterr().err
+    assert "agentihooks gate absent: gate log row not written: " in err
+    assert "agentihooks gate absent: alert hour not claimed: " in err
+    assert world.sent == []
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_claim_that_cannot_be_freed_is_named(world, monkeypatch, capsys):
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+
+    def down(slug: str, path: str, body: dict | None) -> dict:
+        raise OSError("ledger down")
+
+    def stuck(slug: str, gate: str, stamp_ms: int, home: Path | str | None = None) -> None:
+        raise PermissionError("read only")
+
+    monkeypatch.setattr(ledger, "client", lambda slug, timeout=10: ResourceClient("http://x", {}, timeout, down))
+    monkeypatch.setattr(import_failure, "release", stuck)
+    assert world.main("absent") == 0
+    assert "agentihooks gate absent: alert hour not freed: PermissionError: read only" in capsys.readouterr().err
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_claim_drops_stamps_an_hour_old_and_keeps_younger_ones(tmp_path):
+    now = int(START * 1000)
+    assert import_failure.claim(SLUG, "old", now, tmp_path)
+    assert import_failure.claim(SLUG, "young", now + 1, tmp_path)
+    assert import_failure.claim(SLUG, "new", now + 3_600_000, tmp_path)
+    assert stamps(tmp_path) == {"young": now + 1, "new": now + 3_600_000}
+    assert not import_failure.claim(SLUG, "young", now + 3_600_000, tmp_path)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_release_drops_only_the_stamp_it_claimed(tmp_path):
+    now = int(START * 1000)
+    assert import_failure.claim(SLUG, "absent", now, tmp_path)
+    import_failure.release(SLUG, "absent", now + 1, tmp_path)
+    assert stamps(tmp_path) == {"absent": now}
+    import_failure.release(SLUG, "absent", now, tmp_path)
+    assert stamps(tmp_path) == {}
+    import_failure.release(SLUG, "other", now, tmp_path)
+    assert stamps(tmp_path) == {}
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_corrupt_stamp_file_is_read_as_empty(tmp_path):
+    log.gates_dir(SLUG, tmp_path).mkdir(parents=True)
+    (log.gates_dir(SLUG, tmp_path) / "import-alerts.json").write_text("{not json")
+    assert import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_simultaneous_claims_in_one_process_give_the_hour_once(tmp_path):
+    def take(_: int) -> bool:
+        return import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        taken = list(pool.map(take, range(16)))
+    assert taken.count(True) == 1
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_no_gate_name_exits_one(world):
+    assert entry.main([], io.StringIO(PAYLOAD), dict(ENV), world.home) == 1

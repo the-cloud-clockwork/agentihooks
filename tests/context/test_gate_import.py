@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks.context import conditions, profile_chain
+from hooks.context import conditions, gate_import, profile_chain
 from scripts.gates import log
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -188,3 +188,62 @@ def test_an_unreachable_ledger_keeps_the_call_allowed_and_the_next_failure_retri
     assert world.run("ls").decision is None
     assert len(world.rows()) == 2
     assert world.items() == ["gate-import-reruns"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_host_gate_shim_is_reported_under_its_host_gate_name(world):
+    world.write(
+        "pre-bash-prompt_guard.py", 'from scripts.gates.entry import main\n\nraise SystemExit(main(["prompts"]))\n'
+    )
+    assert world.run("ls").decision is None
+    assert [(row["gate"], row["kind"]) for row in world.rows()] == [("prompts", "fail-open")]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_call(world, monkeypatch, capsys):
+    import scripts.gates
+
+    monkeypatch.delattr(scripts.gates, "import_failure", raising=False)
+    monkeypatch.setitem(sys.modules, "scripts.gates.import_failure", None)
+    world.write("pre-bash-rerun_budget.py", IMPORTED)
+    assert world.run("ls").decision is None
+    assert world.rows() == [] and world.sent == []
+    condition = world.directory / "pre-bash-rerun_budget.py"
+    assert f"agentihooks gate reruns: import failure of {condition} not reported: " in capsys.readouterr().err
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.parametrize(
+    "body, gate",
+    [
+        (IMPORTED, "reruns"),
+        ("exec python -P -m scripts.gates quiet\n", "quiet"),
+        (IMPORTED + 'main(["identity"])\n', ""),
+        ("print('no gate here')\n", ""),
+    ],
+)
+def test_a_condition_names_its_gate_only_when_it_runs_exactly_one(tmp_path, body, gate):
+    path = tmp_path / "condition"
+    path.write_text(body)
+    assert gate_import.gate_name(path) == gate
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_an_unreadable_condition_names_no_gate(tmp_path):
+    assert gate_import.gate_name(tmp_path / "missing.py") == ""
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.parametrize(
+    "stderr, ext, found",
+    [
+        ("Traceback\n  File x\nModuleNotFoundError: No module named 'scripts'\n\n", ".py", sys.executable),
+        ("ImportError: cannot import name 'main'", ".sh", "an unknown interpreter"),
+        ("/usr/bin/python3: No module named scripts.gates\n", ".sh", "/usr/bin/python3"),
+        ("ModuleNotFoundError: No module named 'scripts'\nRuntimeError: later\n", ".py", None),
+        ("", ".py", None),
+    ],
+)
+def test_only_a_last_line_import_failure_counts(stderr, ext, found):
+    failed = gate_import.import_failure(stderr, ext)
+    assert (failed[1] if failed else None) == found
