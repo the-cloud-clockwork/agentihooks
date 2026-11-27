@@ -28,6 +28,7 @@
     "tests/ci_lab/test_scheduler_cache.py::test_logging_failure_cannot_prevent_invalid_marker_or_termination",
     "tests/ci_lab/test_scheduler_cache.py::test_unmarked_excess_is_reset_before_restart_consumers",
     "tests/ci_lab/test_scheduler_cache.py::test_startup_measurement_failure_refuses_before_consumers",
-    "tests/ci_lab/test_scheduler_cache.py::test_invalid_marker_failure_still_terminates"
+    "tests/ci_lab/test_scheduler_cache.py::test_invalid_marker_failure_still_terminates",
+    "tests/ci_lab/test_scheduler_cache.py::test_monitor_shutdown_failure_terminates_before_releasing_ownership"
   ]
 }

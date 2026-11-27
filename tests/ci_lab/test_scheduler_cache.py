@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from io import StringIO
 from pathlib import Path
 from threading import Event, Thread
@@ -504,3 +504,35 @@ def test_invalid_marker_failure_still_terminates(tmp_path: Path, monkeypatch: py
     with pytest.raises(OSError, match="filesystem full"):
         cache._invalidate(tmp_path, "budget exceeded")
     assert statuses == [1]
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_monitor_shutdown_failure_terminates_before_releasing_ownership(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    statuses: list[int] = []
+
+    class FailedMonitor:
+        def __init__(self, callback: Callable[[], None], *, every: float) -> None:
+            del callback
+            assert every == cache.SCAN_SECONDS
+
+        def start(self) -> None:
+            calls.append("started")
+
+        def close(self) -> None:
+            calls.append("closed")
+            raise RuntimeError("monitor did not stop")
+
+    def terminate(status: int) -> None:
+        statuses.append(status)
+        with pytest.raises(cache.PolicyError):
+            cache.run(lambda _found: 0, policy)
+
+    monkeypatch.setattr(cache, "Interval", FailedMonitor)
+    monkeypatch.setattr(cache, "_terminate", terminate)
+    assert cache.run(lambda _found: 0, policy) == 0
+    assert calls == ["started", "closed"]
+    assert statuses == [1]
+    assert (Path(policy[cache.ROOT]) / FIRST_POD / ".invalid").is_file()

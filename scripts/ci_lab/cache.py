@@ -7,11 +7,12 @@ import stat
 import sys
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
-from threading import Event, Thread
 from uuid import UUID
 
 from scripts.ci_lab import contract
+from scripts.scheduler.process_interval import Interval
 
 ROOT = "CI_LAB_CACHE_ROOT"
 LIMIT = "CI_LAB_CACHE_LIMIT_BYTES"
@@ -172,16 +173,14 @@ def _invalidate(generation: Path, reason: str) -> None:
         _terminate(1)
 
 
-def _watch(stop: Event, root: Path, generation: Path, limit: int) -> None:
-    while not stop.wait(SCAN_SECONDS):
-        try:
-            used = allocated_bytes(root)
-        except OSError as exc:
-            _invalidate(generation, f"measurement failed: {exc}")
-            return
-        if used > limit:
-            _invalidate(generation, f"allocated {used} bytes exceeds {limit}")
-            return
+def _check_budget(root: Path, generation: Path, limit: int) -> None:
+    try:
+        used = allocated_bytes(root)
+    except OSError as exc:
+        _invalidate(generation, f"measurement failed: {exc}")
+        return
+    if used > limit:
+        _invalidate(generation, f"allocated {used} bytes exceeds {limit}")
 
 
 def run(
@@ -199,11 +198,12 @@ def run(
             contract.GIT_MIRROR: str(generation / "node"),
             "CI_LAB_MIRROR_STORE": str(generation / "store"),
         }
-        stop = Event()
-        watcher = Thread(target=_watch, args=(stop, root, generation, limit), daemon=True)
+        watcher = Interval(partial(_check_budget, root, generation, limit), every=SCAN_SECONDS)
         watcher.start()
         try:
             return start(resolved)
         finally:
-            stop.set()
-            watcher.join()
+            try:
+                watcher.close()
+            except Exception as exc:
+                _invalidate(generation, f"monitor shutdown failed: {exc}")
