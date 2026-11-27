@@ -1,3 +1,7 @@
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
+
 OPS = ("events_ack",)
 FIELDS = {"op", "id", "by", "rev"}
 
@@ -9,7 +13,7 @@ def check(op):
         raise ValueError("events_ack rev is invalid")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     revision = min(op["rev"], ctx.meta["rev"])
     if revision > ctx.meta.get("events_ack", -1):
         ctx.meta["events_ack"] = revision
