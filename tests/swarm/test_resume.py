@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm import naming, resume, snapshot
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_tick import FakeRuntime
 
@@ -237,6 +237,53 @@ def test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff(
     assert "resume-body-sentinel" not in text
     assert "agentihooks swarm sw confirm-handoff " in text
     assert f"--next '{action}'" in text
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize(
+    ("harness", "transport"),
+    [("claude", ""), ("codex", ""), ("codex", APP_SERVER_TRANSPORT)],
+    ids=["claude", "codex-legacy", "codex-push"],
+)
+def test_a_resumed_master_is_given_the_next_action_its_confirmation_accepts(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, transport: str
+) -> None:
+    import shlex
+
+    from scripts.handoff import transfers
+    from scripts.swarm import prompt
+
+    store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
+    master = AgentRecord(
+        "sw-master-1",
+        MASTER,
+        MASTER,
+        pane_id="w1:m1",
+        harness=harness,
+        transport=transport,
+        seat="master@sw",
+        conversation_id=ID,
+    )
+    store.put_agent("sw", master)
+    snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
+    store.redis.flushall()
+    handoff = "# Handoff v2\n## Done\nmaster-body-sentinel\n## Next\n1. Rearm a Monitor on the ledger and answer the operator.\n"
+    monkeypatch.setattr(store, "handoff", lambda slug, task: handoff if (slug, task) == ("sw", MASTER) else "")
+    runtime = ResumingRuntime()
+    restore(store, runtime)
+    ((_, _, text),) = runtime.resumed
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "master-body-sentinel" not in text
+    transfer, flag, action = shlex.split(text.split("confirm-handoff ", 1)[1].splitlines()[0])
+    resumed = next(a for a in store.agents("sw") if a.name == master.name)
+    transfers.confirm(store, "sw", transfer, resumed, action, 2_000)
+    assert flag == "--next"
+    assert transfers.get(store, "sw", transfer)["continuity"] == {
+        "state": "confirmed",
+        "at": 2_000,
+        "by": master.name,
+        "next": action,
+    }
 
 
 def test_a_resumed_agent_record_takes_the_model_effort_and_source_its_relaunch_reports(store, tmp_path):
