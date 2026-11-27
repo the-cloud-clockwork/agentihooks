@@ -162,9 +162,9 @@ def test_the_launcher_keeps_every_argument_literal_and_records_its_process(tmp_p
     assert lines[0] == "#!/usr/bin/env bash"
     assert "export AGENTIHOOKS_QUICK_SEAT='eng 1'" in lines
     assert f"cd -- {shlex.quote('/work dir')}" in lines
-    assert any("record" in line and shlex.quote(str(tmp_path / "pid file")) in line for line in lines)
-    assert lines[-1] == f"exec {shlex.join(argv)}"
-    assert shlex.split(lines[-1].removeprefix("exec ")) == list(argv)
+    assert any("run_program" in line and shlex.quote(str(tmp_path / "pid file")) in line for line in lines)
+    assert lines[-1] == "exec /bin/bash -l"
+    assert shlex.split(lines[-2].removesuffix(" || true"))[-len(argv) :] == list(argv)
 
 
 @pytest.mark.feature("quick-local-command")
@@ -184,7 +184,7 @@ def test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent(
     assert pane == "w1:p2" and os.access(launcher, os.X_OK)
     assert recipe.PROMPT_ENV not in text
     assert "export AGENTIHOOKS_QUICK_SEAT=eng-1" in text and f"export AGENTIHOOKS_QUICK_DIR={tmp_path}" in text
-    assert text.splitlines()[-1] == f"exec {shlex.join((TOOL, 'two words'))}"
+    assert shlex.split(text.splitlines()[-2].removesuffix(" || true"))[-2:] == [TOOL, "two words"]
 
 
 @pytest.mark.feature("quick-local-command")
@@ -305,9 +305,9 @@ def test_force_and_relaunch_reuse_the_saved_command(tmp_path: Path, monkeypatch:
     assert outcome == "exited"
     registry.set_state(tmp_path, "eng-1", registry.PENDING)
     launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, sleep=lambda seconds: None, wait_s=0.0)
-    assert [launcher.read_text().splitlines()[-1] for _, launcher in panes.runs] == [
-        f"exec {shlex.join((TOOL, 'keep me'))}"
-    ] * 2
+    assert [
+        shlex.split(launcher.read_text().splitlines()[-2].removesuffix(" || true"))[-2:] for _, launcher in panes.runs
+    ] == [[TOOL, "keep me"]] * 2
 
 
 @pytest.mark.feature("quick-local-command")
@@ -462,6 +462,8 @@ def test_master_context_reports_command_identity_and_capabilities(tmp_path: Path
     assert "agent hooks unavailable" in text
     assert "automatic handoff unavailable" in text
     assert "prompt typing unavailable" in text
+    assert "outside automatic tiers" in text
+    assert ", automatic tiers" not in text
 
 
 @pytest.mark.feature("quick-local-command")
@@ -521,3 +523,63 @@ def test_a_command_option_keeps_the_up_subcommand() -> None:
     found = cli.parser().parse_args(["up", "--command", '["/usr/bin/env"]'])
     assert found.command == "up"
     assert found.command_argv == '["/usr/bin/env"]'
+
+
+@pytest.mark.feature("quick-local-command")
+def test_a_saved_executable_symlink_keeps_its_invocation_identity(tmp_path: Path) -> None:
+    import subprocess
+
+    executable = tmp_path / "selected python"
+    executable.symlink_to(sys.executable)
+    command = recipe.recipes(
+        json.dumps([str(executable), "-c", "import sys; print(sys.executable)"]), [], ["program"], {}
+    )[0]
+    assert command[0] == str(executable)
+    assert subprocess.check_output(command, text=True).strip() == str(executable)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_program_exit_restores_a_shell_even_in_a_project_with_its_own_scripts_package(tmp_path: Path) -> None:
+    import subprocess
+
+    package = tmp_path / "scripts"
+    package.mkdir()
+    (package / "__init__.py").write_text("raise RuntimeError('project code must not run')")
+    launcher = tmp_path / "command.sh"
+    command = (sys.executable, "-c", "print('program-finished')")
+    launcher.write_text(recipe.script(command, {}, tmp_path / recipe.PID, str(tmp_path)))
+    completed = subprocess.run(
+        ["bash", str(launcher)],
+        input="printf 'shell-restored\\n'\nexit\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "program-finished" in completed.stdout
+    assert "shell-restored" in completed.stdout
+    assert not recipe.alive(tmp_path)
+    swarm = _swarm(tmp_path, command)
+    calls: list[str] = []
+
+    class Shell(Herdr):
+        def bare(self, pane_id: str) -> bool:
+            return True
+
+    def retry(folder: Path, seat: str) -> str:
+        calls.append(seat)
+        return "started"
+
+    rows = tick.round_for(tmp_path, Shell(), retry, 10_000.0)
+    assert rows[1] == {"seat": "eng-1", "outcome": "revived-started"}
+    assert calls == ["eng-1"] and swarm.seats[1].command == command
+
+
+@pytest.mark.feature("quick-local-command")
+def test_the_program_runner_records_and_reaps_its_child(tmp_path: Path) -> None:
+    code = recipe.run_program(tmp_path / recipe.PID, [sys.executable, "-c", "raise SystemExit(7)"])
+    assert code == 7
+    pid = (tmp_path / recipe.PID).read_text()
+    assert (tmp_path / recipe.SEEN).read_text().startswith(pid + " ")
+    assert not recipe.alive(tmp_path)

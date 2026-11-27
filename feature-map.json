@@ -42,7 +42,10 @@
         "tests/quick/test_recipe.py::test_the_real_launcher_delivers_literal_arguments_and_its_directory",
         "tests/quick/test_recipe.py::test_a_forced_program_stop_targets_only_its_verified_process",
         "tests/quick/test_recipe.py::test_a_program_with_a_common_named_choice_needs_no_native_account",
-        "tests/quick/test_recipe.py::test_a_command_option_keeps_the_up_subcommand"
+        "tests/quick/test_recipe.py::test_a_command_option_keeps_the_up_subcommand",
+        "tests/quick/test_recipe.py::test_a_saved_executable_symlink_keeps_its_invocation_identity",
+        "tests/quick/test_recipe.py::test_program_exit_restores_a_shell_even_in_a_project_with_its_own_scripts_package",
+        "tests/quick/test_recipe.py::test_the_program_runner_records_and_reaps_its_child"
       ],
       "rules": [
         "quick-program-busy-refusal"

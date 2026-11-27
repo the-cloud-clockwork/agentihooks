@@ -5,6 +5,7 @@ import os
 import shlex
 import shutil
 import signal
+import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -49,7 +50,7 @@ def _found(executable: str, environ: Mapping[str, str]) -> str | None:
     directory = Path(environ.get("PWD", os.getcwd()))
     if "/" in executable:
         candidate = directory / executable
-        return str(candidate.resolve()) if candidate.is_file() and os.access(candidate, os.X_OK) else None
+        return str(candidate.absolute()) if candidate.is_file() and os.access(candidate, os.X_OK) else None
     search = os.pathsep.join(str(directory / entry) for entry in environ.get("PATH", os.defpath).split(os.pathsep))
     return shutil.which(executable, path=search)
 
@@ -100,14 +101,14 @@ def identity(seat: Seat) -> dict[str, str | int]:
 
 
 def script(argv: Sequence[str], exports: Mapping[str, str], pid_file: Path, directory: str) -> str:
-    recorder = "from pathlib import Path; import sys; from scripts.quick.recipe import record; record(Path(sys.argv[1]), int(sys.argv[2]))"
+    runner = "from pathlib import Path; import sys; from scripts.quick.recipe import run_program; sys.exit(run_program(Path(sys.argv[1]), sys.argv[2:]))"
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         *(f"export {name}={shlex.quote(value)}" for name, value in sorted(exports.items())),
         f"cd -- {shlex.quote(directory)}",
-        f'{shlex.join([sys.executable, "-c", recorder, str(pid_file)])} "$$"',
-        f"exec {shlex.join(argv)}",
+        f"{shlex.join([sys.executable, '-I', '-c', runner, str(pid_file), *argv])} || true",
+        "exec /bin/bash -l",
     ]
     return "\n".join(lines) + "\n"
 
@@ -134,6 +135,12 @@ def record(pid_file: Path, pid: int) -> None:
     pid_file.write_text(str(pid))
 
 
+def run_program(pid_file: Path, argv: list[str]) -> int:
+    with subprocess.Popen(argv) as process:
+        record(pid_file, process.pid)
+        return process.wait()
+
+
 def stop(seat_dir: Path) -> None:
     try:
         pid = int((seat_dir / PID).read_text())
@@ -143,6 +150,8 @@ def stop(seat_dir: Path) -> None:
     try:
         if alive(seat_dir):
             signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+    except ProcessLookupError:
+        return
     finally:
         os.close(descriptor)
 

@@ -108,6 +108,8 @@ def _launch_registry(folder: Path) -> registry.Swarm:
 def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     caller = guard.require(environ)
     directory = Path(args.dir or os.getcwd()).resolve()
+    if not directory.is_dir():
+        raise QuickError("the requested engineer directory is unavailable")
     quick_id = paths.quick_id(environ)
     folder = paths.folder_for(environ, quick_id, directory)
     with paths.host_locked(environ):
