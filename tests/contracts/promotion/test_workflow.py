@@ -253,6 +253,22 @@ def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None
         assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_clean_whole_tree_type_check(result: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    tree = jobs["type-gate-tree"]
+    assert any(step.get("run") == "python -m scripts.type_gate --tree" for step in tree["steps"])
+    assert enabled(tree["if"], "push", {})
+    for event in ("pull_request", "merge_group"):
+        assert not enabled(tree["if"], event, {})
+    assert enabled(tree["if"], "workflow_dispatch", {})
+    assert "type-gate-tree" not in jobs["gate-required"]["needs"]
+    for consumer in ("promotion-ready", "promote"):
+        needs = _graded_needs(jobs[consumer])
+        needs["type-gate-tree"].result = result
+        assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
+
+
 def test_a_revision_sonar_graded_promotes_from_its_own_analysis():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     promote = workflow["jobs"]["promote"]
