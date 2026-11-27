@@ -38,7 +38,7 @@ class Lab:
             **os.environ,
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": f"http.{self.url}.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {secret}",
             "GIT_TERMINAL_PROMPT": "0",
         }
 

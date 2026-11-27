@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.events.envelope import Envelope
+from scripts.routing import place
 from scripts.swarm import capacity, offer_quota, profile_choice, runtime
 from scripts.swarm.offer_quota import accounts as real_accounts
 from scripts.swarm.store import SwarmConfig
@@ -375,3 +377,29 @@ def test_fit_default_reader_is_lazy(config: SwarmConfig, monkeypatch: pytest.Mon
     assert fits(event({"requires_harness": "codex"}))
     assert not fits.held
     assert read.call_count == 1
+
+
+@pytest.mark.feature("event-offer-api-seats")
+@pytest.mark.parametrize(
+    ("credential", "fits"),
+    [
+        ({"ANTHROPIC_API_KEY": "fake"}, True),
+        ({"ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_AUTH_TOKEN": "fake"}, True),
+        ({}, False),
+    ],
+)
+def test_an_api_key_or_gateway_host_fits_offers_with_no_token_account(
+    config: SwarmConfig, monkeypatch: pytest.MonkeyPatch, credential: dict[str, str], fits: bool
+) -> None:
+    for name in [name for name in os.environ if name.startswith(("AH_CC_TOKEN_", "ANTHROPIC_", "CLAUDE_CODE_USE_"))]:
+        monkeypatch.delenv(name)
+    for name, value in credential.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(capacity.place, "policy", lambda harness, environ: place.ApiPolicy(25, place.API_UNBOUNDED))
+    monkeypatch.setattr(capacity.balancer, "cached_observations", lambda **_kwargs: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_kwargs: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router.CodexAccountSource, "pool", lambda self, environ: [])
+    seat = offer_quota.Fit(config, "plan", lambda offered: True)
+    assert seat(event({"requires_harness": "claude"})) is fits
+    assert seat.held is not fits

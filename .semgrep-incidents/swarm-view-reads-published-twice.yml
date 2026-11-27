@@ -1,0 +1,18 @@
+rules:
+  - id: swarm-view-reads-published-twice
+    languages: [python]
+    severity: ERROR
+    message: >-
+      commands.view already reads and decodes the published status key. Calling lifecycle.view there without
+      task_revisions makes lifecycle.published fetch and decode the same key a second time, and the ledger server
+      runs the view every 2 s for each watched ledger. Pass the task revisions the view already holds.
+    paths:
+      include:
+        - /scripts/swarm/commands.py
+        - swarm-view-reads-published-twice.py
+    patterns:
+      - pattern-inside: |
+          def view(...):
+              ...
+      - pattern: lifecycle.view(...)
+      - pattern-not: lifecycle.view(..., task_revisions=$REVISIONS, ...)

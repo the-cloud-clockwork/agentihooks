@@ -324,6 +324,94 @@ def test_status_lists_every_seat(quick_env, tmp_path, capsys):
     assert [row["seat"] for row in rows] == ["master", "eng-1", "eng-2", "eng-3"]
 
 
+@pytest.mark.feature("quick-swarm")
+def test_status_rows_carry_every_seat_field(
+    quick_env: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["up", "--agents", "2", "--dir", str(tmp_path)], quick_env) == 0
+    capsys.readouterr()
+    assert cli.main(["status"], quick_env) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    expected = {"position", "seat", "pane_id", "harness", "name", "session_id", "state", "auth", "account"}
+    assert all(expected <= set(row) for row in rows)
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--harness", "program"],
+        ["--command", "not json"],
+        ["--command", '["/nowhere/tool"]'],
+        ["--engineer-command", '4=["/usr/bin/env"]'],
+    ],
+)
+def test_an_invalid_command_never_creates_panes(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, options: list[str]
+) -> None:
+    def refuse_layout(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid command created a layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse_layout)
+    assert cli.main(["up", "--agents", "3", *options, "--dir", str(tmp_path)], quick_env) == 2
+    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
+
+
+@pytest.mark.feature("quick-local-command")
+def test_up_saves_each_engineers_command_and_status_shows_only_its_safe_identity(
+    quick_env: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    options = ["--harness", "claude,program", "--engineer-command", '2=["/usr/bin/env", "--private-flag"]']
+    assert cli.main(["up", "--agents", "3", *options, "--dir", str(tmp_path)], quick_env) == 0
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None
+    assert [seat.command for seat in swarm.seats] == [(), (), ("/usr/bin/env", "--private-flag")]
+    initial = capsys.readouterr().out
+    assert "--private-flag" not in initial
+    assert cli.main(["status"], quick_env) == 0
+    out = capsys.readouterr().out
+    rows = [json.loads(line) for line in out.splitlines()]
+    assert "--private-flag" not in out and all("command" not in row for row in rows)
+    assert rows[2]["identity"] == {"kind": "program", "program": "env", "arguments": 1}
+    assert rows[2]["capabilities"] == {"agent_hooks": False, "automatic_handoff": False, "prompt_typing": False}
+    assert rows[1]["identity"] == {"kind": "native", "program": "claude", "arguments": 0}
+
+
+@pytest.mark.feature("quick-local-command")
+def test_up_resolves_the_command_from_its_selected_directory(quick_env: dict[str, str], tmp_path: Path) -> None:
+    selected = tmp_path / "selected directory"
+    selected.mkdir()
+    tool = selected / "wrapper"
+    tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
+    tool.chmod(0o700)
+    environ = {**quick_env, "PWD": str(tmp_path / "other")}
+    assert (
+        cli.main(
+            ["up", "--agents", "2", "--harness", "program", "--command", '["./wrapper"]', "--dir", str(selected)],
+            environ,
+        )
+        == 0
+    )
+    folder = cli.paths.folder_for(environ, cli.paths.quick_id(environ), selected)
+    swarm = registry.load(folder)
+    assert swarm is not None
+    assert swarm.seats[1].command == (str(tool),)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_up_refuses_a_missing_directory_before_layout(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        pytest.fail("missing directory changed layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse)
+    assert cli.main(["up", "--dir", str(tmp_path / "missing")], quick_env) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        "agentihooks quick: the requested engineer directory is unavailable"
+    ]
+
+
 @pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize(
     ("selection", "mode", "account", "automatic"),

@@ -44,7 +44,7 @@
   "hooks/context/dep_banner.py": 10,
   "hooks/context/documentation.py": 24,
   "hooks/context/documentation_evidence.py": 75,
-  "hooks/context/documentation_session.py": 57,
+  "hooks/context/documentation_session.py": 55,
   "hooks/context/enforcement.py": 259,
   "hooks/context/file_read_cache.py": 18,
   "hooks/context/hive_join.py": 40,
