@@ -65,6 +65,7 @@ def test_legacy_pairs_get_separate_manual_phases_and_a_second_pass_writes_nothin
         assert moved_target["item"] == f"tasks/{target['id']}"
         assert moved_plan["item"] == f"tasks/{plan['id']}"
         assert moved_target["fields"] == moved_plan["fields"] == {"phase": plan["id"]}
+        assert {phase["by"], moved_target["by"], moved_plan["by"]} == {"swarm"}
     rows, phases = _apply(tasks, batches)
     assert rows == [{**task, "phase": f"enhance-{task.get('enhances', task['id'])}"} for task in original]
     assert phases == {"enhance-legacy", "enhance-second"}
@@ -488,3 +489,29 @@ def test_a_newly_held_batch_does_not_stop_a_later_claimable_batch(
     assert len(client.writes) == 2
     assert all(task["phase"] == "" for task in client.tasks[50:100])
     assert client.tasks[100]["phase"] == client.tasks[101]["phase"] == "enhance-legacy-50"
+
+
+class _AuthoredClient(_Client):
+    def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        from scripts.tick.adapters.writer_client import principal
+
+        name = principal()
+        if name and any(operation["by"] != name for operation in operations):
+            self.writes.append(operations)
+            return {"rejected": [operation["id"] for operation in operations], "_meta": {"warnings": ["wrong author"]}}
+        return super().mutate(slug, operations)
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+@pytest.mark.parametrize(("caller", "author"), [("master@323133-0001", "master@323133-0001"), ("", "swarm")])
+def test_a_seat_run_moves_a_pair_writing_as_that_seat(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], caller: str, author: str
+) -> None:
+    from scripts.tick.adapters.writer_client import acting
+
+    client = _AuthoredClient(_pair())
+    with acting(caller):
+        assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 0, "batch_seconds": [0.125]}
+    assert {operation["by"] for operation in client.writes[0]} == {author}
+    assert [task["phase"] for task in client.tasks] == ["enhance-legacy", "enhance-legacy"]

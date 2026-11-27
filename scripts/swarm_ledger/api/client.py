@@ -25,6 +25,7 @@ from . import resources, schemas
 Transport = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 RETRIES = 5
 BACKOFF = 0.25
+READ_AGAIN = ("hierarchy", "focus")
 KEPT = None
 
 
@@ -125,6 +126,9 @@ class ResourceClient:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:
+        """Every row of a collection, read page by page. A collection that changes between two pages is read
+        again: a stored one from the export, and a hierarchy or the task list of a focus target, which no export
+        holds, from its first page, giving up with the conflict after the retries."""
         rows, query, snapshot, restarts = [], {"limit": 100}, None, itertools.count()
         swarm = path.startswith("swarm/")
         read = resources.swarm_read if swarm else resources.read
@@ -140,8 +144,7 @@ class ResourceClient:
                 if replay.code != 409 or error.get("code") != "revision_conflict":
                     raise replay from None
                 rows, query = [], {"limit": 100}
-                if path.startswith("hierarchy"):
-                    # The export snapshot holds no hierarchy, so a changed tree is walked again from its first page.
+                if path.split("/")[0] in READ_AGAIN:
                     attempt = next(restarts)
                     if attempt == RETRIES:
                         raise replay from None

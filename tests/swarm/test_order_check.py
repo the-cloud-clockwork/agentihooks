@@ -275,10 +275,16 @@ def test_an_orders_read_past_the_reply_limit_names_the_read_that_fits(
         limited.setattr(routes.resources, "MAX_REPLY", size - 1)
         with pytest.raises(APIError) as refused:
             routes.ledger_read(services, SLUG, "orders", {})
-    message = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
+    message = (
+        "The open orders pass the reply limit: read the tasks of one order with "
+        f"agentihooks api --slug {SLUG} get focus/<item>/tasks"
+    )
     assert (refused.value.status, refused.value.code, str(refused.value)) == (413, "resource_too_large", message)
     one = routes.ledger_read(services, SLUG, "focus/phases/p1", {})
     assert [row["id"] for row in one["data"]["tasks"]] == [row["id"] for row in tasks]
+    paged = routes.ledger_read(services, SLUG, "focus/phases/p1/tasks", {"limit": 100})
+    assert [row["id"] for row in paged["data"]] == [row["id"] for row in tasks]
+    assert paged["next_cursor"] is None
 
 
 @pytest.mark.feature("swarm-orders-read")
