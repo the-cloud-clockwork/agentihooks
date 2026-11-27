@@ -91,7 +91,7 @@ class PostRefused(RuntimeError):
 
 
 class MoveRefused(ValueError):
-    """A check run move that is not forward; `Scheduler._fail` reads this as its post already landed this pass."""
+    """A check run was asked to move to a status that is not ahead of the one it holds."""
 
 
 class Token(Protocol):

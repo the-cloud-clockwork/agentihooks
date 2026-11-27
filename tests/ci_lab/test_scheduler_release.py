@@ -18,6 +18,7 @@ from tests.ci_lab.test_scheduler import (
     github,
     plan,
     pull_plan,
+    restarted,
     unit,
 )
 from tests.ci_lab.test_scheduler import lab as _lab
@@ -349,13 +350,6 @@ def test_a_cut_short_refusal_counts_toward_the_pass_s_starts_cap_so_a_later_head
     assert run.lab.client.hlen(scheduler.WAITING) == 1
 
 
-def _real_checks(run: Run) -> tuple[checks.Checks, Run]:
-    poster = checks.Checks(SLUG, FixtureToken())
-    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _repo: poster, run.lab.hotfixes, run.lab.kube)
-    engine = scheduler.Scheduler(run.lab.client, run.lab.objects, ports, run.engine.settings)
-    return poster, Run(run.lab, engine)
-
-
 @pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
 def test_a_head_refused_from_two_waiting_entries_in_one_pass_posts_its_failed_check_once(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
@@ -364,7 +358,8 @@ def test_a_head_refused_from_two_waiting_entries_in_one_pass_posts_its_failed_ch
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(requests, "request", github(calls))
     monkeypatch.setattr(run.lab.expander, "reachable", _unreachable)
-    poster, real = _real_checks(run)
+    poster = checks.Checks(SLUG, FixtureToken())
+    real = restarted(run, poster)
     real.push(HEAD_A, lane="own-sha")
     real.push(HEAD_A, lane="engineer-branch")
     real.push(HEAD_B, lane="other")
@@ -384,7 +379,8 @@ def test_a_pull_request_head_retired_from_two_waiting_entries_in_one_pass_posts_
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(requests, "request", github(calls))
     reaching(run, monkeypatch, HEAD_A)
-    poster, real = _real_checks(run)
+    poster = checks.Checks(SLUG, FixtureToken())
+    real = restarted(run, poster)
     real.push(HEAD_A, event="pull_request", action="synchronize", lane="own-sha")
     real.push(HEAD_A, event="pull_request", action="synchronize", lane="engineer-branch")
     actions = real.tick(1000)
@@ -403,7 +399,8 @@ def test_a_head_refused_in_two_different_passes_still_posts_a_failed_check_in_ea
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(requests, "request", github(calls))
     monkeypatch.setattr(run.lab.expander, "reachable", _unreachable)
-    poster, real = _real_checks(run)
+    poster = checks.Checks(SLUG, FixtureToken())
+    real = restarted(run, poster)
     real.push(HEAD_A, lane="first")
     first = real.tick(1000)
     real.push(HEAD_A, lane="first")

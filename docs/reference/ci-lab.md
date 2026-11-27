@@ -2899,8 +2899,8 @@ check that the App token, GitHub or the network refuses is recorded as
 `cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
 keeps no grade, and the pass goes on. A head refused a second time in this pass, from another
 waiting entry under a different lane, finds its required check already completed and that is
-recorded instead of posted again, so the pass still goes on. A head pushed to a grade ref gets no check run, since
-GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
+recorded instead of posted again, so the pass still goes on. A head pushed to a grade ref gets no
+check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
 check run; [Test units](#test-units) describes both. The scheduler service prints
@@ -2938,9 +2938,9 @@ and holds no merge. That post is tried once, like the cannot expand post: a refu
 token, GitHub or the network ends the same action with
 `; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
 on. A head retired a second time in this pass the same way finds its required check already
-completed and that is recorded instead of posted again. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
-failed `git ls-remote` raises like any other failed git command, so the head takes the
-[cannot expand](#a-head-that-cannot-expand) path.
+completed and that is recorded instead of posted again. A head pushed to a grade ref skips the
+reachability check, since the lab remote serves it. A failed `git ls-remote` raises like any
+other failed git command, so the head takes the [cannot expand](#a-head-that-cannot-expand) path.
 
 #### The worker reads the same workflows
 
