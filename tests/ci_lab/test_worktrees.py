@@ -236,18 +236,21 @@ def test_fetch_passes_the_same_timeout_to_the_lab_remote_fallback_fetch(
     base = _commit(origin, "a", "a")
     mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
     assert mirror.fetch(base) is False
-    calls: list[dict[str, Any]] = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        calls.append(kwargs)
-        if "fetch" in argv and len(calls) == 2:
+        calls.append((argv, kwargs))
+        if mirror.remote in argv:
             raise subprocess.CalledProcessError(128, argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(worktrees.subprocess, "run", run)
     mirror.fetch("1" * 40, timeout=7.5)
-    assert calls[1]["timeout"] == 7.5
-    assert calls[2]["timeout"] == 7.5
+    assert mirror.lab is not None
+    [primary] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.remote in argv]
+    [fallback] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.lab.url in argv]
+    assert primary["timeout"] == 7.5
+    assert fallback["timeout"] == 7.5
 
 
 @pytest.mark.feature("lab-remote-heads")
