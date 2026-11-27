@@ -1,9 +1,11 @@
+import inspect
 from pathlib import Path
 
 import pytest
 import yaml
 
-from tests.test_compose_recovery_drill import assert_seat_fits, function, heredoc, spoke_reader
+from scripts.hive import spoke
+from tests.test_compose_recovery_drill import assert_seat_fits, function, heredoc, spoke_reader, stand_in_parameters
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-task-smoke.sh"
@@ -52,3 +54,13 @@ def test_the_compose_task_smoke_spoke_reads_a_seat_that_fits_its_offer() -> None
     body = heredoc(smoke(), STARTED)
     assert spoke_reader(body) == "free_seat"
     assert_seat_fits(function(body, "free_seat"))
+
+
+@pytest.mark.feature("compose-smoke-launch-report")
+def test_the_compose_task_smoke_stand_in_takes_the_launch_report_of_its_one_launch() -> None:
+    script = smoke()
+    protocol = list(inspect.signature(spoke.Tasks.launched).parameters)
+    assert stand_in_parameters(heredoc(script, STARTED), "launched") == protocol
+    gate = 'assert reported == [["t1", "claude"]]'
+    assert script.index("outcomes.append(spoke.poll(1_000))") < script.index(gate)
+    assert script.index(gate) < script.index("printf 'Compose task smoke passed")
