@@ -437,6 +437,30 @@ def test_block_refuses_when_a_second_task_repository_holds_unpushed_commits(work
     assert ledger.rows["t1"]["state"] != "blocked" and "branch" not in ledger.rows["t1"]
 
 
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_records_a_pushed_repository_and_saves_the_held_one(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    ledger, _, primary, _ = worktree
+    _, other, other_top = _second_repository(worktree, tmp_path)
+    _panic(env, monkeypatch)
+    _task_commit(other_top)
+    comments: list[tuple[str, str, str, str]] = []
+    monkeypatch.setattr(ledger, "comment", lambda slug, task_id, text, by: comments.append((slug, task_id, text, by)))
+    capsys.readouterr()
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["repository_branches"]) == ("blocked", BRANCH, {str(primary): BRANCH})
+    held = json.loads(capsys.readouterr().out)["held_patch"]
+    patch = ledger_workspace.folder("sw", "t1") / "antoncore.patch"
+    assert [(saved["repository"], saved["patch"]) for saved in held] == [(str(other), str(patch))]
+    assert ("sw", "t1", HELD_NOTE.format(count=1), AGENT) in comments
+
+
 @pytest.mark.parametrize(
     ("failing", "says"),
     [

@@ -345,7 +345,7 @@ def save_patch(root: Path, repository: Path, unpushed: stack.Unpushed, folder: P
     text = execute(["git", "format-patch", "--stdout", span], root)
     folder.mkdir(parents=True, exist_ok=True)
     patch = folder / f"{repository.name}.patch"
-    patch.write_text(text, encoding="utf-8")
+    patch.write_bytes(text.encode())
     return {
         "repository": str(repository),
         "branch": unpushed.branch,
