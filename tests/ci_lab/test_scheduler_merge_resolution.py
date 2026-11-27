@@ -429,18 +429,25 @@ def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Calla
     assert grant.unit == leased_unit
     event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested", pull_number=41)
     run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
-    run.tick(2000)
+    run.tick(1100)
     live = [grade for grade in run.grades() if not grade.superseded]
     assert [grade.head for grade in live] == [HEAD_A]
     assert live[0].graded_commit == other_merge
     assert live[0].run != old.run
-    assert live[0].units[ref(leased_unit)].started is True
-    assert live[0].units[ref(leased_unit)].held is False
-    assert live[0].units[ref(leased_unit)].outcome == ""
+    carried = live[0].units[ref(leased_unit)]
+    assert carried.job == grant.job
+    assert carried.started is True
+    assert carried.held is False
+    assert carried.outcome == ""
     stale = run.engine.grade(old.run)
     assert stale is not None and stale.units[ref(held_unit)].outcome == DROPPED
     assert any(post[0] == HEAD_A for post in run.lab.poster.posts)
     assert port.call_count == 2
+    assert [again.unit for again in run.lease(slots=2)] == [held_unit]
+    run.finish(grant, "passed", {})
+    run.tick(1200)
+    finished = run.engine.grade(live[0].run)
+    assert finished is not None and finished.units[ref(leased_unit)].outcome == "passed"
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
