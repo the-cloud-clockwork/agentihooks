@@ -627,7 +627,9 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
-    if state.required != list(_frame_required(state.tier, state.outputs.get("select", {}).get("scope", "none"))):
+    if not state.superseded and state.required != list(
+        _frame_required(state.tier, state.outputs.get("select", {}).get("scope", "none"))
+    ):
         return {}
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))

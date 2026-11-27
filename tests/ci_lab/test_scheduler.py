@@ -913,7 +913,7 @@ def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., R
 
 def test_the_same_head_is_graded_once_unless_a_rerun_bypasses_negative_verdicts(lab: Callable[..., Run]) -> None:
     item = unit(1)
-    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run = lab({HEAD_A: pull_plan({"lint": (item,)})})
     run.cache(item, passed=False)
     run.push(HEAD_A, event="pull_request", action="synchronize")
     run.tick(1000)

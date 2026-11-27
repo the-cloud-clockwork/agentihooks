@@ -5,8 +5,9 @@ from collections.abc import Callable
 import pytest
 
 from scripts.ci_lab import compact, relay, scheduler
-from tests.ci_lab.test_scheduler import BASE, HEAD_A, REPO, TREE, Run, pull_plan, unit
+from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, REPO, TREE, Run, pull_plan, unit
 from tests.ci_lab.test_scheduler import lab as lab
+from tests.ci_lab.test_scheduler_posts import refusing
 
 
 def _release(run: Run, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,12 +75,58 @@ def test_a_release_regrades_a_live_frame_without_posting_failed_required(
     assert not run.lab.client.sismember(scheduler.LIVE, old.run)
     assert ("completed", "failure") not in run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)
     original_ref = old.gates["lint"][0]
-    assert replacement.units[original_ref].job == grant.job
     if quiet:
+        assert replacement.units[original_ref].job == grant.job
         run.finish(grant, "passed", {})
+    else:
+        assert replacement.units[original_ref].outcome == "passed"
+        assert replacement.units[original_ref].job == ""
     run.tick(2100)
     advanced = run.engine.grade(replacement.run)
     assert advanced is not None and advanced.units[original_ref].outcome == "passed"
+
+
+@pytest.mark.feature("lab-grade-required-list-regrade")
+def test_a_release_reuses_queued_work(lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
+    run.push(HEAD_A, event="pull_request", action="synchronize")
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    original_ref = old.gates["lint"][0]
+    _release(run, monkeypatch)
+    assert any(action.startswith("grading ") for action in run.tick(2000))
+    replacement = next(grade for grade in run.grades() if grade.run != old.run)
+    assert replacement.units[original_ref].job == old.units[original_ref].job
+    grant = run.lease()[0]
+    assert grant.job == old.units[original_ref].job
+    run.finish(grant, "passed", {})
+    run.tick(2100)
+    advanced = run.engine.grade(replacement.run)
+    assert advanced is not None and advanced.units[original_ref].outcome == "passed"
+
+
+@pytest.mark.feature("lab-grade-required-list-regrade")
+def test_a_stale_superseded_grade_closes_after_its_first_posts_were_held(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
+    refusing(run, scheduler.PostRefused("held"), heads=frozenset({HEAD_A}))
+    run.push(HEAD_A, event="pull_request", action="synchronize")
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    assert old.posted == {}
+    _release(run, monkeypatch)
+    run.lab.expander.plans[HEAD_B] = pull_plan({"lint": (unit(2),)})
+    run.push(HEAD_B, event="pull_request", action="synchronize")
+    run.tick(2000)
+    assert run.grade(HEAD_B).posted[scheduler.REQUIRED] == ["queued", None]
+    run.tick(1000 + scheduler.POST_HOLD_MS)
+    retired = run.engine.grade(old.run)
+    assert retired is not None and retired.conclusion == "cancelled"
+    grant = run.lease()[0]
+    run.finish(grant, "passed", {})
+    run.tick(1100 + scheduler.POST_HOLD_MS)
+    assert run.grade(HEAD_B).conclusion == "success"
 
 
 @pytest.mark.feature("lab-grade-required-list-regrade")

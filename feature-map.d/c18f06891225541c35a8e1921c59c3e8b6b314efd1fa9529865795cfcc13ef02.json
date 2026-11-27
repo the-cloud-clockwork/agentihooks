@@ -8,6 +8,8 @@
     "tests/ci_lab/test_scheduler_required_frame.py::test_the_plan_keeps_only_the_jobs_its_tier_requires",
     "tests/ci_lab/test_scheduler_required_frame.py::test_a_started_grade_stores_its_planned_required_list",
     "tests/ci_lab/test_scheduler_required_frame.py::test_a_release_regrades_a_live_frame_without_posting_failed_required",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_release_reuses_queued_work",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_stale_superseded_grade_closes_after_its_first_posts_were_held",
     "tests/ci_lab/test_scheduler_required_frame.py::test_stale_intake_regrades_once_and_reuses_the_matching_replacement",
     "tests/ci_lab/test_scheduler_required_frame.py::test_a_legacy_grade_derives_required_from_its_stored_gates",
     "tests/ci_lab/test_scheduler_required_frame.py::test_a_matching_frame_keeps_existing_grade_reuse_and_success",
