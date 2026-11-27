@@ -11,4 +11,16 @@ rules:
         - /scripts/ci_lab/worktrees.py
         - /scripts/ci_lab/remote/
         - lab-remote-basic-scheme.py
-    pattern-regex: (?i:authorization)\s*:\s*(?!Basic\b)(?i:basic)\b
+    pattern-either:
+      - pattern-regex: (?i:authorization)\s*:\s*(?!Basic\b)(?i:basic)\b
+      - patterns:
+          - pattern-either:
+              - pattern: '{..., "$KEY": $VALUE, ...}'
+              - pattern: '$HEADERS["$KEY"] = $VALUE'
+              - pattern: '("$KEY", $VALUE)'
+          - metavariable-regex:
+              metavariable: $KEY
+              regex: (?i)^authorization$
+          - metavariable-regex:
+              metavariable: $VALUE
+              regex: ^f?["'](?!Basic\b)(?i:basic)\b

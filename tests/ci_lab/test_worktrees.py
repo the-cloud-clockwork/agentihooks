@@ -215,10 +215,9 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
 def test_a_lab_fetch_header_is_the_exact_basic_credential_the_lab_remote_accepts() -> None:
     environ = worktrees.Lab("http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git", "lab-token").environ()
     name, _, value = environ["GIT_CONFIG_VALUE_0"].partition(": ")
-    accepted = (b"Bearer lab-token", b"Basic " + base64.b64encode(b"lab:lab-token"))
     assert environ["GIT_CONFIG_KEY_0"] == "http.http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git.extraheader"
     assert name.lower() == "authorization"
-    assert value.strip().encode() in accepted
+    assert value.encode() == b"Basic " + base64.b64encode(b"lab:lab-token")
 
 
 @pytest.mark.feature("lab-remote-heads")
