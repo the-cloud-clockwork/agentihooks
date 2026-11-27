@@ -120,6 +120,81 @@ def test_held_lists_each_open_task_a_phase_holds_with_its_state():
     assert phase_state.report(doc(phases, tasks)) == [("p1", "building", []), ("p2", "waiting", ["b"])]
 
 
+class CountedRows(list[dict[str, object]]):
+    def __init__(self, rows: list[dict[str, object]], counts: dict[str, int], name: str) -> None:
+        super().__init__(rows)
+        self.counts, self.name = counts, name
+
+    def __iter__(self):  # type: ignore[override]
+        self.counts[self.name] += 1
+        return super().__iter__()
+
+
+def counted_status_doc(count: int) -> tuple[dict[str, object], dict[str, int]]:
+    counts = {"phases": 0, "tasks": 0}
+    phases = [{"id": f"p{i}", "planning": "auto"} for i in range(count)]
+    tasks = [plan(f"p{i}") for i in range(count)]
+    return {"phases": CountedRows(phases, counts, "phases"), "tasks": CountedRows(tasks, counts, "tasks")}, counts
+
+
+@pytest.mark.feature("swarm-phase-status-linear")
+def test_status_scans_phases_and_tasks_a_fixed_number_of_times_whatever_the_phase_count() -> None:
+    small, small_counts = counted_status_doc(3)
+    large, large_counts = counted_status_doc(30)
+
+    phase_state.status(small)
+    phase_state.status(large)
+
+    assert large_counts == small_counts
+    assert large_counts["tasks"] <= 1
+
+
+@pytest.mark.feature("swarm-phase-status-linear")
+def test_status_reports_each_phase_s_lifecycle_and_label_exactly() -> None:
+    phases = [
+        {"id": "gone-scope", "out_of_scope": True, "done": True},
+        {"id": "finished", "title": "Finished", "done": True},
+        {"id": "blocked", "depends_on": ["gone", "finished", "open-dep", "gone"], "planning": "auto"},
+        {"id": "open-dep", "title": "Open dependency"},
+        {"id": "untitled", "title": ""},
+        {"id": "waits-untitled", "depends_on": ["untitled"]},
+        {"id": "manual"},
+        {"id": "unplanned", "planning": "auto"},
+        {"id": "planning", "planning": "auto"},
+        {"id": "reviewing", "planning": "auto"},
+        {"id": "approved", "planning": "auto", "review": {"state": "approved"}},
+        {"id": "twice", "planning": "auto"},
+        {"id": "twice", "done": True},
+    ]
+    tasks = [
+        {"id": "loose"},
+        {"id": "enhancer", "phase": "planning", "kind": "plan", "enhances": "t1", "state": "done"},
+        plan("planning"),
+        plan("planning", state="done"),
+        plan("reviewing", state="done"),
+        plan("approved", state="done"),
+    ]
+    data = doc(phases, tasks)
+
+    found = phase_state.status(data)
+
+    expected = {p["id"]: {"state": phase_state.lifecycle(p, data), "label": phase_state.label(p, data)} for p in phases}
+    assert found == expected
+    assert found["blocked"] == {"state": "waiting", "label": "Waits for phase gone, Open dependency, gone"}
+    assert found["waits-untitled"] == {"state": "waiting", "label": "Waits for phase untitled"}
+    assert [found[key]["state"] for key in ("gone-scope", "finished", "manual", "unplanned", "planning")] == [
+        "out_of_scope",
+        "done",
+        "building",
+        "to_plan",
+        "planning",
+    ]
+    assert [found[key]["state"] for key in ("reviewing", "approved", "twice")] == ["in_review", "building", "done"]
+    assert list(found) == [p["id"] for p in phases[:-1]]
+    assert phase_state.status({}) == {}
+    assert phase_state.status({"tasks": []}) == {}
+
+
 def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):
 
     class Ledger:

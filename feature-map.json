@@ -6093,6 +6093,17 @@
       ]
     },
     {
+      "id": "swarm-phase-status-linear",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The page view's phase status builds the done phase set, the phase map and each phase's own plan task once per call, so publishing a watched ledger costs work linear in its phases and tasks instead of phases times phases and tasks, with each phase's state and label unchanged.",
+      "seam": "scripts.swarm.phase_state.status over lifecycle and label",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_status_scans_phases_and_tasks_a_fixed_number_of_times_whatever_the_phase_count",
+        "tests/swarm/test_phase_state.py::test_status_reports_each_phase_s_lifecycle_and_label_exactly"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
