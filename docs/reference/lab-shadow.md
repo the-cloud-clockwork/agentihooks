@@ -120,6 +120,11 @@ and takes each distinct head once. For each head it reads every check run on the
   progress or no run at all leaves the lab verdict missing. The report reads only the newest run
   by id: when it was cancelled or is still running, an earlier verdict of the same name does not
   count, where the shadow recorder keeps that earlier verdict.
+- **Start of the wait.** The `started_at` of the newest `github-actions` check run named
+  `lab-verdict` on the head, the job of the Tests workflow that waits for the lab's verdicts. A
+  head with no such check run, or whose newest one has not started, holds no start. Merge group
+  heads hold none: the job runs on pull requests only. The start comes from the same check run
+  listing, so it costs no extra GitHub call.
 
 A head leaves the window, and the next older head takes its place, when any Actions job of the
 gate was cancelled, is still running, or none of them graded. A unit job that the workflow reran
@@ -144,6 +149,7 @@ Over the window of the newest `--heads` heads that hold an Actions verdict:
 | Mismatches | zero heads where both verdicts exist and disagree |
 | Lab verdict present | at least 48 of every 50 heads |
 | Lab verdict first | at least 45 of every 50 heads have a lab verdict that completed before the Actions verdict |
+| Lab verdict inside the wait | pull request event only: at least 48 of every 50 heads have a lab verdict that completed no later than 1200 seconds after the head's `lab-verdict` job started |
 
 Phase 4 of the grading lab plan, shadow and cutover, sets this rule for every gate flip, printed
 with `--heads 50` and pasted in the flip pull request. It words the
@@ -151,24 +157,36 @@ window as heads "with both verdicts"; the report reads it as heads with an
 Actions verdict, because a window of heads that all carry a lab verdict would make the presence
 count meaningless. A head without a lab verdict stays in the window and counts against presence.
 
-The rule counts heads; it never sets a time limit. A lab verdict that completes at the same
-second as the last Actions job is late.
+A lab verdict that completes at the same second as the last Actions job is late.
+
+First is not enough for a flip. Once a gate is lab authoritative, the `lab-verdict` job of a pull
+request waits 1200 seconds for the lab, `WAIT_S` of `scripts/ci_lab_verdict.py`, and a verdict
+still missing then fails `Gate — Required`. While Actions jobs wait a long time for a runner, a lab
+verdict can be first and still land after that wait. The fourth count measures the wait itself:
+the seconds from the start of the head's `lab-verdict` job to the completion of its lab check run.
+A verdict at exactly 1200 seconds is inside, one second later is not, and a verdict that completed
+before the job started is inside. The job starts a few seconds before its wait does, by its setup
+steps, so the count is the stricter of the two. A head with no lab verdict or no started
+`lab-verdict` job is not inside. A head whose Tests run was rerun holds a newer job, so its start
+moves later.
+
+The merge group event has no such job, so its rule keeps the first three counts.
 
 ### Windows other than 50
 
-For a window other than 50 the two thresholds scale and round up, `scripts.ci_lab.shadow_report.rule`:
+For a window other than 50 the thresholds scale and round up, `scripts.ci_lab.shadow_report.rule`:
 
-| `--heads` | Lab verdict present | Lab verdict first |
-|---|---|---|
-| 100 | 96 | 90 |
-| 50 | 48 | 45 |
-| 25 | 24 | 23 |
-| 20 | 20 | 18 |
-| 10 | 10 | 9 |
-| 3 | 3 | 3 |
+| `--heads` | Lab verdict present | Lab verdict first | Lab verdict inside the wait, pull request only |
+|---|---|---|---|
+| 100 | 96 | 90 | 96 |
+| 50 | 48 | 45 | 48 |
+| 25 | 24 | 23 | 24 |
+| 20 | 20 | 18 | 20 |
+| 10 | 10 | 9 | 10 |
+| 3 | 3 | 3 | 3 |
 
-Below 25 heads every head needs a lab verdict, and below 10 every lab verdict must also come
-first. Phase 4 of the grading lab plan uses the default 50.
+Below 25 heads every head needs a lab verdict, on a pull request window inside the wait, and
+below 10 every lab verdict must also come first. Phase 4 of the grading lab plan uses the default 50.
 
 ## Output
 
@@ -194,33 +212,39 @@ verdict or `missing`, `first` or `late`, and `match` or `mismatch`. A head witho
 leaves the last two columns empty. The last line is `rule holds` with exit code 0, or `rule fails`
 with exit code 1. An argument error exits 2.
 
+A pull request report adds a `seconds` column, the seconds from the start of the head's
+`lab-verdict` job to its lab verdict, empty when the head lacks either, and the line
+`lab verdict inside the wait <n> of at least <m>` after the first count. A merge group report
+keeps the five columns and three counts above.
+
 ### Reading a table with lab verdicts
 
 Four illustrative heads with made up shas, rendered by `scripts.ci_lab.shadow_report.render`:
 
 ```text
 gate tests event pull_request
-head          actions  lab      order  agreement
-1a2b3c4d5e6f  pass     pass     first  match
-2b3c4d5e6f7a  fail     fail     late   match
-3c4d5e6f7a8b  pass     fail     first  mismatch
+head          actions  lab      order  agreement  seconds
+1a2b3c4d5e6f  pass     pass     first  match      412
+2b3c4d5e6f7a  fail     fail     late   match      1530
+3c4d5e6f7a8b  pass     fail     first  mismatch   -95
 4d5e6f7a8b9c  pass     missing
 heads 4 of 4
 lab verdict present 3 of at least 4
 mismatches 1 of at most 0
 lab verdict first 2 of at least 4
+lab verdict inside the wait 2 of at least 4
 rule fails
 ```
 
 | Head | Why its row reads that way |
 |---|---|
-| `1a2b3c4d5e6f` | Both sides passed and the lab check run completed before the last Actions job of the gate |
-| `2b3c4d5e6f7a` | Both sides failed; the lab check run completed in the same second as the last Actions job, which is late |
-| `3c4d5e6f7a8b` | The lab failed a head Actions passed: one mismatch, which alone fails the rule |
-| `4d5e6f7a8b9c` | Actions graded the head and the lab posted no verdict; it stays in the window and counts against presence |
+| `1a2b3c4d5e6f` | Both sides passed and the lab check run completed before the last Actions job of the gate, 412 seconds after the `lab-verdict` job started: inside the wait |
+| `2b3c4d5e6f7a` | Both sides failed; the lab check run completed in the same second as the last Actions job, which is late, and 1530 seconds after the `lab-verdict` job started: outside the wait |
+| `3c4d5e6f7a8b` | The lab failed a head Actions passed: one mismatch, which alone fails the rule. Its lab verdict completed 95 seconds before the `lab-verdict` job started, which is inside the wait |
+| `4d5e6f7a8b9c` | Actions graded the head and the lab posted no verdict; it stays in the window and counts against presence, against first and against the wait |
 
-The counts then fail three ways: 3 lab verdicts against the 4 a window of 4 needs, 1 mismatch
-against 0, and 2 first verdicts against 4.
+The counts then fail four ways: 3 lab verdicts against the 4 a window of 4 needs, 1 mismatch
+against 0, 2 first verdicts against 4, and 2 verdicts inside the wait against 4.
 
 ## Troubleshooting
 
@@ -228,6 +252,8 @@ against 0, and 2 first verdicts against 4.
 |---|---|---|
 | Every row shows `missing` | The lab is not posting `lab-shadow/<gate>` check runs on these heads | Check the lab scheduler and worker are live and grading in shadow |
 | One head shows `missing` although it has a `lab-shadow/<gate>` check run | The run came from another App or a workflow token, or the newest run of that name is still in progress or concluded `cancelled`, `skipped` or `neutral` | `gh api 'repos/<repo>/commits/<sha>/check-runs?check_name=lab-shadow/<gate>'` shows each run's `app.slug`, `status` and `conclusion` |
+| `lab verdict inside the wait` below its threshold while `lab verdict first` holds | Lab verdicts land more than 1200 seconds after the `lab-verdict` job starts, while Actions jobs wait longer still for a runner | Read the `seconds` column for the slow heads, then the lab's queue wait and worker capacity. The gate stays on GitHub Actions until the count holds |
+| A row has no `seconds` although it has a lab verdict | The head holds no started `lab-verdict` job from `github-actions`: the job was skipped, has not started, or the head is older than the job | `gh api 'repos/<repo>/commits/<sha>/check-runs?check_name=lab-verdict'` shows its `status` and `started_at` |
 | `heads N of 50` below 50 | Too few completed Tests runs with a graded job of the gate in the newest 1000 runs | Use a smaller `--heads`, or wait for more heads |
 | `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs before it prints: 10 pages of runs plus at least one API call per distinct head | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
 | `error: --app or AGENTIHOOKS_LAB_APP names the lab App`, exit 2 | Neither the flag nor the variable names the lab App | Pass `--app <lab App slug>` or export `AGENTIHOOKS_LAB_APP` |

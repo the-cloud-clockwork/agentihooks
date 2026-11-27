@@ -6,7 +6,8 @@ the gate with the head's lab-shadow/<gate> check run from the lab App, named by 
 whose jobs of the gate were cancelled, still run or never graded leaves the window; a unit job the workflow reran after
 a lost runner counts by its rerun. It prints one row per head and the counts, and exits 0 only when the window holds N
 heads with no mismatch, a lab verdict on 48 and a lab verdict completed first on 45 of every 50, rounded up, and 1
-otherwise.
+otherwise. For the pull request event it also asks for a lab verdict on 48 of every 50 inside the wait of the head's
+lab-verdict job, counted from the start of that job, and each row ends with the seconds the lab verdict took.
 """
 
 import argparse
@@ -16,13 +17,14 @@ import subprocess
 import sys
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 import scripts.ci_budget.rate_limit
 from scripts.ci_lab import shadow
 from scripts.ci_lab.webhooks import CHECK_PREFIX
+from scripts.ci_lab_verdict import WAIT_S
 
 __all__ = [
     "Head",
@@ -45,7 +47,9 @@ __all__ = [
     "render",
     "rerun",
     "rule",
+    "started",
     "tally",
+    "waited",
 ]
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
@@ -59,13 +63,16 @@ PULL_REQUEST = "pull_request"
 MERGE_GROUP = "merge_group"
 CANCELLED = "cancelled"
 MISSING = "missing"
+JOB = "lab-verdict"
 COLUMNS = "{:<12}  {:<7}  {:<7}  {:<5}  {}"
+TIMED = "{:<12}  {:<7}  {:<7}  {:<5}  {:<9}  {}"
 PER_PAGE = 100
 PAGES = 10
 TIMEOUT_S = 30.0
 HEADS = 50
 PRESENT = 48
 FIRST = 45
+INSIDE = 48
 
 Fetch = Callable[[str], Mapping[str, Any]]
 
@@ -116,9 +123,10 @@ class Tally:
 
 
 def rule(heads: int, event: str = MERGE_GROUP) -> Rule:
-    """Return the rule for a window of heads: lab verdicts present on 48 and first on 45 of every 50, rounded up."""
-    del event
-    return Rule(heads, math.ceil(heads * PRESENT / HEADS), math.ceil(heads * FIRST / HEADS))
+    """Return the rule for a window of heads: lab verdicts present on 48 and first on 45 of every 50, rounded up, and
+    for the pull request event, whose lab-verdict job waits for the lab, also inside that wait on 48."""
+    inside = math.ceil(heads * INSIDE / HEADS) if event == PULL_REQUEST else None
+    return Rule(heads, math.ceil(heads * PRESENT / HEADS), math.ceil(heads * FIRST / HEADS), inside)
 
 
 def completed(run: Mapping[str, Any]) -> datetime:
@@ -166,12 +174,24 @@ def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str, listed: bool = F
     return None if outcome is None else Verdict(outcome, completed(newest))
 
 
+def started(runs: Sequence[Mapping[str, Any]]) -> datetime | None:
+    """Return when the newest lab-verdict job of GitHub Actions on a head started, or None when none has started."""
+    jobs = [run for run in runs if run["name"] == JOB and run["app"]["slug"] == shadow.ACTIONS]
+    if not jobs:
+        return None
+    start = max(jobs, key=lambda run: int(run["id"])).get("started_at")
+    return None if start is None else datetime.fromisoformat(str(start))
+
+
 def head(
     sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources, listed: bool = False
 ) -> Head | None:
-    """Return the head's verdicts on the gate, or None when it holds no Actions verdict."""
+    """Return the head's verdicts on the gate and the start of its lab-verdict job, or None when it holds no Actions
+    verdict."""
     found = actions(runs, gate, sources.static)
-    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app, listed))
+    if found is None:
+        return None
+    return Head(sha, found, lab(runs, gate, sources.lab_app, listed), started(runs))
 
 
 def mismatch(found: Head) -> bool:
@@ -184,44 +204,63 @@ def first(found: Head) -> bool:
     return found.lab is not None and found.lab.completed_at < found.actions.completed_at
 
 
+def waited(found: Head) -> timedelta | None:
+    """Return the time from the start of the head's lab-verdict job to its lab verdict, or None without either."""
+    if found.lab is None or found.started is None:
+        return None
+    return found.lab.completed_at - found.started
+
+
 def inside(found: Head) -> bool:
-    """Whether the lab verdict completed inside the wait of the head's lab-verdict job."""
-    del found
-    return False
+    """Whether the lab verdict completed inside the wait of the head's lab-verdict job, counted from the job's start,
+    which is earlier than the start of the wait by the job's setup steps."""
+    taken = waited(found)
+    return taken is not None and taken <= timedelta(seconds=WAIT_S)
 
 
 def tally(heads: Sequence[Head]) -> Tally:
     """Return the counts the rule judges."""
     present = sum(found.lab is not None for found in heads)
-    return Tally(len(heads), present, sum(map(mismatch, heads)), sum(map(first, heads)))
+    return Tally(len(heads), present, sum(map(mismatch, heads)), sum(map(first, heads)), sum(map(inside, heads)))
 
 
 def holds(counted: Tally, window: Rule) -> bool:
-    """Whether the counts meet the rule: the window full, no mismatch and enough lab verdicts present and first."""
+    """Whether the counts meet the rule: the window full, no mismatch, enough lab verdicts present and first and, where
+    the rule asks for it, enough inside the wait."""
     full = counted.heads >= window.heads and counted.mismatches == 0
-    return full and counted.present >= window.present and counted.first >= window.first
+    timely = window.inside is None or counted.inside >= window.inside
+    return full and timely and counted.present >= window.present and counted.first >= window.first
 
 
-def line(found: Head) -> str:
-    """Return one head's row of the table."""
+def line(found: Head, timed: bool = False) -> str:
+    """Return one head's row of the table; a timed row ends with the seconds from the start of the head's lab-verdict
+    job to its lab verdict, or with nothing when the head lacks either."""
     if found.lab is None:
         return COLUMNS.format(found.sha[:12], found.actions.outcome, MISSING, "", "").rstrip()
     order = "first" if first(found) else "late"
     agreement = "mismatch" if mismatch(found) else "match"
-    return COLUMNS.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement)
+    if not timed:
+        return COLUMNS.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement)
+    taken = waited(found)
+    seconds = "" if taken is None else str(round(taken.total_seconds()))
+    return TIMED.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement, seconds).rstrip()
 
 
 def render(gate: str, event: str, heads: Sequence[Head], window: Rule) -> str:
-    """Return the report: the gate and event, one row per head, the counts against the rule and its verdict."""
+    """Return the report: the gate and event, one row per head, the counts against the rule and its verdict; a rule
+    that asks for lab verdicts inside the wait adds the seconds column and that count."""
     counted = tally(heads)
+    timed = window.inside is not None
+    names = ("head", "actions", "lab", "order", "agreement")
     lines = [
         f"gate {gate} event {event}",
-        COLUMNS.format("head", "actions", "lab", "order", "agreement"),
-        *map(line, heads),
+        TIMED.format(*names, "seconds") if timed else COLUMNS.format(*names),
+        *(line(found, timed) for found in heads),
         f"heads {counted.heads} of {window.heads}",
         f"lab verdict present {counted.present} of at least {window.present}",
         f"mismatches {counted.mismatches} of at most 0",
         f"lab verdict first {counted.first} of at least {window.first}",
+        *([f"lab verdict inside the wait {counted.inside} of at least {window.inside}"] if timed else []),
         "rule holds" if holds(counted, window) else "rule fails",
     ]
     return "".join(f"{text}\n" for text in lines)
@@ -287,7 +326,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], fetch: Fetch = api) ->
     if not arguments.app:
         parser.error(f"--app or {LAB_APP} names the lab App")
     repository = environ.get("GITHUB_REPOSITORY") or REPOSITORY
-    window = rule(arguments.heads)
+    window = rule(arguments.heads, arguments.event)
     sources = shadow.Sources(shadow.static_jobs(ROOT), arguments.app)
     found = collect(fetch, repository, arguments.event, arguments.gate, sources, arguments.heads)
     sys.stdout.write(render(arguments.gate, arguments.event, found, window))
