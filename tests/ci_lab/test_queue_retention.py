@@ -2,6 +2,7 @@
 drains the old global done set; kept out of tests/ci_lab/test_scheduler.py, which is at the file-lines cap."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,6 +15,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.leases import Leases
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.outcomes import CRASH, DROPPED, PASSED
+from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.units import Unit
 from tests.ci_lab.test_scheduler import (
     APP_SETTINGS,
@@ -182,6 +184,7 @@ def test_each_pass_drains_at_most_one_batch_of_the_old_done_set_then_stops_readi
     lab: Callable[..., Run],
 ) -> None:
     run = lab({})
+    run.engine.settings = replace(run.engine.settings, retention_ms=RETENTION_MS)
     client = run.lab.client
     batch = scheduler.DRAINED_PER_PASS
     named = [f"h{number % 3}:test:{number}" for number in range(batch + 1)]
@@ -195,8 +198,7 @@ def test_each_pass_drains_at_most_one_batch_of_the_old_done_set_then_stops_readi
     assert f"drained {batch} jobs of the old done set, {batch} settled, 1 left" in first
     run.tick(1100)
     assert client.scard(DONE) == 0
-    retention = run.engine.settings.retention_ms
-    assert all(expires_within(client, record_key(job), retention) for job in named)
+    assert all(expires_within(client, record_key(job), RETENTION_MS) for job in named)
     assert not any(action.startswith("drained") for action in run.tick(1200))
     client.sadd(DONE, "h9:test:late")
     run.tick(1300)
@@ -216,6 +218,21 @@ def test_a_settled_job_keeps_its_record_within_the_retention_until_its_grade_col
     assert expires_within(run.lab.client, record_key(scheduler.job_id(HEAD_A, item)), queue.RETENTION_MS)
     run.tick(1100)
     assert run.grade(HEAD_A).units[ref(item)].outcome == PASSED
+
+
+@pytest.mark.feature("lab-settled-job-retention")
+def test_the_reap_pass_marks_a_lost_job_with_the_scheduler_retention(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=Policy(lost=0))
+    run.engine.settings = replace(run.engine.settings, retention_ms=RETENTION_MS)
+    run.push(HEAD_A)
+    run.tick(1000)
+    [grant] = run.lease(ttl_ms=100)
+
+    assert f"reaped {grant.job} lost" in run.tick(1100)
+
+    assert expires_within(run.lab.client, record_key(grant.job), RETENTION_MS)
+    assert expires_within(run.lab.client, head_done(HEAD_A), RETENTION_MS)
 
 
 @pytest.mark.feature("lab-settled-job-retention")

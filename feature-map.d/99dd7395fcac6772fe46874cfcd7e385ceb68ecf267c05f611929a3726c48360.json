@@ -15,6 +15,7 @@
     "tests/ci_lab/test_queue_retention.py::test_drain_removes_each_named_job_and_gives_only_done_or_lost_records_the_retention",
     "tests/ci_lab/test_queue_retention.py::test_each_pass_drains_at_most_one_batch_of_the_old_done_set_then_stops_reading_it",
     "tests/ci_lab/test_queue_retention.py::test_a_settled_job_keeps_its_record_within_the_retention_until_its_grade_collects_it",
+    "tests/ci_lab/test_queue_retention.py::test_the_reap_pass_marks_a_lost_job_with_the_scheduler_retention",
     "tests/ci_lab/test_queue_retention.py::test_lease_completion_and_reaping_settle_with_the_lease_layer_retention",
     "tests/ci_lab/test_queue_retention.py::test_main_gives_leases_the_scheduler_retention"
   ]
