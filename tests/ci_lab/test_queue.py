@@ -422,7 +422,7 @@ def test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one(jobs:
 def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {}, rank=3)
     assert take(jobs, "h1:test:a")
-    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "failed")
 
     assert jobs.enqueue([unit("a")], "h1", {}, rank=1) == []
 
