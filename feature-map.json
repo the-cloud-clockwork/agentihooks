@@ -17191,6 +17191,7 @@
         "tests/quick/test_authentication_successors.py::test_competing_initial_launchers_take_the_native_engineer_once",
         "tests/quick/test_authentication_successors.py::test_initial_native_spawn_failure_releases_the_seat_for_retry",
         "tests/quick/test_authentication_successors.py::test_initial_launch_preserves_an_already_launching_native_engineer",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_skips_seats_it_cannot_take_and_still_launches_later_engineers",
         "tests/quick/test_cli.py::test_up_reports_an_unbound_native_engineer_as_pending",
         "tests/quick/test_authentication_quota.py::test_bound_default_claude_without_a_target_marker_keeps_explicit_authentication",
         "tests/quick/test_cli.py::test_up_refuses_a_registry_removed_during_native_startup"

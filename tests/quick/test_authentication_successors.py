@@ -222,6 +222,7 @@ def test_initial_launch_preserves_an_already_launching_native_engineer(
     assert registry.load(tmp_path) == swarm
 
 
+@pytest.mark.feature("quick-native-authentication")
 def test_initial_launch_skips_seats_it_cannot_take_and_still_launches_later_engineers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
