@@ -2903,7 +2903,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/dep-manifest"
           shopt -s nullglob
-          python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
+          python -m coverage combine --rcfile=.github/coverage/coverage.ini --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
             .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
           python -m scripts.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
             --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
