@@ -58,7 +58,7 @@ def test_a_release_regrades_a_live_frame_without_posting_failed_required(
     run.push(HEAD_A, event="pull_request", action="synchronize")
     run.tick(1000)
     old = run.grade(HEAD_A)
-    grant = run.lease()[0]
+    grant = run.lease(ttl_ms=10000)[0]
     run.tick(1100)
     if not quiet:
         run.finish(grant, "passed", {})

@@ -143,7 +143,9 @@ class Expander:
 
     def expand(self, request: GradeRequest) -> scheduler.Plan:
         self.seen.append(request)
-        return self.plans[request.head]
+        plan = self.plans[request.head]
+        scope = plan.outputs.get("select", {}).get("scope", "none")
+        return replace(plan, required=scheduler._frame_required(int(request.tier), scope))
 
     def merge_base(self, repo: str, head: str) -> str:
         return self.plans[head].grader
