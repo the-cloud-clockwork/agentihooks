@@ -6,5 +6,8 @@
   "seam": "scripts.ci_lab.worktrees.Lab.environ, the environment Mirror.fetch passes git for the lab remote",
   "tests": [
     "tests/ci_lab/test_worktrees.py::test_a_lab_fetch_header_is_the_exact_basic_credential_the_lab_remote_accepts"
+  ],
+  "rules": [
+    "lab-remote-basic-scheme"
   ]
 }
