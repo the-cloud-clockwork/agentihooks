@@ -2651,7 +2651,7 @@ def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
     assert isinstance(verdicts, Store) and (verdicts.client, verdicts.objects) == (client, objects)
     found = worktrees.Lab("http://ci-lab-remote.ci-lab:8080/agentihooks.git", "lab-token")
     store = tmp_path / "stores" / "the-cloud-clockwork--agentihooks"
-    assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found)
+    assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found, timeout_s=60.0)
 
 
 @pytest.mark.feature("lab-scheduler-service")
