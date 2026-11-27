@@ -775,7 +775,7 @@ def sample_tool_use_event():
 
 
 @pytest.fixture(autouse=True)
-def _first_read_gate_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+def _first_read_gate_offline(_isolate_real_user_paths: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_GATE_FIRST_READ", "off")
 
 

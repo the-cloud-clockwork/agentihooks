@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Any, cast
 
-from scripts.gates.base import Call, Decision, Who
+from scripts.gates.base import Call, Decision, Gate, Who
 
 REASON = "Run agentihooks seat brief before using other tools in this seated session."
 SESSION = re.compile(r"[A-Za-z0-9_-]+")
@@ -166,7 +166,7 @@ def reset(payload: dict[str, Any]) -> None:
         path.unlink(missing_ok=True)
 
 
-class FirstRead:
+class FirstRead(Gate):
     name = "first-read"
     default_mode = "observe"
 
