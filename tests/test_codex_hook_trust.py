@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -50,3 +51,24 @@ def test_handler_position_names_the_key_after_skipped_groups(tmp_path):
         f"{hooks}:stop:1:0": {"trusted_hash": CODEX_HOOK_HASHES["stop:0:0"]},
         f"{hooks}:stop:2:0": {"trusted_hash": CODEX_HOOK_HASHES["stop:1:0"]},
     }
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+def test_rebase_state_filters_source_prefix_and_preserves_values(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "hooks.json"
+    target = tmp_path / "target" / "hooks.json"
+    first = {"trusted_hash": "first", "enabled": False}
+    second = {"trusted_hash": "second"}
+    state = {
+        f"{source}:SessionStart:0:0": first,
+        f"{source}:Stop:1:2": second,
+        f"{source}.other:Stop:1:2": {"trusted_hash": "similar"},
+        f"{target}:Stop:1:2": {"trusted_hash": "foreign"},
+        f"prefix{source}:Stop:1:2": {"trusted_hash": "embedded"},
+    }
+    rebased = codex_hook_trust.rebase_state(state, source, target)
+    assert rebased == {f"{target}:SessionStart:0:0": first, f"{target}:Stop:1:2": second}
+    assert rebased[f"{target}:SessionStart:0:0"] is first
+    assert rebased[f"{target}:Stop:1:2"] is second
+    assert list(state)[0] == f"{source}:SessionStart:0:0"
+    assert codex_hook_trust.rebase_state({}, source, target) == {}

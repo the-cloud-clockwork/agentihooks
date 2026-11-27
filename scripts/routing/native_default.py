@@ -4,8 +4,12 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
+import tomlkit
+from tomlkit.items import InlineTable, Item, SingleKey, Table
+
 from scripts.profiles import binding, homes
 from scripts.routing import envs, native_login
+from scripts.targets.codex_hook_trust import rebase_state
 
 
 def _configuration(source: Path, home: Path) -> None:
@@ -20,6 +24,40 @@ def _configuration(source: Path, home: Path) -> None:
                 target.symlink_to(entry.resolve())
         else:
             shutil.copy2(entry, target)
+
+
+def _rename_trust_key(key: SingleKey, value: Item, name: str) -> None:
+    original = key.as_string()
+    replacement = SingleKey(name, t=key.t).as_string()
+    key._original = original.replace(original.strip(), replacement, 1)
+    if isinstance(value, Table) and value.display_name is not None:
+        value.display_name = value.display_name.replace(original.strip(), replacement)
+
+
+def _codex_trust(source: Path, home: Path) -> None:
+    config = home / "config.toml"
+    if not config.is_file():
+        return
+    doc = tomlkit.parse(config.read_bytes().decode())
+    hooks = doc.get("hooks", {})
+    state = hooks.get("state")
+    if not isinstance(state, (Table, InlineTable)):
+        return
+    source_hooks = source / "hooks.json"
+    target_hooks = home / "hooks.json"
+    renamed: dict[str, str] = {}
+    for path in dict.fromkeys((source_hooks, source_hooks.resolve())):
+        renamed.update(
+            {
+                original: name
+                for name, original in rebase_state({name: name for name in state}, path, target_hooks).items()
+            }
+        )
+    for key, value in state.value.body:
+        if isinstance(key, SingleKey) and key.key in renamed:
+            _rename_trust_key(key, value, renamed[key.key])
+    if renamed:
+        config.write_bytes(tomlkit.dumps(doc).encode())
 
 
 def _binding(agent: str, source: Path, home: Path, environ: Mapping[str, str]) -> None:
@@ -49,6 +87,8 @@ def prepare(agent: str, environ: Mapping[str, str]) -> dict[str, str]:
     home = root / agent
     home.mkdir(mode=0o700)
     _configuration(source, home)
+    if agent == "codex":
+        _codex_trust(source, home)
     shutil.copy2(login, home / credential)
     (home / credential).chmod(0o600)
     _binding(agent, source, home, environ)
