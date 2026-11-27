@@ -86,7 +86,24 @@ def _canary_statement(statement: ast.stmt) -> bool:
     )
 
 
+def _literal(text: str) -> bool:
+    single, double = False, False
+    for char in text:
+        if single:
+            single = char != "'"
+        elif char == '"':
+            double = not double
+        elif char == "'" and not double:
+            single = True
+        elif char in SHELL_META or char == "\\":
+            return False
+    return True
+
+
 def _canary(command: str) -> bool:
+    text = _command(command)
+    if text is None or not _literal(text):
+        return False
     words = _words(command)
     if len(words) != 5 or not re.fullmatch(r"python[0-9.]*", Path(words[0]).name):
         return False
