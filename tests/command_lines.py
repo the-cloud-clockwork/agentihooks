@@ -5,9 +5,14 @@ import re
 import shlex
 
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 
-PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
+PARSERS = {
+    "swarm": lambda argv: swarm_parser().parse_args(argv),
+    "msg": lambda argv: msg_parser().parse_args(argv),
+    "seat": lambda argv: seat_parser().parse_args(argv),
+}
 
 
 def named(text: str) -> list[str]:

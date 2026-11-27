@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 ITEM_RE = re.compile(r"^((phases|questions|followups|tasks|notes)/[^/]+|notes)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -83,7 +84,7 @@ def relayed(op, meta) -> str:
     return verified(op["by"], op["quote"]) if master else ""
 
 
-def orchestrator(op: dict[str, Any], ctx: Any, what: str) -> bool:
+def orchestrator(op: dict[str, Any], ctx: OpContext, what: str) -> bool:
     """Whether the op's author is the ledger's orchestrator, with the refusal recorded on ctx when it is not."""
     if ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator":
         return True
@@ -91,7 +92,7 @@ def orchestrator(op: dict[str, Any], ctx: Any, what: str) -> bool:
     return False
 
 
-def orchestrator_words(op: dict[str, Any], ctx: Any, what: str = "relay") -> str:
+def orchestrator_words(op: dict[str, Any], ctx: OpContext, what: str = "relay") -> str:
     """The verified quoted span of an orchestrator's op, or empty with the refusal recorded on ctx."""
     if not orchestrator(op, ctx, what):
         return ""
@@ -110,7 +111,7 @@ def marks_of(op: dict[str, Any], proof: dict[str, str]) -> dict[str, str]:
     return {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, **proof}
 
 
-def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     """A new operator note carrying the orchestrator's relayed text and the operator's verified words."""
     if any(n["id"] == op["id"] for n in doc["notes"]):
         return True
@@ -125,7 +126,7 @@ def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["item"] == "notes":
         return add_note(doc, op, ctx)
     name, item_id = op["item"].split("/")

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x_frame:e48276e73b46bdf58f775a543cbe3c8fd6808458b949ce58507e5390cc72323c": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: this branch handles promotion and backfill, for which _frame_required returns (). Omitting required uses the identical Plan.required default ()."
+  }
+}

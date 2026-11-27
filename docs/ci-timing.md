@@ -1373,8 +1373,8 @@ Pull request unit runner pods prefer nodes that run no batch runner pod. The
 `anton`, `anton-oss` and `anton-oss-queue` runner scale sets carry a preferred
 pod anti affinity, weight 100 per node, against pods of the `anton-oss-batch`
 and `anton-batch` scale sets. Batch runners are never refused a node by it, and
-the batch lane keeps its limits: `anton-oss-batch` still has `maxRunners` 12
-and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
+the batch lane keeps its limits: `anton-oss-batch` has `maxRunners` 6, since antoncore pull request 2079
+on 25 November 2026, and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
 delivered the rule; ArgoCD applied it at 01:23:52 UTC on 20 October 2026.
 
 ### Cause
@@ -1425,7 +1425,7 @@ of the three ArgoCD applications and asserts:
 |---|---|
 | `test_unit_runners_prefer_nodes_without_batch_runners` | each unit set has a weight 100 preferred term per hostname against both batch sets in their namespaces |
 | `test_batch_runners_are_never_refused_a_unit_runner_node` | no unit set has a required term that names a batch set |
-| `test_batch_lane_keeps_its_limits` | `anton-oss-batch` keeps `maxRunners` 12 and a CPU limit of `"3"` |
+| `test_batch_lane_keeps_its_limits` | `anton-oss-batch` keeps `maxRunners` 6 and a CPU limit of `"3"` |
 
 ### Why the rule is preferred, not required
 
@@ -1932,7 +1932,7 @@ Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `ho
 | Mutation line selection proof | `mutation-line-selection-proof.yml` | every run |
 | Mutation refinement proof | `mutation-refinement-proof.yml` | every run |
 | Published Helm chart in kind | `helm-kind-published.yml` | runs under its own name |
-| Queue retry | `queue-retry.yml`, job `retry` | every run |
+| Queue retry | `queue-retry.yml`, job `retry` | every run, at most five minutes; queued pulls resume after dequeue |
 | Startup stages | `startup-stages.yml` | `workflow_dispatch` runs |
 | Swarm container smoke | `swarm-smoke.yml` | runs under its own name |
 | Swarm worker image | `swarm-node-image.yml` | `workflow_dispatch` runs |

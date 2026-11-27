@@ -70,6 +70,7 @@ WORKER_KEYS = (
     "swarm:*:review-tasks",
     "seat:*:recaps",
     "seat:*:learned",
+    "seat-learned:*",
     "seat-of:*:exit",
 )
 INDEX = hive_state.LEGACY_INDEX

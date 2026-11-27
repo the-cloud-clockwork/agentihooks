@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.xǁSchedulerǁ__init__:9ef0a943ec8bc9b15da5d29a9345d5c8add791050c8a34b6c903bdcb68aef840": {
+    "reader": "standards_reader",
+    "reason": "_drained is read only by if self._drained and only ever set to True, so None and False behave the same."
+  }
+}

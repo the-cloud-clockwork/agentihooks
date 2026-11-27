@@ -364,7 +364,9 @@ def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
 
 def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     if tick.deliberate_exit.take(store, slug, agent.name):
-        runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task))
+        if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+            tick.retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
+            return [f"could not retire {agent.name}, retrying next tick"]
         return [
             f"retired {agent.name} after a deliberate terminate"
             + tick._drop(slug, store, ledger, rows, agent, refund=True)
@@ -374,7 +376,9 @@ def _lost(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: An
         return [f"resumed {agent.name}"]
     if agent not in store.agents(slug):
         return []
-    runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task))
+    if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+        tick.retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
+        return [f"could not retire {agent.name}, retrying next tick"]
     return [f"lost {agent.name}" + tick._drop(slug, store, ledger, rows, agent)]
 
 

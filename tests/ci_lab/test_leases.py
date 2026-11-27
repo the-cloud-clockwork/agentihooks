@@ -210,6 +210,70 @@ def test_a_lease_reads_past_a_page_of_jobs_that_do_not_fit(jobs: queue.Queue, la
     assert [grant.job for grant in lab.lease("w1", 1, frozenset(), 0)] == ["h2:test:narrow"]
 
 
+def shedding(jobs: queue.Queue, clock: Clock, *classes: str) -> leases.Leases:
+    return leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=clock.sleep, poll_ms=50, shed=lambda: classes)
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_a_lease_with_promotion_shed_grants_pull_request_and_queue_work_and_no_promotion_or_backfill_job(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    jobs.enqueue([unit("p1")], "promote", {}, rank=3)
+    jobs.enqueue([unit("b1")], "audit", {}, rank=4)
+    jobs.enqueue([unit("q1")], "merge", {}, rank=2)
+    jobs.enqueue([unit("r1")], "pull", {}, rank=1)
+    lab = shedding(jobs, clock, "backfill", "promotion")
+
+    assert [grant.job for grant in lab.lease("w1", 4, frozenset(), 0)] == ["pull:test:r1", "merge:test:q1"]
+    assert jobs.pending() == ["promote:test:p1", "audit:test:b1"]
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_a_lease_with_only_backfill_shed_grants_promotion_work_and_no_backfill_or_unranked_job(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    jobs.enqueue([unit("old")], "before", {})
+    jobs.enqueue([unit("b1")], "audit", {}, rank=4)
+    jobs.enqueue([unit("p1")], "promote", {}, rank=3)
+    lab = shedding(jobs, clock, "backfill")
+
+    assert [grant.job for grant in lab.lease("w1", 3, frozenset(), 0)] == ["promote:test:p1"]
+    assert jobs.pending() == ["audit:test:b1", "before:test:old"]
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_a_lease_with_queue_shed_grants_only_hotfix_and_pull_request_work(jobs: queue.Queue, clock: Clock) -> None:
+    jobs.enqueue([unit("q1")], "merge", {}, rank=2)
+    jobs.enqueue([unit("r1")], "pull", {}, rank=1)
+    jobs.enqueue([unit("h1")], "fix", {}, rank=0)
+    lab = shedding(jobs, clock, "backfill", "promotion", "queue")
+
+    assert [grant.job for grant in lab.lease("w1", 3, frozenset(), 0)] == ["fix:test:h1", "pull:test:r1"]
+    assert jobs.pending() == ["merge:test:q1"]
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_a_lease_stops_reading_the_pending_order_at_the_first_job_of_a_shed_class(
+    jobs: queue.Queue, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit(f"{number:03}") for number in range(queue.PAGE * 2 + 1)], "promote", {}, rank=3)
+    jobs.enqueue([unit("r1")], "pull", {}, rank=1)
+    lab = shedding(jobs, clock, "backfill", "promotion")
+    pages = page_reads(jobs, monkeypatch)
+    reads: list[str] = []
+    read = jobs.job
+
+    def counted(job: str) -> queue.Job | None:
+        reads.append(job)
+        return read(job)
+
+    monkeypatch.setattr(jobs, "job", counted)
+
+    assert [grant.job for grant in lab.lease("w1", 4, frozenset(), 0)] == ["pull:test:r1"]
+    assert reads == ["pull:test:r1", "promote:test:000"]
+    assert [page["num"] for page in pages] == [queue.PAGE]
+
+
 def test_long_poll_waits_until_work_arrives(jobs: queue.Queue, clock: Clock) -> None:
     def arrive(ms: int) -> None:
         clock.sleep(ms)

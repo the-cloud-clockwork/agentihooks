@@ -8,10 +8,11 @@ from typing import Any, cast
 import pytest
 
 from scripts.ci_lab.webhooks import LabIntake
-from scripts.events.bus import Bus
+from scripts.events.bus import Bus, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
+from scripts.events.subjects import subject
 from scripts.hub import github_webhooks, pulls
 from scripts.hub.github_webhooks import Ingress
 from scripts.hub.pulls import Observation, Pulls
@@ -27,10 +28,15 @@ def sign(body: bytes, secret: bytes = SECRET) -> str:
     return "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
-def pull_request(action="opened", state="open", merged=False, head="a1"):
+def pull_request(action: str = "opened", state: str = "open", merged: bool = False, head: str = "a1") -> dict[str, Any]:
     return {
         "action": action,
-        "pull_request": {"html_url": URL, "state": state, "merged": merged, "head": {"sha": head}},
+        "pull_request": {
+            "html_url": URL,
+            "state": state,
+            "merged": merged,
+            "head": {"sha": head, "ref": "feature", "label": "acme:feature"},
+        },
     }
 
 
@@ -438,11 +444,11 @@ def merge_group(action="checks_requested"):
     }
 
 
-def lab_pull_request(action="opened", head="a1"):
+def lab_pull_request(action: str = "opened", head: str = "a1") -> dict[str, Any]:
     payload = pull_request(action, head=head)
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}
-    payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["base"] = {"sha": "b0", "label": "acme:dev"}
     payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
     return payload
 
@@ -634,6 +640,65 @@ def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatc
     assert [subject for subject, _ in buses[0].lab_heads.entries] == []
     assert [subject for subject, _ in buses[1].lab_heads.entries] == ["ci.lab.head.notice"]
     assert [subject for subject, _ in buses[1].events.entries] == []
+
+
+@pytest.mark.feature("github-webhook-scoped-receiver")
+def test_a_scoped_receiver_without_provision_publishes_a_merge_group_on_the_swarm_scoped_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", SECRET.decode())
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.setenv("AGENTIHOOKS_BUS_SCOPED", "1")
+    monkeypatch.delenv(github_webhooks.NOTICE_SECRET_ENV, raising=False)
+    scoped = open_bus(BusConfig(scoped=True))
+    root = open_bus(BusConfig())
+    Pulls(cast(Bus, root), clock=lambda: 1000).track("crew", URL)
+    opened: list[tuple[str, bool, bool]] = []
+    answers: list[object] = []
+
+    class ReceiverBus:
+        def __init__(self, config: BusConfig) -> None:
+            opened.append(("open", config.scoped, config.provision))
+            self.config = config
+            self.events = (scoped if config.scoped else root).events
+
+        def state(self, bucket: str) -> StateStore:
+            if self.config.scoped and not self.config.provision:
+                raise PermissionError("select a swarm before opening scoped state")
+            return root.state(bucket)
+
+        def close(self) -> None:
+            opened.append(("closed", self.config.scoped, self.config.provision))
+
+    class Server:
+        def __init__(self, address: tuple[str, int], handler: type) -> None:
+            body = json.dumps(merge_group()).encode()
+            headers = {"X-GitHub-Event": "merge_group", "X-Hub-Signature-256": sign(body)}
+            answers.extend(request(None, body=body, cls=handler, headers=headers)[:1])
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            pass
+
+    review = scoped.for_swarm("crew").events.consumer("review", subject("crew", "merge_group", "requested"))
+    legacy = root.events.consumer("legacy", "swarm.>")
+    monkeypatch.setattr(github_webhooks, "open_bus", ReceiverBus)
+    monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
+    with pytest.raises(KeyboardInterrupt):
+        github_webhooks.main([])
+    assert answers == [("status", 200)]
+    assert [(event.swarm, event.type, event.key) for event in drain(review)] == [
+        ("crew", "merge_group.requested", "a1")
+    ]
+    assert drain(legacy) == []
+    assert opened == [
+        ("open", True, False),
+        ("open", False, False),
+        ("closed", True, False),
+        ("closed", False, False),
+    ]
 
 
 def release(action="published", tag="v1.2.3"):

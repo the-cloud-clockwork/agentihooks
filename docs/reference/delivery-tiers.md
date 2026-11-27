@@ -197,18 +197,20 @@ until it passes does not repair it.
 
 ## Checks a dev push skips
 
-`lint` and `semgrep` pass on the pull request head, and `test-count` passes on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
+`lint`, `lint-actions` and `semgrep` pass on the pull request head, and `test-count` and `collect` pass on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
 
-- **Pull request:** `lint`, `semgrep` and `test-count` must succeed.
-- **Merge group:** `test-count` must succeed; `lint` and `semgrep` must be skipped, like every job outside the queue set.
-- **Dispatched run:** all three must succeed; a skip fails with `Every required gate must succeed.`
-- **Push:** a skipped `lint`, `semgrep` or `test-count` passes.
+- **Pull request:** `lint`, `lint-actions`, `semgrep`, `test-count` and `collect` must succeed.
+- **Merge group:** `test-count` and `collect` must succeed; `lint`, `lint-actions` and `semgrep` must be skipped, like every job outside the queue set.
+- **Dispatched run:** all five must succeed; a skip fails with `Every required gate must succeed.`
+- **Push:** a skipped `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` passes.
 
 | Job | `pull_request` | `merge_group` | `push` to `dev` |
 |---|---|---|---|
 | `lint` | runs | skipped | skipped |
+| `lint-actions` | runs | skipped | skipped |
 | `semgrep` | runs | skipped | skipped |
 | `test-count` (3.12) | runs | runs | skipped |
+| `collect` (3.12) | runs | runs | skipped |
 | `unit` and `shard-check` (3.12) | runs | runs | runs |
 
 The size and complexity limits `lint` holds on the pull request head are graded again on the merge group's combined tree by the unit test `test_the_checked_out_tree_holds_the_size_limits` in `tests/test_size_limits.py`. It measures the checked out tree with `scripts.size_limits` against that tree's own `tests/SIZE_ALLOWLIST.json` and fails on a unit over a limit without an allowance, a unit grown past its allowance, or an allowlist that differs from the measurement. Two pull requests can each keep a file under the cap and still merge it over: on 20 November pull request 12249 passed `lint` with `tests/ci_lab/test_scheduler.py` at 2943 lines, the merge group combined it with eight later merges into 3077 lines, and every branch cut from `dev` then failed its prepush size step. The test starts `git` and `ruff`, so its dependency record escapes, and the queue planner reruns it whenever a `tests/`, `hooks/`, `scripts/` or `.github/workflows/` path or a global input changed ([Slice 5 as delivered](ci-result-cache.md#slice-5-as-delivered)).
@@ -229,8 +231,8 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `Gate — Required` fails with `Every gate required for this event must succeed and other gates must be skipped.` on a pull request while `lint`, `semgrep` or `test-count` reads `skipped` | A workflow change dropped the job's pull request condition. | Restore the job `if` shown above. |
-| `lint`, `semgrep` or `test-count` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
+| `Gate — Required` fails with `Every gate required for this event must succeed and other gates must be skipped.` on a pull request while `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` reads `skipped` | A workflow change dropped the job's pull request condition. | Restore the job `if` shown above. |
+| `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
 | `gate-protected.yml` fails with `The head's Gate — Required changes its steps; the protected branch grades with its own.` | The head's gate step matches none of the twelve accepted renderings of `scripts.ci_reuse.gate_steps`. | Render the step from `scripts.ci_reuse.gate_steps` instead of editing it by hand; a new form lands first in its own pull request that teaches `scripts.gate_protected` to accept it. |
 
 ## Suite speed checks on pull requests
@@ -434,11 +436,11 @@ Any other pull request keeps its first in, first out place.
 
 The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
 
-The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
+The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`, or a failure of the priority step under `priority_error`:
 
 ```bash
 agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<number> \
-  | jq -c 'with_entries(select(.key == "queued" or .key == "priority"))'
+  | jq -c 'with_entries(select(.key == "queued" or .key == "priority" or .key == "priority_error"))'
 ```
 
 | `priority` | Meaning |
@@ -447,6 +449,7 @@ agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<num
 | `null` | No task naming the pull request is urgent or focused |
 | `{"url", "displaced", "errors", "lab"}` | The priority ran; `displaced` lists the entries it moved behind the pull request |
 | `{"url", "errors"}` | The priority was refused or a step failed, for example `another merge queue priority is running; try again when it ends`. Entries it left out are requeued as below |
+| absent, with `priority_error` | The priority step raised before it could report an outcome, for example `HTTP Error 409: Conflict` from the ledger hierarchy read. GitHub accepted the entry, so the command prints the queue outcome and exits zero |
 
 The merge watcher does not read that outcome and never retries a refused priority, because its next pass finds the pull request already queued. The master or the operator can then run `merge priority <url>`.
 
@@ -510,7 +513,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split` and `test-count`, the other merge group jobs on that pool, with six runners spare for an overlapping group's planning jobs |
+| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split`, `test-count` and `collect`, the other merge group jobs on that pool, with five runners spare for an overlapping group's planning jobs |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: 15 s under the 210 s acceptance, because merge group runs [40119907157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119907157) and [40119162144](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119162144) after pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) predicted 240 s and 264 s against a slowest `Run tests` step of 239 s and 242 s |
 | Half step timeout | 360 s | The most a plan may predict before `combine` refuses it; also the sizing target when lower than `TARGET_SECONDS` |
@@ -669,7 +672,7 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split` and `test-count`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split`, `test-count` and `collect`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
@@ -996,7 +999,7 @@ A merge group unit shard that loses its runner gets one recovery inside the same
 3. `unit rerun (3.12, <shard>)` replaces each lost original once and overwrites its durations, flake and coverage artifacts. `shard-check (3.12)` grades completeness using the recovered results.
 4. With no lost originals, `unit-lost` and the unexpanded `unit rerun` matrix must be skipped. With lost originals, classification and every matching recovery must succeed. Duplicate, unplanned or extra recovery jobs reject the run; an incomplete inventory waits rather than passing. A failed recovery, including a second runner loss, rejects it. Queue retry refuses a failed `unit rerun` with `failed again on its in-run rerun`.
 
-The early verifier also waits for the other required queue jobs, including `shard-check (3.12)` and `test-count`, and verifies that jobs outside the queue set are skipped. Passing the unit matrix alone cannot make the required check green.
+The early verifier also waits for the other required queue jobs, including `shard-check (3.12)`, `test-count` and `collect`, and verifies that jobs outside the queue set are skipped. Passing the unit matrix alone cannot make the required check green.
 
 ## Lost fail fast watcher
 
@@ -1077,7 +1080,7 @@ The API step conclusions distinguish a silent successful verification from a fai
 |---|---|
 | Early `Gate — Required` lost its runner or was cancelled, later summary passed | Inspect the early gate's annotation and the queue state. A green summary cannot satisfy the required context |
 | Verifier failed, cancel step succeeded and the run ended `cancelled` | Read the verifier error and the named shard or job; cancellation does not mean the run had no failing check |
-| Units passed but the early gate still runs | Check `shard-check`, `test-count`, classification, recovery and required skips. The verifier waits for the complete inventory |
+| Units passed but the early gate still runs | Check `shard-check`, `test-count`, `collect`, classification, recovery and required skips. The verifier waits for the complete inventory |
 | Gate reports a stale queue group | Inspect the queue ref and entry state; this run can no longer merge |
 
 ### Evidence read from merge group runs
@@ -1340,7 +1343,9 @@ Queue retry runs on `workflow_run` when a Tests run completes. Its job starts on
 - ended `failure` or `cancelled`, and
 - is the first attempt of the run (`run_attempt` 1).
 
-GitHub runs `workflow_run` workflows from the default branch, `main`. A change to `queue-retry.yml` or `scripts/ci_queue_retry.py` merged on `dev` takes effect only after it is [promoted](promotion.md) to `main`. Until then the queue keeps the behaviour of the last promoted release.
+Queue retry also runs on `pull_request_target` with type `dequeued`. That entry passes the pull request number to the same classifier. Both entries check out the default branch and never execute pull request code. The job timeout is five minutes.
+
+GitHub runs these workflows from the default branch, `main`. A change to `queue-retry.yml` or `scripts/ci_queue_retry.py` merged on `dev` takes effect only after it is [promoted](promotion.md) to `main`. Until then the queue keeps the behaviour of the last promoted release.
 
 ### How a failed run is classified
 
@@ -1356,13 +1361,13 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 
    The last is recorded when the job log API refuses the read, as it does for a shard lost before it uploaded a log, unless an annotation shows a step exited nonzero. One red shard beside a lost one refuses the requeue.
 4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
-5. While the pull request is still in the queue, the classifier polls every 30 seconds, up to 30 minutes, for GitHub to drop it. The job's 35 minute timeout covers that wait.
+5. The classifier reads the pull request once. While it remains in the queue, the step writes `requeue=false` and `waiting=true` and ends immediately, releasing its runner and shared hosted lane. The dequeued event resumes classification with `python -m scripts.ci_queue_retry --repo <owner>/<repo> --pull <number>`. It finds the newest Tests merge group run for that pull since its head commit and applies the same first attempt and failed run guards once. A newer successful run, unfinished run or rerun prevents an older loss from being retried. If dequeue arrives before the run finishes, the later run completion performs classification instead. Run inventory reads are bounded to ten pages of one hundred runs; no matching run means no retry.
 6. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
 
-The step prints one JSON line with the decision and writes `requeue`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
+The step prints one JSON line with the decision and writes `requeue`, `waiting`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
 
 ```json
-{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
+{"run": 1234567890, "pull": 4321, "requeue": true, "waiting": false, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
 ```
 
 ### Enforcement
@@ -1401,7 +1406,8 @@ gh run view <run id> --log | grep -E '"requeue"|Log only'
 | `"requeue": false` with `failed outside the unit shards: <jobs>` | A job other than the unit shards and their dependents failed. | Fix that job; the pull request needs a new queue entry once its checks pass. |
 | `"requeue": false` with `failed without a runner loss signature: <shards>` | A shard failed on a test, or its loss left none of the three signatures. | Read the shard log. Fix a real failure; queue again by hand for an unrecognised runner loss. |
 | `"requeue": false` with `head already left the queue 2 times on failed checks` | The same head was already requeued once and failed again. | Treat it as a real failure until the shard logs show otherwise. |
-| `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed or merged, already queued again, or still in the queue after the 30 minute wait. | None, unless it is open and outside the queue; then queue it by hand. |
+| `"requeue": false` with `"waiting": true` | The pull request remains queued. | The step ends immediately; the dequeued event resumes classification. |
+| `"requeue": false` with `pull request is not open outside the queue` and `"waiting": false` | The pull request was closed or merged. | None. |
 | `"requeue": false` with `failed again on its in-run rerun: <jobs>` | A shard lost its runner, was rerun inside the run, and the rerun failed. | Read the rerun log; queue again by hand once the cause is fixed. |
 | `"requeue": false` with `no unit shard failed` | The run failed or was cancelled with no unit shard carrying a failure or a runner loss signature. | Read the failed job; queue again by hand once it is fixed. |
 | `Classify the failed jobs` fails with `gh: HTTP 404` on `actions/jobs/<id>/logs` | GitHub kept no log for a shard, which can happen when its runner was lost. No decision is printed and nothing is requeued. | Queue the pull request by hand. |

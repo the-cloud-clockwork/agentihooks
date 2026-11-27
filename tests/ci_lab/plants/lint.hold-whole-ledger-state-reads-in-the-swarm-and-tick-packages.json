@@ -4,8 +4,8 @@
   "edits": [
     {
       "path": "scripts/tick/catalogue.py",
-      "before": "def step_modules() -> list[str]:\n",
-      "after": "def planted(ledger: object) -> object:\n    \"\"\"Read the whole ledger.\"\"\"\n    return ledger.state\n\n\ndef step_modules() -> list[str]:\n"
+      "before": "    \"\"\"Every module of the step package, discovered from its path.\"\"\"\n",
+      "after": "    \"\"\"Every module of the step package, discovered from its path.\"\"\"\n    ledger = None\n    if ledger is not None:\n        ledger.state(\"catalogue\")\n"
     }
   ]
 }

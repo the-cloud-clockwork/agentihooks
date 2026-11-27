@@ -27,6 +27,8 @@ class Seat:
     name: str
     session_id: str = ""
     state: str = READY
+    auth: str = "routed"
+    account: str = ""
 
 
 @dataclass(frozen=True)

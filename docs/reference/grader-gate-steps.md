@@ -61,16 +61,18 @@ git fetch --no-tags origin "${BASE#origin/}"    # Semgrep scan job; the charts j
 git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 ```
 
-The Tests workflow skips its `lint` and `semgrep` jobs on `merge_group` and
-`push` events. Both jobs run on pull requests and on admitted manual
-dispatches. Either job is also skipped when the [CI lab](ci-lab.md) already
-holds an authoritative verdict for it.
+The Tests workflow skips its `lint`, `lint-actions` and `semgrep` jobs on
+`merge_group` and `push` events. They run on pull requests and on admitted
+manual dispatches. `lint` and `semgrep` are also skipped when the
+[CI lab](ci-lab.md) already holds an authoritative verdict for them;
+`lint-actions` holds the steps the lab cannot run, so no lab verdict skips it.
 
 ## What each step runs
 
 | Workflow and job | Step | From the grader | From the head |
 | --- | --- | --- | --- |
-| Tests `lint` | `Refuse marker key vector drift from kernel dev` | `python -m scripts.ci_marker_vectors`, run from `$RUNNER_TEMP/grader` | `tests/fixtures/marker-idempotency-vectors.json` under `--root "$GITHUB_WORKSPACE"` |
+| Tests `lint-actions` | `Refuse marker key vector drift from kernel dev` | `python -m scripts.ci_marker_vectors`, run from `$RUNNER_TEMP/grader` | `tests/fixtures/marker-idempotency-vectors.json` under `--root "$GITHUB_WORKSPACE"` |
+| Tests `lint-actions` | `Hold the static gates the released lab reads equal to the gates the head reads` | `python -m scripts.ci_lab.discovery_parity`, run from `$RUNNER_TEMP/grader`, or from the head while the grader holds no copy of the module, which only the pull request that introduces it meets | The workflow, its registry and its exclusion catalog under `--head "$GITHUB_WORKSPACE"`, read once by the `scripts` folder of `main` and once by the head's own, and those under `--base "$RUNNER_TEMP/base"`, read by the `scripts` folder of `main` |
 | Tests `lint` | `Lint check` | `ruff check` with the grader's `pyproject.toml` | The code. A second `ruff check` also applies the head's own config, so a rule the head adds holds too |
 | Tests `lint` | `Format check` | `ruff format --check` with the grader's `pyproject.toml` | The code |
 | Tests `lint` | `Check every pull request job is a need of Gate Required` | `python -m scripts.ci_wiring`, run from `$RUNNER_TEMP/grader` | The workflows under `--root "$GITHUB_WORKSPACE"` |
@@ -485,8 +487,10 @@ step, `tests/test_gate_protected.py`:
 | `protected-lint-grades-the-pull-request-head` | The protected gate step grades the pull request head, or `github.sha` outside a pull request, so frozen changes that landed on `dev` after the event base are never blamed on a pull request behind `dev`, and a frozen file edit in the head is still refused. See [Guards](#guards) |
 
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`
-pins the marker step's run text, its kernel checkout and its order in the lint
-job. No test covers the guard rule floors step's fallback to the head copy.
+pins the marker step's run text, its kernel checkout and its order in the
+`lint-actions` job. No test covers the guard rule floors step's fallback to the head copy.
+`tests/ci_lab/test_discovery_parity.py::test_the_lint_actions_job_reads_the_head_with_the_scripts_of_main_after_the_base_and_grader_checkouts`
+pins the run text of the released lab step and its place after the base and grader checkouts.
 
 ## Related pages
 

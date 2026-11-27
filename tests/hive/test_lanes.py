@@ -13,7 +13,7 @@ from scripts.swarm_v2.runtime.base import Outcome, Status
 
 
 def offer(task: str = "t1", lane: str = "eng", generation: int = 2, **pin: str) -> Envelope:
-    data = {"lane": lane, "generation": generation, **pin}
+    data = {"lane": lane, "generation": generation, "quota": {}, **pin}
     return Envelope(
         f"ready:rig:{task}:{generation}", "task.ready", "rig", "task", task, generation, 9, "readiness", data
     )

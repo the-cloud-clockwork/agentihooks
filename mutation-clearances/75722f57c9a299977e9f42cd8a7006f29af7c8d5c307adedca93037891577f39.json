@@ -1,0 +1,6 @@
+{
+  "scripts/routing/native_default.py:scripts.routing.native_default.x_prepare:e6fc8a306e20571d097b7460454295bae747c6807f1f3d290535884ac0cc891d": {
+    "reader": "standards-reader",
+    "reason": "The changed argument only names an interactive marker created by claude_interactive_child. codex_subscription_child immediately removes every INTERACTIVE_PREFIX key, so both arguments produce the same returned environment and neither changes preceding credential or binding operations."
+  }
+}

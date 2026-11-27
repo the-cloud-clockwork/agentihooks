@@ -1,0 +1,34 @@
+rules:
+  - id: sonar-coverage-wait-without-unit-need
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A job that takes each shard's coverage as it lands starts before the unit legs and holds its runner while
+      they queue for the same capped pool. On 26 and 27 November the dev push sonar job of runs 45890810721,
+      45904106858 and 45914890675 waited 66 to 75 minutes for coverage, its wait step timed out, and the single
+      unit copy leg of the first run got a runner only after sonar released its own. A job that runs this wait on a
+      dev push either needs unit, as sonar-after-unit does, or hands the push off with SONAR_HAND_OFF in its env.
+    paths:
+      include:
+        - '**/.github/workflows/*.yml'
+        - '**/.github/workflows/*.yaml'
+        - '**/sonar-coverage-wait-without-unit-need.test.yaml'
+    patterns:
+      - pattern-inside: |
+          $JOB:
+            ...
+            steps: $STEPS
+      - metavariable-regex:
+          metavariable: $STEPS
+          regex: (?s).*Take each shard's coverage as it lands.*
+      - pattern-not-inside: |
+          $JOB:
+            ...
+            env:
+              ...
+              SONAR_HAND_OFF: $HAND
+      - pattern: |
+          needs: $NEEDS
+      - metavariable-regex:
+          metavariable: $NEEDS
+          regex: ^(?![\s\S]*(?<![\w-])unit(?![\w-]))[\s\S]*$

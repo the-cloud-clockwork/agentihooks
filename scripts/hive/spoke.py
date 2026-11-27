@@ -12,7 +12,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_events, headroom, presence
-from scripts.swarm import launch_check, readiness
+from scripts.swarm import launch_check, offer_quota, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 ASKED = "asked"
@@ -96,13 +96,14 @@ class Spoke:
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
+        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit)
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = readiness.take(queue, self.view, timeout_ms, self.config.fit)
+            delivery = readiness.take(queue, self.view, timeout_ms, fit)
         except Exception:
             return self._failed()
         if delivery is None:
-            return recovered or "empty"
+            return recovered or ("held" if fit.held else "empty")
         try:
             heartbeat.check()
             return self._apply(delivery, heartbeat)

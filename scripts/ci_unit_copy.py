@@ -50,7 +50,7 @@ def layout(queue: Path, legs: dict[str, int], out: Path) -> None:
     for leg in range(1, LEGS + 1):
         source = legs[str(leg)]
         durations = shutil.copytree(queue / artifact("durations", source), out / artifact("durations", leg))
-        shutil.copytree(queue / artifact("coverage", source), out / artifact("coverage", leg))
+        shutil.copytree(queue / artifact("coverage", source), out / artifact("coverage", leg), copy_function=os.link)
         flakes = out / artifact("flakes", leg)
         if source == leg:
             shutil.copytree(queue / artifact("flakes", leg), flakes)

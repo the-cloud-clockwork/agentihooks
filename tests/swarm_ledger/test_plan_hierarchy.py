@@ -1,5 +1,6 @@
 import copy
 import itertools
+from typing import Any, cast
 
 import pytest
 
@@ -339,7 +340,7 @@ class Recorder:
 
 
 def test_plan_and_slice_ops_start_their_collections_and_record_events():
-    doc, ctx = {"phases": [{"id": "p1", "plan": "plans/a"}]}, Recorder()
+    doc, ctx = {"phases": [{"id": "p1", "plan": "plans/a"}]}, cast(Any, Recorder())
     assert ledger_plans.apply(doc, {"op": "plan_add", "by": "planner", "plan": "a", "title": " Plan "}, ctx)
     assert ledger_plans.apply(doc, {"op": "plan_add", "by": "planner", "plan": "a", "title": "Plan"}, ctx)
     assert ledger_plans.apply(doc, {"op": "slice_add", "by": "planner", "phase": "phases/p1", "anchor": "x"}, ctx)
@@ -352,7 +353,7 @@ def test_plan_and_slice_ops_start_their_collections_and_record_events():
 
 
 def test_plan_add_with_a_source_stores_it_and_an_operator_by_is_accepted() -> None:
-    doc, ctx = {}, Recorder()
+    doc, ctx = {}, cast(Any, Recorder())
     source = {"harness": "claude", "session": "s-1", "path": "/tmp/plan.md", "sha256": "a" * 64}
     op = {"op": "plan_add", "by": "operator", "plan": "a", "title": "Plan", "source": source}
     ledger_plans.check(op)
@@ -509,7 +510,7 @@ def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
 )
 def test_a_refused_update_drops_only_an_unnamed_plan_this_batch_added(phases, events, kept, left):
     doc = {"phases": phases, "plans": [{"id": "a"}, {"id": "b"}]}
-    ctx = Recorder()
+    ctx = cast(Any, Recorder())
     ctx.events = [*events, {"kind": "added", "target": "tasks/t1"}]
     ledger_plans.drop_unused(doc, "plans/b", ctx)
     assert [row["id"] for row in doc["plans"]] == kept
@@ -529,7 +530,7 @@ def test_a_batch_whose_phase_update_is_rejected_before_it_applies_keeps_no_plan_
 
 def test_drop_refused_drops_only_plans_named_by_rejected_phase_updates():
     doc = {"phases": [{"id": "p1"}], "plans": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]}
-    ctx = Recorder()
+    ctx = cast(Any, Recorder())
     ctx.events = [{"kind": "added", "target": f"plans/{plan}"} for plan in ("a", "b", "c", "d")]
     ops = [
         {"op": "phase_update", "id": "u1", "fields": {"plan": "plans/a"}},
@@ -566,7 +567,7 @@ def test_a_phase_keeps_its_slices_unless_it_holds_slices_of_an_earlier_plan(doc)
 def test_settle_records_each_task_whose_slice_changed_or_cleared():
     doc, ctx = (
         {"tasks": [{"id": "a", "slice": "slices/x.1"}, {"id": "b", "slice": "slices/x.2"}, {"id": "c"}]},
-        Recorder(),
+        cast(Any, Recorder()),
     )
     view = {"tasks": [{"id": "a", "slice": "slices/y.1"}, {"id": "b"}, {"id": "c"}], "slices": []}
     ledger_plans.settle(doc, view, "planner", ctx)

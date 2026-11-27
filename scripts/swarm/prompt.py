@@ -65,6 +65,11 @@ RECON_FIRST = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+RECAPS_TOTAL = "recaps_total"
+SEAT_BRIEF = (
+    "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
+    "learned notes from the store that keeps them."
+)
 ORDERS_OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 ORDERS_NONE = "Operator orders: none were open at the handoff."
 ORDERS_UNKNOWN = (
@@ -406,7 +411,7 @@ def build(
         "successor continues the task from it and the seat recap is derived from the same document.",
         (
             f'If you cannot finish: {me} block "<plain words naming the blocker>" and stop.'
-            if ledger_kinds.kind(task) == "plan"
+            if ledger_kinds.kind(task) in ("plan", "review")
             else "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
             f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.'
         ),
@@ -433,12 +438,12 @@ def artifact_line(led):
     )
 
 
-def priming_lines(task):
+def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
     handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
     culture = task.get("culture", "")
     if not (handoff or culture or recaps or learned):
-        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
+        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes.", SEAT_BRIEF]
     lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
     if task.get("transfer"):
         from scripts.handoff import transfers
@@ -459,13 +464,26 @@ def priming_lines(task):
     lines += learned_lines(learned)
     older = recaps[1:]
     if not older:
-        return [*lines, "5. Older recaps: none."]
+        return [*lines, "5. Older recaps: none.", SEAT_BRIEF]
     lines.append("5. Older recaps, newest first:")
     for recap in older[:OLDER_RECAPS]:
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
-    if len(older) > OLDER_RECAPS:
-        lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
-    return lines
+    hidden = task.get(RECAPS_TOTAL, len(recaps)) - 1 - OLDER_RECAPS
+    if hidden > 0:
+        lines.append(f"{hidden} older recaps are kept on the seat and not shown.")
+    return [*lines, SEAT_BRIEF]
+
+
+def carried(task: dict[str, Any]) -> dict[str, Any]:
+    """The task with only the recaps its prompt shows, the seat's whole recap count, and its learned notes less the
+    withheld ones, so an admission carries what the hive renders and counts instead of every recap the seat holds."""
+    recaps = task.get("recaps") or []
+    return {
+        **task,
+        "recaps": recaps[: 1 + OLDER_RECAPS],
+        RECAPS_TOTAL: task.get(RECAPS_TOTAL, len(recaps)),
+        "learned": [note for note in task.get("learned") or [] if not note.get("withheld")],
+    }
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:
@@ -781,6 +799,23 @@ def research_steps(me, led, name, phase):
     ]
 
 
+def review_steps(me: str, led: str, name: str, phase: str) -> list[str]:
+    """A reviewer's launch steps: read the change request, post strict findings through review post, which records
+    the finding done requires, then leave and close with the change request link; a reviewer edits nothing."""
+    slug = me.rpartition(" ")[2]
+    return [
+        "Work it end to end with the swarm-reviewer skill, then stop. You edit, commit and push nothing:",
+        "1. Read the change request your task names with agentihooks forge read <number> --remote <repository url>: "
+        "its body, the whole diff, the feature map entries it touches and the code it reaches.",
+        "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
+        "its evidence and the smallest fix.",
+        f"3. Post them on the change request with agentihooks review post <change request url> --slug {slug} "
+        '--finding "<finding>", one --finding per finding; a forge post records nothing for done.',
+        f"4. Leave the crew with {led} leave, then close the task: {me} done --finding <change request url>. The ledger "
+        f"refuses done until review post has recorded a finding. {CLOSES}",
+    ]
+
+
 def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
@@ -832,6 +867,7 @@ STEPS = {
     "tune": tune_steps,
     "troubleshoot": troubleshoot_steps,
     "research": research_steps,
+    "review": review_steps,
 }
 
 

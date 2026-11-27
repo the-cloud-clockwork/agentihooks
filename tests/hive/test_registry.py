@@ -26,6 +26,7 @@ DEFAULT = {
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
     "master_login": {"claude": ""},
+    "master_logins": [],
     "master_login_enabled": "no",
     "repos": [],
     "capabilities": [],

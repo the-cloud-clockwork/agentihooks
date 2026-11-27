@@ -5,10 +5,12 @@ master decides for the operator.
 """
 
 import re
+from typing import Any
 
 import ledger_comments
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 ITEM_RE = re.compile(r"^questions/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -37,7 +39,7 @@ def check(op):
     ledger_comments.check(text, "comment")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     lane_of = ports.swarm().naming.lane_of
 
     question = next((q for q in doc["questions"] if q["id"] == op["item"].split("/")[1]), None)

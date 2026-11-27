@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts import herdr_host
-from scripts.quick import cli, guard, member, paths, registry, room, tick
+from scripts.quick import cli, guard, member, paths, registry, room, seeds, tick
 
 pytestmark = pytest.mark.unit
 
@@ -103,6 +103,131 @@ def test_up_refuses_a_harness_list_that_does_not_match_the_engineers(quick_env, 
 
 
 @pytest.mark.feature("quick-swarm")
+def test_an_invalid_harness_count_never_creates_panes(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_layout(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid request created a layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse_layout)
+    assert cli.main(["up", "--agents", "3", "--harness", "codex,claude,claude", "--dir", str(tmp_path)], quick_env) == 2
+    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_up_persists_default_for_mixed_engineers_without_changing_master(
+    quick_env: dict[str, str], tmp_path: Path
+) -> None:
+    assert (
+        cli.main(
+            ["up", "--agents", "3", "--harness", "claude,codex", "--auth", "default", "--dir", str(tmp_path)], quick_env
+        )
+        == 0
+    )
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None
+    assert [(row["harness"], row["auth"], row["account"]) for row in map(cli.dataclasses.asdict, swarm.seats)] == [
+        ("claude", "routed", ""),
+        ("claude", "default", ""),
+        ("codex", "default", ""),
+    ]
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_up_reports_an_unbound_native_engineer_as_pending(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def unbound(folder: Path, swarm: registry.Swarm, environ: dict[str, str]) -> dict[str, int]:
+        registry.set_state(folder, "eng-1", registry.PENDING)
+        return {"eng-1": 0}
+
+    monkeypatch.setattr(cli.launch, "start_all", unbound)
+    assert cli.main(["up", "--agents", "2", "--auth", "default", "--dir", str(tmp_path)], quick_env) == 1
+    captured = capsys.readouterr()
+    rows = [json.loads(line) for line in captured.out.splitlines()]
+    assert rows[0]["started"] == {"eng-1": 0}
+    assert rows[1]["seat"] == "master"
+    assert (rows[2]["seat"], rows[2]["state"], rows[2]["auth"]) == ("eng-1", registry.PENDING, "default")
+    assert "eng-1 did not start; the next round retries it" in captured.err
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize("stage", ["before-state-read", "after-state-write"])
+def test_up_refuses_a_registry_removed_during_native_startup(
+    stage: str,
+    quick_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def interrupted(folder: Path, swarm: registry.Swarm, environ: dict[str, str]) -> dict[str, int]:
+        if stage == "before-state-read":
+            registry.path(folder).unlink()
+        return {"eng-1": 3}
+
+    def remove(folder: Path, name: str, state: str) -> None:
+        registry.path(folder).unlink()
+
+    monkeypatch.setattr(cli.launch, "start_all", interrupted)
+    if stage == "after-state-write":
+        monkeypatch.setattr(cli.registry, "set_state", remove)
+    assert cli.main(["up", "--agents", "2", "--auth", "default", "--dir", str(tmp_path)], quick_env) == 2
+    captured = capsys.readouterr()
+    assert "agentihooks quick: quick swarm registry disappeared during startup" in captured.err.splitlines()
+    assert '"state": "ready"' not in captured.out
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    "choice", ["named:missing", "default,named:missing", "default,routed,default", "named:", "interactive"]
+)
+def test_invalid_authentication_never_creates_panes(
+    choice: str, quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_layout(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid authentication created a layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse_layout)
+    assert (
+        cli.main(
+            ["up", "--agents", "3", "--harness", "claude,codex", "--auth", choice, "--dir", str(tmp_path)], quick_env
+        )
+        == 2
+    )
+    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_up_resolves_named_native_references_per_engineer(quick_env: dict[str, str], tmp_path: Path) -> None:
+    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused", "AH_CX_TOKEN_beta": "unused"}
+    assert (
+        cli.main(
+            [
+                "up",
+                "--agents",
+                "3",
+                "--harness",
+                "claude,codex",
+                "--auth",
+                "named:AH_CC_TOKEN_alpha,named:AH_CX_TOKEN_beta",
+                "--dir",
+                str(tmp_path),
+            ],
+            environ,
+        )
+        == 0
+    )
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None
+    assert [(row["auth"], row["account"]) for row in map(cli.dataclasses.asdict, swarm.seats)] == [
+        ("routed", ""),
+        ("named", "alpha"),
+        ("named", "beta"),
+    ]
+    assert "unused" not in registry.path(tmp_path / "scratchpad" / "repo" / "quick-d039e169").read_text()
+
+
+@pytest.mark.feature("quick-swarm")
 def test_up_outside_herdr_fails_loudly(monkeypatch, quick_env, tmp_path, capsys):
     def refuse(environ):
         raise guard.QuickError(guard.NOT_INSTALLED)
@@ -197,6 +322,65 @@ def test_status_lists_every_seat(quick_env, tmp_path, capsys):
     assert cli.main(["status"], quick_env) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [row["seat"] for row in rows] == ["master", "eng-1", "eng-2", "eng-3"]
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    ("selection", "mode", "account", "automatic"),
+    [
+        ("routed", "routed", "", True),
+        ("default", "default", "", False),
+        ("named:alpha", "named", "alpha", False),
+    ],
+)
+def test_status_exposes_saved_authentication_and_tier_metadata(
+    selection: str,
+    mode: str,
+    account: str,
+    automatic: bool,
+    quick_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused"}
+    assert cli.main(["up", "--agents", "2", "--auth", selection, "--dir", str(tmp_path)], environ) == 0
+    capsys.readouterr()
+    assert cli.main(["status"], environ) == 0
+    output = capsys.readouterr().out
+    rows = [json.loads(line) for line in output.splitlines()]
+    assert (rows[1]["harness"], rows[1]["auth"], rows[1]["account"], rows[1]["automatic_tiers"]) == (
+        "claude",
+        mode,
+        account,
+        automatic,
+    )
+    assert "automatic_tiers" not in rows[0]
+    assert "unused" not in output
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_master_context_exposes_each_safe_authentication_selection(tmp_path: Path) -> None:
+    master = registry.Seat(1, "master", "w1:p1", "claude", "quick-proof-master")
+    swarm = registry.Swarm(
+        "quick-proof",
+        str(tmp_path),
+        (
+            master,
+            registry.Seat(2, "eng-1", "w1:p2", "claude", "quick-proof-eng-1", auth="default"),
+            registry.Seat(3, "eng-2", "w1:p3", "codex", "quick-proof-eng-2", auth="named", account="alpha"),
+            registry.Seat(4, "eng-3", "w1:p4", "claude", "quick-proof-eng-3"),
+        ),
+    )
+    lines = seeds.opening(member.Member(tmp_path, swarm, master)).splitlines()
+    for name, position, harness, choice, tiers in (
+        ("eng-1", 2, "claude", "default", "outside automatic tiers"),
+        ("eng-2", 3, "codex", "named:alpha", "outside automatic tiers"),
+        ("eng-3", 4, "claude", "routed", "automatic tiers"),
+    ):
+        assert (
+            f"- {name} in pane {position} ({harness}, session quick-proof-{name}); "
+            f"seat folder {paths.seat_dir(tmp_path, name)}; authentication {choice}, {tiers}"
+        ) in lines
 
 
 def test_herdr_columns_read_the_tab_layout(monkeypatch):

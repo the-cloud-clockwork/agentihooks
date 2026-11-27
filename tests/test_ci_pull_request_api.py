@@ -320,6 +320,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
+        "scripts/ci_lab/discovery_parity.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
@@ -596,7 +597,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_upload_it() -> None:
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     steps = sonar["steps"]
     arrivals = next(step for step in steps if step.get("name") == "Take each shard's coverage as it lands")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")

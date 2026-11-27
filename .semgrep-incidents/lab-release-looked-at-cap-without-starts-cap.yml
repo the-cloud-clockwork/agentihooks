@@ -1,0 +1,26 @@
+rules:
+  - id: lab-release-looked-at-cap-without-starts-cap
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler release loop bounds the heads it looks at with LOOKED_AT_PER_PASS but no break in it names
+      STARTS_PER_PASS, so one pass may start three times its eight heads and the eight places no longer bound the
+      work before admission. Keep both caps: break on STARTS_PER_PASS started or LOOKED_AT_PER_PASS looked at.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-release-looked-at-cap-without-starts-cap.py
+    patterns:
+      - pattern: $SCHEDULER._start(...)
+      - pattern-inside: |
+          for $ENTRY in $WAITING:
+              ...
+              if <... LOOKED_AT_PER_PASS ...>:
+                  break
+              ...
+      - pattern-not-inside: |
+          for $ENTRY in $WAITING:
+              ...
+              if <... STARTS_PER_PASS ...>:
+                  break
+              ...

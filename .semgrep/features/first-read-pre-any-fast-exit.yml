@@ -1,0 +1,12 @@
+rules:
+  - id: first-read-pre-any-fast-exit
+    languages: [generic]
+    severity: ERROR
+    message: A package pre any shell condition must exit cheaply before starting Python for calls it does not need to judge.
+    paths:
+      include:
+        - /profiles/package/conditions/pre-any-*.sh
+        - first-read-pre-any-fast-exit.sh
+    patterns:
+      - pattern-regex: '(?ms)\A(?:(?!\bexit[ \t]+0\b).)*?^(?P<START>(?:exec[ \t]+)?[^\n;#]*(?:\bpython[0-9.]*\b|scripts\.gates)[^\n]*)'
+      - focus-metavariable: $START

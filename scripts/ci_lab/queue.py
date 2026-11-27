@@ -7,10 +7,10 @@ from itertools import batched
 from typing import Any
 
 from scripts.ci_lab.delivery import CLASSES
-from scripts.ci_lab.outcomes import LOST
+from scripts.ci_lab.outcomes import LOST, UNGRADED
 from scripts.ci_lab.units import Unit
 
-__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "Job", "Queue", "Requirement"]
+__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "RETENTION_MS", "UNRANKED", "Job", "Queue", "Requirement"]
 
 PREFIX = "agentihooks-ci:queue:"
 RANKS = len(CLASSES)
@@ -18,6 +18,7 @@ UNRANKED = RANKS
 BAND = 2**40
 PAGE = 64
 BATCH = 500
+RETENTION_MS = 6 * 60 * 60 * 1000
 
 
 @dataclass(frozen=True)
@@ -50,18 +51,26 @@ local function rank_of(job) return tonumber(redis.call('HGET', job, 'rank') or {
 local function score(counter, rank) return counter - ({RANKS} - rank) * {BAND} end
 """
 
+RESTARTED = ", ".join(f"{outcome} = true" for outcome in sorted(UNGRADED))
+
 ENQUEUE = (
     SCORE
-    + """
+    + f"""
+local ungraded = {{{RESTARTED}}}
 local rank = tonumber(ARGV[3])
 if redis.call('HSETNX', KEYS[1], 'head', ARGV[2]) == 0 then
-  local placed = redis.call('ZSCORE', KEYS[2], ARGV[1])
-  local held = rank_of(KEYS[1])
-  if placed and rank < held then
-    redis.call('HSET', KEYS[1], 'rank', rank)
-    redis.call('ZADD', KEYS[2], score(tonumber(placed), rank) - score(0, held), ARGV[1])
+  if not ungraded[redis.call('HGET', KEYS[1], 'outcome')] then
+    local placed = redis.call('ZSCORE', KEYS[2], ARGV[1])
+    local held = rank_of(KEYS[1])
+    if placed and rank < held then
+      redis.call('HSET', KEYS[1], 'rank', rank)
+      redis.call('ZADD', KEYS[2], score(tonumber(placed), rank) - score(0, held), ARGV[1])
+    end
+    return 0
   end
-  return 0
+  redis.call('DEL', KEYS[1])
+  redis.call('SREM', KEYS[5], ARGV[1])
+  redis.call('HSET', KEYS[1], 'head', ARGV[2])
 end
 for index = 4, #ARGV, 2 do redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1]) end
 redis.call('ZADD', KEYS[2], score(redis.call('INCR', KEYS[3]), rank), ARGV[1])
@@ -101,8 +110,9 @@ FINISH = """
 if ARGV[2] == '' or redis.call('HGET', KEYS[1], 'token') ~= ARGV[2] then return 0 end
 if redis.call('ZREM', KEYS[2], ARGV[1]) == 0 then return 0 end
 redis.call('HSET', KEYS[1], 'state', 'done', 'outcome', ARGV[3], 'token', '')
-redis.call('SADD', KEYS[3], ARGV[1])
-redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
+redis.call('SMOVE', KEYS[3], KEYS[4], ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[4])
+redis.call('PEXPIRE', KEYS[4], ARGV[4])
 return 1
 """
 
@@ -117,12 +127,14 @@ if attempts < tonumber(ARGV[3]) then
   redis.call('HINCRBY', KEYS[1], 'attempts', 1)
   redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'token', '')
   redis.call('ZADD', KEYS[3], score(redis.call('INCR', KEYS[4]), rank_of(KEYS[1])), ARGV[1])
-  redis.call('SMOVE', KEYS[6], KEYS[7], ARGV[1])
+  redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
+  redis.call('PERSIST', KEYS[1])
   return 'pending'
 end
 redis.call('HSET', KEYS[1], 'state', 'lost', 'outcome', ARGV[4], 'token', '')
-redis.call('SADD', KEYS[5], ARGV[1])
-redis.call('SMOVE', KEYS[6], KEYS[8], ARGV[1])
+redis.call('SMOVE', KEYS[5], KEYS[7], ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[5])
+redis.call('PEXPIRE', KEYS[7], ARGV[5])
 return 'lost'
 """
 )
@@ -133,12 +145,21 @@ RETRY = (
 if redis.call('HGET', KEYS[1], 'state') ~= 'done' then return 0 end
 redis.call('HINCRBY', KEYS[1], 'attempts', 1)
 redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'outcome', '')
-redis.call('SREM', KEYS[2], ARGV[1])
-redis.call('ZADD', KEYS[3], score(redis.call('INCR', KEYS[4]), rank_of(KEYS[1])), ARGV[1])
-redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
+redis.call('ZADD', KEYS[2], score(redis.call('INCR', KEYS[3]), rank_of(KEYS[1])), ARGV[1])
+redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
+redis.call('PERSIST', KEYS[1])
 return 1
 """
 )
+
+DRAIN = """
+local state = redis.call('HGET', KEYS[1], 'state')
+redis.call('SREM', KEYS[2], ARGV[1])
+if state ~= 'done' and state ~= 'lost' then return 0 end
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+redis.call('PEXPIRE', KEYS[3], ARGV[2])
+return 1
+"""
 
 PRUNE = """
 local fields = redis.call('HGETALL', KEYS[1])
@@ -172,7 +193,12 @@ def _decode(job: str, record: Mapping[str, str]) -> Job | None:
     return Job(
         id=job,
         head=record["head"],
-        unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
+        unit=Unit(
+            kind=record["kind"],
+            key=record["key"],
+            members=tuple(json.loads(record["members"])),
+            manifest_digest=record.get("manifest_digest", ""),
+        ),
         requirement=Requirement(slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))),
         state=record["state"],
         attempts=int(record["attempts"]),
@@ -199,6 +225,7 @@ class Queue:
         self._retry = client.register_script(RETRY)
         self._prune = client.register_script(PRUNE)
         self._tally = client.register_script(TALLY)
+        self._drain = client.register_script(DRAIN)
 
     def enqueue(
         self,
@@ -212,7 +239,10 @@ class Queue:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
         job is already known. The pending order is the rank first, the most urgent class lowest, then the order of
         enqueue; a job with no rank sorts after every ranked one, as every job enqueued before ranks existed does. A
-        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order."""
+        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order. A
+        known job that ended without a verdict, lost, crashed or unable to run, is replaced in the same step by a
+        fresh pending job that has used none of its attempts and holds no expiry, so a grade that needs the unit runs
+        it again."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
@@ -223,6 +253,7 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
+                "manifest_digest": unit.manifest_digest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",
@@ -232,7 +263,7 @@ class Queue:
                 "rank": rank,
             }
             fields = [item for pair in record.items() for item in pair]
-            keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]
+            keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending"), _head(head, "done")]
             if self._enqueue(keys=keys, args=[job, head, rank, *fields]):
                 added.append(job)
         return added
@@ -319,10 +350,11 @@ class Queue:
         """Move the expiry of a lease the token holds."""
         return bool(self._extend(keys=[_job(job), _key("leased")], args=[job, token, expires_ms]))
 
-    def finish(self, job: Job, token: str, outcome: str) -> bool:
-        """Record the outcome of a lease the token holds; only one of finishing and reaping wins it."""
-        keys = [_job(job.id), _key("leased"), _key("done"), _head(job.head, "leased"), _head(job.head, "done")]
-        return bool(self._finish(keys=keys, args=[job.id, token, outcome]))
+    def finish(self, job: Job, token: str, outcome: str, retention_ms: int = RETENTION_MS) -> bool:
+        """Record the outcome of a lease the token holds, its record and its head's done set expiring retention_ms
+        later; only one of finishing and reaping wins it."""
+        keys = [_job(job.id), _key("leased"), _head(job.head, "leased"), _head(job.head, "done")]
+        return bool(self._finish(keys=keys, args=[job.id, token, outcome, retention_ms]))
 
     def expired(self, now_ms: int) -> list[str]:
         return list(self.client.zrangebyscore(_key("leased"), 0, now_ms))
@@ -354,28 +386,40 @@ class Queue:
         worker renews meanwhile stays."""
         return int(self._prune(keys=[_key("offers")], args=[since_ms]))
 
-    def reap(self, job: Job, now_ms: int, requeues: int) -> str:
-        """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""
+    def reap(self, job: Job, now_ms: int, requeues: int, retention_ms: int = RETENTION_MS) -> str:
+        """Requeue an expired lease while attempts remain, its record kept with no expiry, else mark it lost, its
+        record and its head's done set expiring retention_ms later; empty when it no longer expired."""
         keys = [
             _job(job.id),
             _key("leased"),
             _key("pending"),
             _key("seq"),
-            _key("done"),
             _head(job.head, "leased"),
             _head(job.head, "pending"),
             _head(job.head, "done"),
         ]
-        return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST]))
+        return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST, retention_ms]))
 
     def retry(self, job: Job) -> bool:
-        """Move a finished job back to pending with one more attempt; False when it is not finished."""
-        keys = [
-            _job(job.id),
-            _key("done"),
-            _key("pending"),
-            _key("seq"),
-            _head(job.head, "done"),
-            _head(job.head, "pending"),
-        ]
+        """Move a finished job back to pending with one more attempt, its record kept with no expiry; False when it is
+        not finished."""
+        keys = [_job(job.id), _key("pending"), _key("seq"), _head(job.head, "done"), _head(job.head, "pending")]
         return bool(self._retry(keys=keys, args=[job.id]))
+
+    def undrained(self) -> list[str]:
+        """Return the jobs the old global done set still names; no transition adds to it any more."""
+        return list(self.client.smembers(_key("done")))
+
+    def drain(self, jobs: Sequence[str], retention_ms: int = RETENTION_MS) -> int:
+        """Remove each job from the old global done set, its record and its head's done set expiring retention_ms later
+        when the record is done or lost, and return how many expire; the heads are read in one pipeline and the
+        scripts run in another, neither opening a transaction."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hget(_job(job), "head")
+        heads = pipe.execute()
+        pipe = self.client.pipeline(transaction=False)
+        for job, head in zip(jobs, heads):
+            keys = [_job(job), _key("done"), _head(head or "", "done")]
+            self._drain(keys=keys, args=[job, retention_ms], client=pipe)
+        return sum(pipe.execute())

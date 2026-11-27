@@ -147,6 +147,16 @@ configured baseline, and the override clears when the session ends.
 
 ---
 
+## Delivery Requirements
+
+Every agent session starts with a delivery requirements summary of at most 50 words, injected at `SessionStart` on the Claude, Codex and Copilot targets for standalone sessions and swarm seats alike. `agentihooks init` prints the same summary as its last line. The summary asks for each change as one complete pull request, split in two only when it changes more than the file limit, never smaller for size alone, and for the source root fix rather than a workaround the user did not ask for.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_CODEREVIEW_FILELIMIT` | `20` | Code review file limit: a change may be split into two pull requests only when it changes more than this many files. |
+
+---
+
 ## Context Preprocessor (token compression)
 
 > **Periodic rules / CLAUDE.md re-injection was removed on 2026-07-20.** Claude
@@ -238,7 +248,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
 | `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` | `false` | Gates master login placement for swarm masters (see [Master claude ai login](account-login.md#master-claude-ai-login)); route `claude-ai`, front door masters included, works with it on or off |
-| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login)) |
+| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Live sessions on a claude ai login](account-login.md#live-sessions-on-a-claude-ai-login)) |
 | `AGENTIHOOKS_MASTER_LOGIN_SLOTS` | `5` | Number of stored claude ai login slots |
 | `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `2` | 7-day left % on the first entry of `AGENTIHOOKS_MASTER_LOGIN_ORDER` at or under which nothing new places there (claude-ai route, master login placement, worker token routing, controller admission); a master already there gets a handoff directive |
 | `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |

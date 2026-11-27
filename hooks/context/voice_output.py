@@ -1,7 +1,7 @@
-"""Voice output — spoken summaries of Claude responses via Anton Voice Service.
+"""Voice output — spoken summaries of agent responses via the Anton Voice Service, or ElevenLabs without one.
 
 Toggle: operator says "enable voice" / "disable voice" in chat.
-Pipeline: Stop hook → fork → Haiku summarizes → POST /speak → ffplay plays OGG.
+Pipeline: Stop hook → fork → summarize → voice service or ElevenLabs → ffplay plays OGG.
 Session-scoped: persists until session end or explicit disable.
 """
 
@@ -11,8 +11,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
@@ -25,6 +28,12 @@ _FLAG_DIR = AGENTIHOOKS_HOME / "voice_flags"
 _QUOTA_FLAG = _FLAG_DIR / "quota_exhausted"
 _LAST_SPOKE_FLAG = _FLAG_DIR / "last_spoke_ts"
 _COOLDOWN_SECONDS = 10
+ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+ELEVENLABS_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_API_BASE = "https://api.elevenlabs.io"
+ELEVENLABS_FORMAT = "opus_48000_64"
+ELEVENLABS_KEY_HEADER = "xi-api-key"
+JSON_HEADER = {"Content-Type": "application/json"}
 
 _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECASE)
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
@@ -301,12 +310,63 @@ def _kill_existing_playback() -> None:
                 capture_output=True,
                 timeout=5,
             )
+        elif sys.platform == "win32":
+            subprocess.run(["taskkill", "/IM", "ffplay.exe", "/F"], capture_output=True, timeout=5)
         elif _is_macos():
             subprocess.run(["pkill", "-x", "afplay"], capture_output=True, timeout=5)
         else:
             subprocess.run(["pkill", "-x", "ffplay"], capture_output=True, timeout=5)
     except Exception:
         pass
+
+
+def _fetch_voice_service(text: str, voice_service_url: str, api_key: str, path: str) -> str:
+    """Write the voice service's clip for ``text`` to ``path`` and return the HTTP status."""
+    curl_cmd = [
+        "curl",
+        "-s",
+        "-X",
+        "POST",
+        f"{voice_service_url}/speak",
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        json.dumps({"text": text, "store": False}),
+        "-o",
+        path,
+        "-w",
+        "%{http_code}",
+    ]
+    if api_key:
+        curl_cmd.extend(["-H", f"Authorization: Bearer {api_key}"])
+    result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=30)
+    return result.stdout.strip()
+
+
+def _fetch_elevenlabs(text: str, path: str) -> str:
+    """Write ElevenLabs' clip for ``text`` to ``path`` and return the HTTP status; the variables are the tell-me skill's."""
+    voice = os.getenv("ELEVENLABS_VOICE_ID") or ELEVENLABS_VOICE_ID
+    model = os.getenv("ELEVENLABS_MODEL") or ELEVENLABS_MODEL
+    base = os.getenv("ELEVENLABS_API_BASE") or ELEVENLABS_API_BASE
+    request = urllib.request.Request(
+        f"{base}/v1/text-to-speech/{voice}?output_format={ELEVENLABS_FORMAT}",
+        data=json.dumps({"text": text, "model_id": model}).encode(),
+        headers={**JSON_HEADER, ELEVENLABS_KEY_HEADER: os.getenv("ELEVENLABS_API_KEY", "")},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body, status = response.read(), response.status
+    except urllib.error.HTTPError as error:
+        body, status = error.read(), error.code
+    Path(path).write_bytes(body)
+    return str(status)
+
+
+def _fetch_audio(text: str, voice_service_url: str, api_key: str, path: str) -> str:
+    """Fetch the clip from the voice service when one is set, otherwise from ElevenLabs."""
+    if voice_service_url:
+        return _fetch_voice_service(text, voice_service_url, api_key, path)
+    return _fetch_elevenlabs(text, path)
 
 
 def _speak_and_play(text: str, voice_service_url: str) -> bool:
@@ -317,32 +377,7 @@ def _speak_and_play(text: str, voice_service_url: str) -> bool:
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             tmp_path = tmp.name
 
-        payload = json.dumps({"text": text, "store": False})
-        curl_cmd = [
-            "curl",
-            "-s",
-            "-X",
-            "POST",
-            f"{voice_service_url}/speak",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            payload,
-            "-o",
-            tmp_path,
-            "-w",
-            "%{http_code}",
-        ]
-        if VOICE_API_KEY:
-            curl_cmd.extend(["-H", f"Authorization: Bearer {VOICE_API_KEY}"])
-
-        result = subprocess.run(
-            curl_cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        http_code = result.stdout.strip() if result.stdout else ""
+        http_code = _fetch_audio(text, voice_service_url, VOICE_API_KEY, tmp_path)
 
         if http_code != "200":
             try:
@@ -404,7 +439,7 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
         return
     if not last_assistant_message or not last_assistant_message.strip():
         return
-    if not VOICE_SERVICE_URL:
+    if not VOICE_SERVICE_URL and not os.getenv("ELEVENLABS_API_KEY"):
         return
     if _is_quota_exhausted():
         return

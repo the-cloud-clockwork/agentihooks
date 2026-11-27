@@ -25,7 +25,7 @@ from scripts.profiles import binding, browser, bundle_copy, connectors, homes, p
 from scripts.swarm import brain_binding
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
-from scripts.targets.codex_hook_trust import trusted_state
+from scripts.targets.codex_hook_trust import rebase_state, trusted_state
 from scripts.targets.codex_target import codex_home
 
 SHARED_DIRS = ("projects", "sessions", "todos")
@@ -540,11 +540,8 @@ def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings
     doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
     doc["sqlite_home"] = str(operator)
     doc["features"]["hooks"] = True
-    source = f"{operator / 'hooks.json'}:"
     state: dict[str, Any] = cast(dict[str, Any], cast(dict[str, Any], installed.get("hooks") or {}).get("state") or {})
-    trusted: dict[str, Any] = {
-        f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)
-    }
+    trusted = rebase_state(state, operator / "hooks.json", out / "hooks.json")
     for key, value in trusted_state(operator / "hooks.json", out / "hooks.json").items():
         trusted[key] = {**trusted.get(key, {}), **value}
     if trusted:

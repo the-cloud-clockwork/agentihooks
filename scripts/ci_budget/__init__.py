@@ -16,6 +16,7 @@ SELF = "stage-budget"
 WATCHER = "queue-fail-fast"
 BUDGETS = {
     "type-gate": 300,
+    "type-gate-tree": 600,
     "promote": 10 * 60,
     "admission": 30,
     "reuse": 30,
@@ -29,9 +30,12 @@ BUDGETS = {
     "unit-selected": 300,
     "shard-check": 90,
     "test-count": 120,
+    "collect": 120,
     "lint": 240,
+    "lint-actions": 240,
     "docs": 120,
     "sonar": 570,
+    "sonar-after-unit": 570,
     "dep-manifest": 120,
     "coverage-ratchet": 90,
     "queue-fail-fast": 60,

@@ -192,6 +192,7 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
     codex_refresh_kick = Mock()
     monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", codex_refresh_kick)
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", Mock())
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -218,6 +219,7 @@ _START_PAYLOADS = {
         "permission_mode": "bypassPermissions",
         "source": "startup",
     },
+    "copilot": {"hookEventName": "sessionStart", "sessionId": "copilot-start"},
 }
 
 
@@ -242,6 +244,7 @@ def quiet_session_start(monkeypatch):
     monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
     monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", Mock())
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", Mock())
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -286,6 +289,70 @@ def test_codex_session_start_envelope_carries_start_condition_context(start_cond
     output = json.loads(out)["hookSpecificOutput"]
     assert output["hookEventName"] == "SessionStart"
     assert "[condition start-greet.sh]\nhello from a start condition" in output["additionalContext"]
+
+
+@pytest.fixture(params=["standalone", "swarm seat"])
+def start_seat(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from tests.swarm_ledger import legacy_page
+
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    if request.param == "swarm seat":
+        folder = tmp_path / "ledgers"
+        folder.mkdir()
+        task = {"id": "t1", "phase": "p1", "title": "Ship it", "description": "Ship the change."}
+        phase = {"id": "p1", "title": "Delivery", "description": "Deliver complete changes."}
+        legacy_page.store(folder, "rig", {"title": "Rig", "overview": "Ship.", "phases": [phase], "tasks": [task]})
+        monkeypatch.setenv("LEDGER_DIR", str(folder))
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
+    return tmp_path
+
+
+def _start_context(target: str, out: str) -> str:
+    if target == "claude":
+        return out
+    envelope = json.loads(out)
+    return envelope["additionalContext"] if target == "copilot" else envelope["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.feature("delivery-requirements-summary")
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_every_session_start_carries_the_delivery_requirements_summary(
+    target: str,
+    start_seat: Path,
+    quiet_session_start: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _start_context(target, _session_start_stdout(target, start_seat, monkeypatch, capsys))
+    assert "Delivery requirements: deliver each change as one complete pull request." in context
+    assert "Split it in two only when it changes more than 20 files" in context
+    assert "Always deliver or offer the source root fix, never a workaround the user did not ask for." in context
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_session_start_reports_the_herdr_resume_command(quiet_session_start, monkeypatch):
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    seen = []
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", seen.append)
+    EVENT_HANDLERS["SessionStart"]({"session_id": "herdr-session"})
+    assert seen == [{"session_id": "herdr-session"}]
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_a_failing_herdr_resume_report_never_breaks_session_start(quiet_session_start, monkeypatch):
+    from hooks import hook_manager
+
+    def refuse(payload):
+        raise OSError("herdr socket gone")
+
+    logged = []
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", refuse)
+    monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
+    hook_manager.EVENT_HANDLERS["SessionStart"]({"session_id": "herdr-session"})
+    assert ("herdr resume report failed", {"error": "OSError"}) in logged
 
 
 def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tmp_path):
@@ -344,6 +411,31 @@ def test_windows_session_start_registers_no_broadcast_session(
 
     register.assert_not_called()
     deliver.assert_not_called()
+
+
+@pytest.mark.parametrize(("platform", "calls"), [("win32", 0), ("linux", 1)])
+def test_session_end_closes_the_broadcast_session_only_off_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str, calls: int
+) -> None:
+    """Windows registers no broadcast session, so its session end closes none and never reaches the session registry."""
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    close, heartbeat = Mock(), Mock()
+    monkeypatch.setattr(config, "BROADCAST_ENABLED", True)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", Mock(return_value=7))
+    monkeypatch.setattr("hooks.context.broadcast.mark_session_closed", close)
+    monkeypatch.setattr("hooks.context.broadcast.heartbeat_sessions", heartbeat)
+    monkeypatch.setattr("hooks.context.documentation_session.end", Mock())
+    monkeypatch.setattr(sys, "platform", platform)
+
+    EVENT_HANDLERS["SessionEnd"]({"session_id": "s-end", "cwd": str(tmp_path)})
+
+    assert (close.call_count, heartbeat.call_count) == (calls, calls)
+    if calls:
+        close.assert_called_once_with("s-end", 7)
 
 
 def test_pretool_blocks_handed_off_session(monkeypatch, tmp_path):

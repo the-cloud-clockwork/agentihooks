@@ -20,7 +20,9 @@ def now_ms() -> int:
 
 
 def local_spawn(store: RedisStore, harness: str, at: int) -> AgentRecord:
-    runtime = SimpleNamespace(spawn=lambda *args: Placed("local:pane", harness, launched_at=at))
+    runtime = SimpleNamespace(
+        spawn=lambda *args: Placed("local:pane", harness, launched_at=at), retire=lambda agent: None
+    )
     record, _ = seat_spawn.place_seat(
         SLUG, store.config(SLUG), store, runtime, seat_spawn.Seat("master", "master"), at, lambda record: {}
     )
@@ -157,7 +159,8 @@ def test_a_same_name_master_resume_adds_a_new_launch(store: RedisStore, with_lau
     original = local_spawn(store, "claude", now - 1000)
     agent = replace(original, harness="claude", profile="engineer", launched_at=now - 1000)
     runtime = SimpleNamespace(
-        resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now if with_launch_time else 0)
+        resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now if with_launch_time else 0),
+        retire=lambda agent: None,
     )
     requested = now - HOUR - 1 if with_launch_time else now
     master_launch._resume(store, SLUG, runtime, requested, master_launch.Previous(agent, now - 1000))
