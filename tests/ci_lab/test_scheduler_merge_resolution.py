@@ -166,9 +166,12 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
     port = Mock(return_value=None)
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
-    for _ in range(scheduler.UNMERGED_TRIES):
+    for i in range(scheduler.UNMERGED_TRIES):
         actions = run.tick(1000)
-        assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+        if i < scheduler.UNMERGED_TRIES - 1:
+            assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+        else:
+            assert actions[-1].startswith(f"the lab gives up on a merge of {HEAD_A}")
         assert run.grades() == []
     actions = run.tick(1000)
     assert any(action.startswith("grading ") for action in actions)
@@ -208,6 +211,45 @@ def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound
     assert any(action.startswith("grading ") for action in actions)
     assert run.grade(HEAD_A).merge_fallback is True
     assert port.call_count == scheduler.UNMERGED_TRIES
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_merge_try_under_the_bound_restarts_its_waiting_window(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    port = Mock(return_value=None)
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    actions = run.tick(1000)
+    assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+    assert port.call_count == 1
+    held = run.tick(1500)
+    assert not any(action.startswith(f"holding {HEAD_A}") for action in held)
+    assert port.call_count == 1
+    actions = run.tick(2001)
+    assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+    assert port.call_count == 2
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_merge_try_at_the_bound_gives_up_without_restarting_the_window(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    port = Mock(return_value=None)
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    now = 1000
+    for _ in range(scheduler.UNMERGED_TRIES - 1):
+        run.tick(now)
+        now += 1000
+    actions = run.tick(now)
+    assert actions[-1].startswith(f"the lab gives up on a merge of {HEAD_A}")
+    assert run.grades() == []
+    gave_up_calls = port.call_count
+    actions = run.tick(now + 1)
+    assert any(action.startswith("grading ") for action in actions)
+    assert run.grade(HEAD_A).merge_fallback is True
+    assert port.call_count == gave_up_calls
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

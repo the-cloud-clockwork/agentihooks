@@ -1143,7 +1143,9 @@ class Scheduler:
         such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. A pull request or
         hotfix head whose merge resolution still runs off the pass is held the same way; one GitHub answered with no
         merge yet, or never answered or answered with a server error, waits out the window again, its count of such
-        tries kept in its waiting entry; at the `UNMERGED_TRIES`th the next start gives up and grades the bare head.
+        tries kept in its waiting entry; at the `UNMERGED_TRIES`th the lab gives up on a merge of the head and keeps
+        its waiting entry's window unrestarted, so the next pass starts it bare with the fallback at once, with no
+        further call of the merges port.
         Neither takes one of the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the
         pass moves on to the next waiting head instead of stalling on it. A head keeps its waiting entry while it is
         checked and expanded, with the count of starts begun and not finished in it, so a pass stopped inside a
@@ -1194,8 +1196,13 @@ class Scheduler:
                         actions.append(f"cannot expand {request.head}: {refusal}")
                         actions.extend(self._refuse(request, ref, refusal, now_ms))
                 except (Unmerged, merges.MergeRefused) as error:
-                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
-                    actions.append(f"holding {request.head}: {error}")
+                    tries = unmerged + 1
+                    if tries < UNMERGED_TRIES:
+                        self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": tries}))
+                        actions.append(f"holding {request.head}: {error}")
+                    else:
+                        self.client.hset(WAITING, name, json.dumps({**held, "unmerged": tries}))
+                        actions.append(f"the lab gives up on a merge of {request.head}: {error}")
                 except (
                     subprocess.CalledProcessError,
                     ValueError,

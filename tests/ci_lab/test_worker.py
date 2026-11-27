@@ -814,7 +814,13 @@ def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: 
     def broken_bundler(sha: str) -> bytes | None:
         raise RuntimeError("boom")
 
-    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), broken_bundler)
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        try:
+            return lease_api.answer(lab, Signer(sink.url), method, target, raw, authorization, broken_bundler)
+        except RuntimeError as error:
+            return 500, {"error": str(error)}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
     _serving(server)
     try:
         jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)

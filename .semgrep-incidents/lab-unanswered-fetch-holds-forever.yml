@@ -17,4 +17,3 @@ rules:
       - pattern-not-inside: |
           if $COUNT < $CAP:
               ...
-      - pattern-not: '$CLIENT.hset(WAITING, $NAME, json.dumps({**$HELD, "since": $NOW, "unmerged": $X, ...}))'

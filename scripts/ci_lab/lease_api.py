@@ -282,18 +282,13 @@ def _log_request(request: BaseHTTPRequestHandler, code: int | str = "-", size: i
 
 def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
     """Bind JSON routes on host and port, each request's method, target, body and Authorization header answered by
-    reply; the caller runs serve_forever. A route that raises any other exception answers 500 instead of dropping
-    the connection."""
+    reply; the caller runs serve_forever."""
 
     def handle(request: BaseHTTPRequestHandler) -> None:
         length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
             raw = request.rfile.read(int(length))
-            try:
-                status, payload = reply(request.command, request.path, raw, request.headers.get(AUTHORIZATION))
-            except Exception as error:
-                request.log_error("%s", error)
-                status, payload = 500, {"error": "internal error"}
+            status, payload = reply(request.command, request.path, raw, request.headers.get(AUTHORIZATION))
         else:
             status, payload = 400, {"error": "bad request"}
         data = json.dumps(payload).encode()
