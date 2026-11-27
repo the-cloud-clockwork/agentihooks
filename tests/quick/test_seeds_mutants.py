@@ -7,6 +7,10 @@ from scripts.quick.layout import MASTER
 from tests.quick.test_seeds import _member
 
 pytestmark = pytest.mark.unit
+BRIEF = (
+    "Run `agentihooks seat brief` before your first command: it prints your seat's handoff, culture, latest recap "
+    "and learned notes from its seat folder."
+)
 
 
 def test_reach_prefers_sendmessage_only_between_two_claude_seats_other_than_master() -> None:
@@ -23,6 +27,7 @@ def test_the_master_seed_pins_every_exact_sentence(tmp_path: Path) -> None:
             "front door: the operator talks only to you.",
             "Load the quick-swarm-master skill before any other action: it covers how this quick swarm is built, "
             "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
+            BRIEF,
             "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
             "Your engineers, the only agents you contact:",
             f"- eng-1 in pane 2 (claude, session quick-abc-eng-1); seat folder {paths.seat_dir(tmp_path, 'eng-1')}",
@@ -54,6 +59,7 @@ def test_an_engineer_seed_pins_every_exact_sentence_for_a_claude_seat(tmp_path: 
         [
             "You are eng-1 of quick swarm quick-abc, in herdr pane 2. The master "
             "in pane 1 is the sole authority and the operator's front door.",
+            BRIEF,
             "Wait for the operator's instructions. Talk to the operator only while planning your task.",
             f"When briefed, write your plan to {paths.plan(tmp_path, 'eng-1')} as checkbox stages "
             "(- [ ] stage), then report the plan to the master before you start.",
@@ -77,6 +83,7 @@ def test_an_engineer_seed_pins_every_exact_sentence_for_a_codex_seat(tmp_path: P
         [
             "You are eng-2 of quick swarm quick-abc, in herdr pane 3. The master "
             "in pane 1 is the sole authority and the operator's front door.",
+            BRIEF,
             "Wait for the operator's instructions. Talk to the operator only while planning your task.",
             f"When briefed, write your plan to {paths.plan(tmp_path, 'eng-2')} as checkbox stages "
             "(- [ ] stage), then report the plan to the master before you start.",
