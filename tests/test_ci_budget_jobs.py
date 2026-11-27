@@ -230,6 +230,30 @@ def test_reader_accepts_a_five_job_initial_page_size(monkeypatch):
     ]
 
 
+def test_reader_returns_every_job_of_a_102_job_attempt_when_pages_above_25_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+    sleeps: list[float] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        query = parse_qs(urlsplit(command[-1]).query)
+        size, page = int(query["per_page"][0]), int(query["page"][0])
+        calls.append((size, page))
+        if size > 25:
+            raise subprocess.CalledProcessError(1, command, stderr="gh: Server Error (HTTP 502)")
+        start = (page - 1) * size
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps({"jobs": [{"id": i} for i in range(start, min(start + size, 102))]})
+        )
+
+    monkeypatch.setattr(reader.subprocess, "run", run)
+    monkeypatch.setattr(reader.time, "sleep", sleeps.append)
+    assert reader.read_jobs("repos/owner/repo/actions/runs/1/attempts/3/jobs", 100) == [{"id": i} for i in range(102)]
+    assert calls == [(100, 1), (50, 1), (25, 1), (25, 2), (25, 3), (25, 4), (25, 5)]
+    assert sleeps == [1, 2]
+
+
 @pytest.mark.parametrize("size", [0, -1, 101])
 def test_reader_cli_refuses_a_page_size_outside_the_github_range(size):
     result = subprocess.run(
