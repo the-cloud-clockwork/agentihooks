@@ -1,6 +1,7 @@
 import hashlib
 import signal
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ import pytest
 
 from scripts import cli_delegates
 from scripts.events import memory
-from scripts.events.bus import StateEntry
+from scripts.events.bus import Bus, StateEntry
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
@@ -373,6 +374,99 @@ def test_the_lease_keeper_holds_the_lease_while_the_loop_is_blocked(bus, clock):
     assert clock.now == 1_300
 
 
+class Counted(Clock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def __call__(self) -> int:
+        self.calls += 1
+        return self.now
+
+
+def _waiting() -> registry.Reactor:
+    return registry.Reactor("wait-ends-checks", "swarm.*.checks.completed", lambda _: None, singleton=True)
+
+
+@pytest.mark.feature("hub-wait-ends-own-loop")
+def test_a_held_poll_never_holds_a_wait_end_delivery(bus: Bus) -> None:
+    held, polling, delivered = threading.Event(), threading.Event(), threading.Event()
+
+    def poll(guard: Callable[[], bool]) -> None:
+        polling.set()
+        held.wait(60)
+
+    reactors = registry.Registry(
+        [registry.Reactor("pulls", "swarm.*.pull.polled", lambda _: None, poll=poll)],
+        own_loop=[
+            registry.Reactor("wait-ends-checks", "swarm.*.checks.completed", lambda _: delivered.set(), singleton=True)
+        ],
+    )
+    hosted = runner.HubRunner(bus, reactors, "a", clock=Clock(), lease_ttl_ms=100)
+    passes: list[dict[str, list[str]]] = []
+    serving = threading.Thread(target=lambda: passes.append(hosted.run_once(timeout_ms=50)), daemon=True)
+    serving.start()
+    try:
+        assert polling.wait(10)
+        bus.events.publish("swarm.s.checks.completed", event("e1", 1))
+        assert delivered.wait(10)
+    finally:
+        held.set()
+        serving.join(10)
+    assert not serving.is_alive()
+    assert passes == [{"pulls": [], "wait-ends-checks": ["handled"]}]
+
+
+@pytest.mark.feature("hub-wait-ends-own-loop")
+def test_an_own_loop_reactor_on_standby_reports_standby_once_across_its_rounds(
+    bus: Bus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "IDLE_S", 0.001)
+    leader = runner.HubRunner(bus, registry.Registry(own_loop=[_waiting()]), "b", clock=Clock(), lease_ttl_ms=100)
+    leader.run_once(timeout_ms=0)
+    rested = Counted()
+
+    def poll(guard: Callable[[], bool]) -> None:
+        deadline = time.monotonic() + 10
+        while rested.calls < 3 and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+    reactors = registry.Registry(
+        [registry.Reactor("pulls", "swarm.*.pull.polled", lambda _: None, poll=poll)], own_loop=[_waiting()]
+    )
+    standby = runner.HubRunner(bus, reactors, "a", clock=rested, lease_ttl_ms=100)
+    assert standby.run_once(timeout_ms=0) == {"pulls": [], "wait-ends-checks": ["standby"]}
+    assert rested.calls >= 3
+
+
+@pytest.mark.feature("hub-wait-ends-own-loop")
+def test_an_own_loop_on_standby_rests_the_idle_wait_and_ends_with_the_main_lane(
+    bus: Bus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "IDLE_S", 60)
+    leader = runner.HubRunner(bus, registry.Registry(own_loop=[_waiting()]), "b", clock=Clock(), lease_ttl_ms=100)
+    leader.run_once(timeout_ms=0)
+    rested = Counted()
+
+    def poll(guard: Callable[[], bool]) -> None:
+        deadline = time.monotonic() + 10
+        while not rested.calls and time.monotonic() < deadline:
+            time.sleep(0.001)
+        time.sleep(0.2)
+
+    reactors = registry.Registry(
+        [registry.Reactor("pulls", "swarm.*.pull.polled", lambda _: None, poll=poll)], own_loop=[_waiting()]
+    )
+    standby = runner.HubRunner(bus, reactors, "a", clock=rested, lease_ttl_ms=100)
+    passes: list[dict[str, list[str]]] = []
+    serving = threading.Thread(target=lambda: passes.append(standby.run_once(timeout_ms=0)), daemon=True)
+    serving.start()
+    serving.join(30)
+    assert not serving.is_alive()
+    assert passes == [{"pulls": [], "wait-ends-checks": ["standby"]}]
+    assert rested.calls == 1
+
+
 def test_a_running_hub_keeps_its_leases_on_a_scheduled_interval(monkeypatch, hive):
     kept = []
 
@@ -552,6 +646,25 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
             raise Stop from None
 
     slept = []
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", slept.append)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert slept == [runner.IDLE_S]
+
+
+@pytest.mark.feature("hub-wait-ends-own-loop")
+def test_the_hub_loop_idles_after_a_pass_in_which_a_reactor_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    passes = iter([{"page": ["handled"], "pulls": ["failed"]}, {"page": ["handled"], "pulls": []}])
+
+    def run_once(self: runner.HubRunner) -> dict[str, list[str]]:
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    slept: list[float] = []
     monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
     monkeypatch.setattr(runner, "scheduled_wait", slept.append)
     monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))

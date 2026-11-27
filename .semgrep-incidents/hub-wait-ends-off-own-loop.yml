@@ -1,0 +1,12 @@
+rules:
+  - id: hub-wait-ends-off-own-loop
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hub registry serves the wait ends reactors on the main loop. On 24 November the hub served all seventeen
+      reactors on one thread with the wait ends last, behind the pull request poll that reads GitHub once per open pull
+      request, so a checks wake reached its engineer 117 to 242 seconds after GitHub resolved the checks. Pass the wait
+      ends reactors to the registry as own_loop so their own thread serves them while the poll runs.
+    pattern-either:
+      - pattern: Registry([..., *WaitEnds(...).reactors(), ...], ...)
+      - pattern: Registry(reactors=[..., *WaitEnds(...).reactors(), ...], ...)

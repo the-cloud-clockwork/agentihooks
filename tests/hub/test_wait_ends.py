@@ -184,3 +184,10 @@ def test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject(
     owners = [cast(Any, reactor.handler).__self__ for reactor in found.values()]
     assert [(owner.clock, owner.ledger.service) for owner in owners] == [(clock, True)] * 4
     bus.close()
+
+
+@pytest.mark.feature("hub-wait-ends-own-loop")
+def test_the_hub_registry_serves_every_wait_end_reactor_on_its_own_loop() -> None:
+    bus = cast(Bus, memory.open_bus(BusConfig()))
+    assert registry.configured(bus).own_loop == {*wait_ends.SUBJECTS, "task-wait-ends", "reply-wait-ends"}
+    bus.close()
