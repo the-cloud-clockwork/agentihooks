@@ -1,5 +1,9 @@
 """Page notifications: the server derives them from what agents did; only the operator clears them."""
 
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
+
 OPS = ("notification_clear", "notice")
 NEW_ITEM = {"questions": "New open question", "followups": "New follow-up"}
 REPLY_KINDS = {"comment added": "comments", "message added": "chat"}
@@ -23,7 +27,7 @@ def check_notice(op):
         raise ValueError("a notice comes from the swarm or an agent; the operator talks in chat")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     rows = doc.setdefault("notifications", [])
     if op["op"] == "notice":
         rows.append(
@@ -73,7 +77,7 @@ def _from_event(doc, event):
     return None
 
 
-def derive(doc, ctx):
+def derive(doc: dict[str, Any], ctx: OpContext) -> None:
     rows = doc.setdefault("notifications", [])
     for n, event in enumerate(ctx.events):
         found = _from_event(doc, event)

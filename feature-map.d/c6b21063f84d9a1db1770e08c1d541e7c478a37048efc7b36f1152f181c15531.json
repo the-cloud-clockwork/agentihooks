@@ -1,0 +1,11 @@
+{
+  "id": "swarm-alert-sources-accepted",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-alert-sources-refused",
+  "behaviour": "The ready step's merge requeue alerts, the priority requeue alert and the master login spent alert raise sources the ledger accepts, so each reaches the master, and a priority requeue that could not queue a pull still marks it retrying after the alert.",
+  "seam": "scripts.swarm_ledger.ledger_alerts.check_raise on each raiser's source, and scripts.swarm.queue_priority.refresh against a ledger that refuses what the server refuses",
+  "tests": [
+    "tests/swarm/test_alert_sources.py::test_the_ledger_accepts_each_swarm_alert_source",
+    "tests/swarm/test_queue_priority.py::test_a_refused_requeue_alerts_the_ledger_and_still_marks_the_pull_retrying"
+  ]
+}

@@ -74,10 +74,10 @@ def test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_
 def test_an_offer_carries_its_hive_pin_and_needs_and_nothing_for_an_unpinned_task() -> None:
     offered = {event.key: event.data for event in readiness.offers(snapshot(doc(PINNED)), NOW)}
     assert offered == {
-        "plain": {"lane": "eng", "generation": 0},
-        "desk": {"lane": "eng", "generation": 0, "hive": ROOT},
-        "pinned": {"lane": "eng", "generation": 0, "hive": "hive-b"},
-        "gpu": {"lane": "eng", "generation": 0, "needs": ["gpu"]},
+        "plain": {"lane": "eng", "generation": 0, "quota": {}},
+        "desk": {"lane": "eng", "generation": 0, "quota": {}, "hive": ROOT},
+        "pinned": {"lane": "eng", "generation": 0, "quota": {}, "hive": "hive-b"},
+        "gpu": {"lane": "eng", "generation": 0, "quota": {}, "needs": ["gpu"]},
     }
 
 
@@ -88,8 +88,8 @@ def test_a_workstation_task_pinned_off_the_root_hive_is_never_offered() -> None:
         task("blank", workstation=True, hive=""),
     ]
     assert [event.data for event in readiness.offers(snapshot(doc(pinned)), NOW)] == [
-        {"lane": "eng", "generation": 0, "hive": ROOT},
-        {"lane": "eng", "generation": 0, "hive": ROOT},
+        {"lane": "eng", "generation": 0, "quota": {}, "hive": ROOT},
+        {"lane": "eng", "generation": 0, "quota": {}, "hive": ROOT},
     ]
 
 

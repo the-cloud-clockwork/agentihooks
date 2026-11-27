@@ -24,47 +24,47 @@ def _eng(**task):
 
 
 @pytest.mark.feature("swarm-seat-priming")
-def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
+def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LEDGER_DIR")
     text = _eng(seat="eng-1@sw", handoff="handoff doc text", recaps=RECAPS, learned=LEARNED)
-    order = [text.index(part) for part in ("handoff doc text", "latest recap text", "learned note text")]
-    assert order == sorted(order) and order[-1] < text.index("older recap text")
+    assert all(
+        body not in text for body in ("handoff doc text", "latest recap text", "learned note text", "older recap text")
+    )
     assert "eng-1@sw" in text
-    assert text.index("older recap text") < text.index("Read your task through the ledger API")
+    assert text.index(prompt.SEAT_BRIEF) < text.index("Read your task through the ledger API")
 
 
 @pytest.mark.feature("swarm-seat-priming")
-def test_a_missing_recap_is_named_in_the_prompt():
+def test_a_missing_recap_is_named_in_the_prompt() -> None:
     text = _eng(seat="eng-1@sw", handoff="handoff doc text", learned=LEARNED)
-    assert "Latest recap: missing" in text
-    assert "handoff doc text" in text and "learned note text" in text
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "handoff doc text" not in text and "learned note text" not in text
 
 
-def test_missing_handoff_and_learned_notes_are_named():
+def test_missing_handoff_and_learned_notes_are_named() -> None:
     text = _eng(seat="eng-1@sw", recaps=RECAPS[:1])
-    assert "Handoff document: none" in text
-    assert "Learned notes: none" in text
-    assert "Older recaps: none" in text
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "latest recap text" not in text
 
 
-def test_a_seat_with_no_history_gets_a_prompt_that_says_so():
+def test_a_seat_with_no_history_gets_a_prompt_that_says_so() -> None:
     text = _eng(seat="eng-1@sw")
     assert "Your seat eng-1@sw has no history yet" in text
     assert "Latest recap" not in text
 
 
-def test_older_recaps_beyond_the_cap_are_counted_not_dropped_silently():
+def test_older_recaps_beyond_the_cap_are_counted_not_dropped_silently() -> None:
     many = [{"occupant": f"sw-eng-{n}", "task": "t1", "text": f"recap {n}", "at": n} for n in range(9, 0, -1)]
     text = _eng(seat="eng-1@sw", recaps=many)
-    shown = prompt.OLDER_RECAPS
-    assert f"recap {9 - shown}" in text and f"recap {8 - shown}" not in text
-    assert f"{len(many) - 1 - shown} older recaps are kept on the seat" in text
+    assert all(recap["text"] not in text for recap in many)
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
-def test_the_master_prompt_carries_the_chain_too():
+def test_the_master_prompt_carries_the_chain_too() -> None:
     task = {"id": MASTER, "seat": "master@sw", "handoff": "caps go to four", "recaps": RECAPS, "learned": LEARNED}
     text = prompt.build("sw", "/repo", MASTER, "master@a1b2c3-0002", task)
-    assert text.index("caps go to four") < text.index("latest recap text") < text.index("learned note text")
+    assert all(body not in text for body in ("caps go to four", "latest recap text", "learned note text"))
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
 def test_a_handoff_writes_a_recap_under_the_seat(
@@ -141,12 +141,12 @@ def _note(text, maturity):
     return {"occupant": "engineer@a1b2c3-0001", "text": text, "at": 1, "maturity": maturity}
 
 
-def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data():
+def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data() -> None:
     first, second = "first plain note entry", "second plain note entry"
     canon, insight = "canon note entry", "insight note entry"
     hidden = ("first hidden data entry", "second hidden data entry")
     ranked = [_note(first, "note"), _note(hidden[0], "data"), _note(canon, "canon"), _note(insight, "insight")]
-    text = _eng(seat="eng-1@sw", learned=[*ranked, _note(hidden[1], "data"), _note(second, "note")])
+    text = "\n".join(prompt.learned_lines([*ranked, _note(hidden[1], "data"), _note(second, "note")]))
     order = [
         text.index(f"- {m}: {t}")
         for m, t in (("canon", canon), ("insight", insight), ("note", first), ("note", second))
@@ -156,26 +156,28 @@ def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data()
     assert "2 data entries are kept on the seat and not shown." in text
 
 
-def test_a_seat_with_only_data_says_so_and_counts_it():
-    text = _eng(seat="eng-1@sw", learned=[_note("only hidden data entry", "data")])
+def test_a_seat_with_only_data_says_so_and_counts_it() -> None:
+    text = "\n".join(prompt.learned_lines([_note("only hidden data entry", "data")]))
     assert "only hidden data entry" not in text and "1 data entries are kept on the seat" in text
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
 @pytest.mark.feature("swarm-culture")
-def test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master(lane):
+def test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master(lane: str) -> None:
     task = {"id": "t1", "title": "x", "seat": f"{lane}-1@sw", "culture": "culture text", "recaps": RECAPS}
     text = prompt.build("sw", "/repo", lane, f"sw-{lane}-1", task)
-    assert text.index("culture text") < text.index("latest recap text")
+    assert "culture text" not in text and "latest recap text" not in text
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
-def test_a_culture_alone_still_reaches_a_fresh_seat():
+def test_a_culture_alone_still_reaches_a_fresh_seat() -> None:
     text = _eng(seat="eng-1@sw", culture="culture text")
-    assert "culture text" in text and "has no history yet" not in text
+    assert "culture text" not in text and "has no history yet" not in text
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
-def test_a_swarm_without_culture_names_it_missing():
-    assert "Swarm culture: none" in _eng(seat="eng-1@sw", recaps=RECAPS)
+def test_a_swarm_without_culture_names_it_missing() -> None:
+    assert _eng(seat="eng-1@sw", recaps=RECAPS).count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.mark.feature("swarm-learned-notes")
@@ -317,7 +319,7 @@ def test_retire_reports_what_it_did_and_names_each_refusal(
     }
 
 
-def test_a_retired_note_no_longer_reaches_the_next_master(store):  # noqa: F811
+def test_a_retired_note_no_longer_reaches_the_next_master(store: Any) -> None:  # noqa: F811
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
     (old,) = masters(store)
@@ -328,8 +330,9 @@ def test_a_retired_note_no_longer_reaches_the_next_master(store):  # noqa: F811
     tick("sw", store, tasks(), runtime, 2)
     name, primed = runtime.masters[-1]
     text = prompt.build("sw", "/repo", MASTER, name, {**primed, "id": MASTER})
-    assert "keep caps at four" in text
-    assert "enable voice" not in text
+    assert "keep caps at four" in "\n".join(prompt.learned_lines(primed["learned"]))
+    assert "enable voice" not in "\n".join(prompt.learned_lines(primed["learned"]))
+    assert "keep caps at four" not in text and "enable voice" not in text
 
 
 @pytest.mark.feature("swarm-culture")

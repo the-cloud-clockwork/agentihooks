@@ -38,6 +38,7 @@ WORKER_KEYS = (
     "swarm:*:codex-openings",
     "swarm:*:codex-viewers",
     "swarm:*:launch-endings",
+    "swarm:*:spawned",
     "swarm:*:identity-conflicts",
     "swarm:*:desired-routes",
     "swarm:*:state-since",
@@ -69,6 +70,7 @@ WORKER_KEYS = (
     "swarm:*:review-tasks",
     "seat:*:recaps",
     "seat:*:learned",
+    "seat-learned:*",
     "seat-of:*:exit",
 )
 INDEX = hive_state.LEGACY_INDEX

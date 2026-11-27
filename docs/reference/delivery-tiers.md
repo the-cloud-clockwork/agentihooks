@@ -24,7 +24,7 @@ Removing the queue tier, so that a pull request merges on its pull request verdi
 
 ## Lab authority and back pressure
 
-The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The repository lists `lint`, `type-gate` and `test-count`; `docs`, `writer-lock` and `semgrep` stay on Actions, see [static units](ci-lab.md#static-units). `lab.queue.authoritative` names the gates the lab is to grade on merge groups. Each name must be a workflow job, and `scripts.ci_wiring` requires a `lab/<gate>` lab gate in `.github/gate-wiring.json` for it. `AGENTIHOOKS_LAB_OFF=true` empties the list, and `python -m scripts.ci_lab_verdict authority <grader root> merge_group` publishes it. An absent key is an empty list. `delivery.yaml` leaves the key out until the deployed lab scheduler runs a release whose delivery schema accepts it, because the scheduler validates dev's `delivery.yaml` against its own schema when it starts and the merge group base's on each merge group grade. No workflow reads that merge group output yet, so the queue and promotion tiers run on Actions whatever the list holds. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
+The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)), the same test merge commit GitHub Actions grades once the lab resolves it, falling back to the bare head when GitHub has none yet. A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The repository lists `lint`, `type-gate` and `test-count`; `docs`, `writer-lock` and `semgrep` stay on Actions, see [static units](ci-lab.md#static-units). `lab.queue.authoritative` names the gates the lab is to grade on merge groups. Each name must be a workflow job, and `scripts.ci_wiring` requires a `lab/<gate>` lab gate in `.github/gate-wiring.json` for it. `AGENTIHOOKS_LAB_OFF=true` empties the list, and `python -m scripts.ci_lab_verdict authority <grader root> merge_group` publishes it. An absent key is an empty list. `delivery.yaml` leaves the key out until the deployed lab scheduler runs a release whose delivery schema accepts it, because the scheduler validates dev's `delivery.yaml` against its own schema when it starts and the merge group base's on each merge group grade. No workflow reads that merge group output yet, so the queue and promotion tiers run on Actions whatever the list holds. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
 
 A long lab wait is back pressure, never a red. Each tick pass reads the lab's capacity document. When its predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20), the swarm holds new claims of eng tasks outside the fix phase and raises the standing `lab_wait` finding. A reading older than ten minutes holds nothing, and the finding clears once the wait falls back. Nobody retries or dispatches to catch up. [Lab wait and capacity](../ci-timing.md#lab-wait-and-capacity) shows how to read the wait.
 
@@ -436,11 +436,11 @@ Any other pull request keeps its first in, first out place.
 
 The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
 
-The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
+The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`, or a failure of the priority step under `priority_error`:
 
 ```bash
 agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<number> \
-  | jq -c 'with_entries(select(.key == "queued" or .key == "priority"))'
+  | jq -c 'with_entries(select(.key == "queued" or .key == "priority" or .key == "priority_error"))'
 ```
 
 | `priority` | Meaning |
@@ -449,6 +449,7 @@ agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<num
 | `null` | No task naming the pull request is urgent or focused |
 | `{"url", "displaced", "errors", "lab"}` | The priority ran; `displaced` lists the entries it moved behind the pull request |
 | `{"url", "errors"}` | The priority was refused or a step failed, for example `another merge queue priority is running; try again when it ends`. Entries it left out are requeued as below |
+| absent, with `priority_error` | The priority step raised before it could report an outcome, for example `HTTP Error 409: Conflict` from the ledger hierarchy read. GitHub accepted the entry, so the command prints the queue outcome and exits zero |
 
 The merge watcher does not read that outcome and never retries a refused priority, because its next pass finds the pull request already queued. The master or the operator can then run `merge priority <url>`.
 
@@ -467,7 +468,7 @@ An entry the priority dequeued and could not queue again stays in the swarm's di
 | Closed, merged, no longer into `dev`, or already back in the queue | Dropped from the set with no record |
 | A draft, a moved head or a conflict with `dev` | Left out: a `priority-requeue-skipped` record carrying `reason`, one inbox notice to its owner, and dropped from the set |
 | Anything else | Queued again at its recorded head once its staged compatibility check passes: a `priority-requeue` record |
-| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises the ledger alert `merge-priority-requeue:<url>` naming the error |
+| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises a `merge` ledger alert naming the pull request and the error |
 
 While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
 

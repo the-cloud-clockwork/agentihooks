@@ -1,0 +1,21 @@
+rules:
+  - id: alert-source-outside-ledger-sources
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A swarm alert raised a source string of its own (requeue, master-login, merge-priority-requeue with the pull
+      link), and the ledger refused every raise with schema invalid, so the alert never reached the master and the
+      priority requeue skipped its retry mark. Raise a source named in ledger_alerts (MERGE, SEAT and the rest) and
+      keep the pull link in the alert text.
+    paths:
+      include:
+        - /scripts/
+        - alert-source-outside-ledger-sources.py
+    pattern-either:
+      - pattern: $LEDGER.raise_alert($SLUG, "...", ...)
+      - pattern: $LEDGER.raise_alert($SLUG, f"...", ...)
+      - patterns:
+          - pattern: $NAME = "..."
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: ^\w*ALERT_SOURCE$

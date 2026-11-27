@@ -73,7 +73,7 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
         HEAD_B: scheduler.Plan(TREE, BASE, {"unit": (second,)}),
     }
     run = lab(plans)
-    run.push(HEAD_A, lane=HEAD_A)
+    run.push(HEAD_A, lane="first")
     with monkeypatch.context() as held:
         held.setattr(run.engine, "_admit", lambda _now: [])
         run.tick(1000)
@@ -99,20 +99,20 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
     monkeypatch.setattr(executors.venvs, "venv_for", venv)
     monkeypatch.setattr(executors.run_tests, "run", ran)
     with pytest.raises(ValueError, match="manifest digest mismatch") as refused:
-        executors.tests(pod, suite, first)
+        executors.tests(pod, suite, first, pod.runs)
     assert type(refused.value).__name__ == "ManifestRefused"
     assert first.unit.key in str(refused.value)
     assert cast(support.FakeWorktrees, pod.trees.worktrees).calls == []
     assert venv.calls == []
     assert ran.calls == []
-    run.push(HEAD_B, lane=HEAD_B)
+    run.push(HEAD_B, lane="second")
     run.tick(1002)
     following = leased(run)
     assert following.head == HEAD_B
     assert following.unit.manifest_digest == expected
     tree = support.folder(tmp_path, "tree", {executors.venvs.LOCKFILE: "lock"})
     healthy = support.pod_of(tmp_path / "healthy", support.FakeWorktrees({HEAD_B: tree}))
-    assert executors.tests(healthy, suite, following).outcome == PASSED
+    assert executors.tests(healthy, suite, following, healthy.runs).outcome == PASSED
     assert len(ran.calls) == 1
 
 
@@ -137,7 +137,7 @@ def test_manifest_refusal_precedes_all_test_execution_resources(tmp_path: Path, 
         "mismatch": "manifest digest mismatch",
     }[missing]
     with pytest.raises(ValueError, match=reason) as refused:
-        executors.tests(pod, suite, lease)
+        executors.tests(pod, suite, lease, pod.runs)
     assert type(refused.value).__name__ == "ManifestRefused"
     assert unit.key in str(refused.value)
     assert cast(support.FakeWorktrees, pod.trees.worktrees).calls == []
@@ -177,5 +177,5 @@ def test_old_records_without_identity_are_parsed_then_refused_after_claiming(
     pod = support.pod_of(tmp_path, support.FakeWorktrees({}))
     suite = executors.Suite(tmp_path / "absent", tmp_path / "flakes")
     with pytest.raises(ValueError, match="missing manifest digest"):
-        executors.tests(pod, suite, lease)
+        executors.tests(pod, suite, lease, pod.runs)
     assert cast(support.FakeWorktrees, pod.trees.worktrees).calls == []

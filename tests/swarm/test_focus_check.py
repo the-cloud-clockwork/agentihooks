@@ -5,7 +5,7 @@ import io
 import json
 import urllib.error
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -213,7 +213,7 @@ class Context:
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_unfreeze_of_a_target_that_does_not_exist_is_refused() -> None:
-    found, ctx = ledger_doc(record("tasks/gone", "focus")), Context()
+    found, ctx = ledger_doc(record("tasks/gone", "focus")), cast(Any, Context())
     op = {"op": "freeze_clear", "id": "c1", "target": "tasks/nope"}
     assert ledger_freezes._clear(found, op, ctx, "operator") is False
     assert ctx.refused == ["freeze_clear refused: target tasks/nope does not exist"]
@@ -343,6 +343,27 @@ def test_the_fix_phase_passes_a_doctor_fix_through_a_focus_elsewhere() -> None:
     assert verdicts(plain) == {"t1": "a focus elsewhere holds it"}
 
 
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_task_rows_passes_the_fix_phase_through_a_focus_elsewhere() -> None:
+    found = doc(record("lane:ci", "focus"), tasks=[task("t1", phase=loop.FIX_PHASE), ELSEWHERE])
+    fixed = focus_check.task_rows(found, "focus/lane:eng/tasks", loop.FIX_PHASE)
+    plain = focus_check.task_rows(found, "focus/lane:eng/tasks", "")
+    assert fixed is not None and plain is not None
+    assert {row["id"]: row["verdict"] for row in fixed} == {"t1": "claimable"}
+    assert {row["id"]: row["verdict"] for row in plain} == {"t1": "a focus elsewhere holds it"}
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_task_rows_is_none_under_no_target_or_with_no_tasks_suffix_and_lists_a_node_named_tasks_one_down() -> None:
+    found = ledger_doc(record("phases/p1", "focus"))
+    assert focus_check.task_rows(found, "focus/phases/none/tasks", "") is None
+    assert focus_check.task_rows(found, "focus/phases/p1", "") is None
+    tasked = doc(tasks=[task("tasks"), task("t1")])
+    assert focus_check.task_rows(tasked, "focus/tasks/tasks", "") is None
+    under = focus_check.task_rows(tasked, "focus/tasks/tasks/tasks", "")
+    assert under is not None and [row["id"] for row in under] == ["tasks"]
+
+
 @pytest.mark.feature("swarm-focus-verdict")
 def test_a_selector_target_is_known_only_with_a_value_and_split_at_its_first_colon() -> None:
     bare = ledger_doc()
@@ -432,3 +453,27 @@ def test_the_ledger_read_sends_a_focus_path_to_the_focus_read_with_its_slug(monk
     monkeypatch.setattr(routes, "focus_read", focus_read)
     assert routes.ledger_read(services, "demo", "focus/tasks/t1", {}) == {"data": []}  # type: ignore[arg-type]
     assert asked == [(services, "demo", "focus/tasks/t1")]
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_the_focus_tasks_route_hands_the_fix_phase_of_the_slug_to_task_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    state: dict[str, Any] = {"tasks": []}
+    services = SimpleNamespace(repository=Current(state))
+    fixes: list[tuple[Any, str]] = []
+    reads: list[tuple[Any, str, str]] = []
+    rows = [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
+
+    def fix_phase(given: Any, slug: str) -> str:
+        fixes.append((given, slug))
+        return "p9"
+
+    def task_rows(given_doc: dict[str, Any], path: str, fix: str) -> list[dict[str, Any]]:
+        reads.append((given_doc, path, fix))
+        return rows
+
+    monkeypatch.setattr(routes, "fix_phase", fix_phase)
+    monkeypatch.setattr(focus_check, "task_rows", task_rows)
+    reply = routes.focus_tasks(services, "demo", "focus/lane:eng/tasks", {})  # type: ignore[arg-type]
+    assert fixes == [(services, "demo")]
+    assert reads == [(state, "focus/lane:eng/tasks", "p9")]
+    assert reply is not None and [row["id"] for row in reply["data"]] == ["t1"]

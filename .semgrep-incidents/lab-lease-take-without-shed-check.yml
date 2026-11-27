@@ -1,0 +1,27 @@
+rules:
+  - id: lab-lease-take-without-shed-check
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lease take claims a pending job without first stopping at the jobs of a class the day's core budget sheds.
+      On 26 November the budget shed promotion early in the morning and kept it shed until midnight, yet the lease take
+      granted the promotion units enqueued before the shed, and they charged 13499 core minutes, more than nine days of
+      budget. Compare the job's rank with the most urgent shed class before the claim and stop the take there.
+    paths:
+      include:
+        - /scripts/ci_lab/leases.py
+        - lab-lease-take-without-shed-check.py
+    patterns:
+      - pattern: $QUEUE.claim(...)
+      - pattern-inside: |
+          def $TAKE(...):
+              ...
+      - pattern-not-inside: |
+          for $JOB in $ORDER:
+              ...
+              if <... $RANKED.rank ...>:
+                  ...
+              ...
+              if <... $QUEUE.claim(...) ...>:
+                  ...
+              ...

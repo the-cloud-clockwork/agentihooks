@@ -1,3 +1,4 @@
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from scripts.swarm_ledger.api.client import export_file
 @pytest.mark.feature("codex-planner-export-grant")
 def test_planner_keeps_existing_write_grants(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: Path("/process"))
-    options = runtime.codex_plan_mode({"HOME": "/launch", "LEDGER_DIR": "/ledger"})
+    options = runtime.codex_plan_mode({"HOME": "/launch", "LEDGER_DIR": "/ledger"}, "/repo")
     planner = tomllib.loads(options[1])["permissions"]["planner"]
     assert planner["extends"] == ":read-only"
     assert planner["network"] == {"enabled": True}
@@ -42,10 +43,11 @@ def test_planner_grants_the_client_export_directory(
     monkeypatch: pytest.MonkeyPatch, override: str | None, exports: str
 ) -> None:
     monkeypatch.setattr(Path, "home", lambda: Path("/process"))
+    monkeypatch.setattr(tempfile, "tempdir", "/launch-tmp")
     environ = {"HOME": "/launch", "LEDGER_DIR": "/ledger"}
     if override is not None:
         environ["AGENTIHOOKS_HOME"] = override
-    options = runtime.codex_plan_mode(environ)
+    options = runtime.codex_plan_mode(environ, "/repo")
     assert options[::2] == ["-c", "-c"]
     assert options[3] == 'default_permissions="planner"'
     assert str(export_file("https://ledger.example", "proof", environ).parent) == exports
@@ -59,6 +61,9 @@ def test_planner_grants_the_client_export_directory(
                     "/launch/.agentihooks/swarm": "write",
                     "/launch/scratchpad": "write",
                     exports: "write",
+                    "/repo/.git": "write",
+                    "/launch/dev/worktrees": "write",
+                    "/launch-tmp": "write",
                 },
             }
         }

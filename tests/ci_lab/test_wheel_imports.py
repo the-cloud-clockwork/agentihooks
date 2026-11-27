@@ -1,14 +1,13 @@
 """Every CI lab module, the CI test and mutation planners and the branch coverage script use shipped packages alone."""
 
 import os
-import pkgutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-import scripts.ci_lab
+from scripts import ci_lab_smoke
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,8 +74,7 @@ for module in sys.argv[2:]:
 
 def _lab_modules() -> list[str]:
     """Return every module of the CI lab package and the CI test planner."""
-    found = pkgutil.walk_packages(scripts.ci_lab.__path__, f"{scripts.ci_lab.__name__}.")
-    return sorted(module.name for module in found) + ["scripts.ci_test_plan"]
+    return ci_lab_smoke.lab_modules() + ["scripts.ci_test_plan"]
 
 
 def _import_without_tests(modules: list[str]) -> subprocess.CompletedProcess[str]:

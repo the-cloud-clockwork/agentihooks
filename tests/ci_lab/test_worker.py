@@ -189,12 +189,20 @@ def finished(root: Path, lease: worker.Lease, outcome: str = "passed") -> worker
 def pod(
     scheduler: str,
     executors: dict[str, worker.Executor],
+    tmp_path: Path,
     slots: int = 1,
     heartbeat_s: float = worker.HEARTBEAT_SECONDS,
     grace_s: float = worker.GRACE_SECONDS,
 ) -> worker.Worker:
     return worker.Worker(
-        worker.Client(scheduler), executors, "pod-1", slots, wait_ms=0, heartbeat_s=heartbeat_s, grace_s=grace_s
+        worker.Client(scheduler),
+        executors,
+        "pod-1",
+        slots,
+        tmp_path,
+        wait_ms=0,
+        heartbeat_s=heartbeat_s,
+        grace_s=grace_s,
     )
 
 
@@ -219,11 +227,11 @@ def test_units_from_two_heads_run_concurrently_on_one_pod(
     jobs.enqueue([UNIT_B], "h2", {})
     meet = threading.Barrier(2, timeout=10)
 
-    def together(lease: worker.Lease) -> worker.Finished:
+    def together(lease: worker.Lease, root: Path) -> worker.Finished:
         meet.wait()
         return finished(tmp_path, lease)
 
-    two = pod(scheduler, {"test": together}, slots=2)
+    two = pod(scheduler, {"test": together}, tmp_path, slots=2)
 
     started = two.run_once()
 
@@ -245,11 +253,11 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     jobs.enqueue([Unit(kind="test", key=key, members=(f"tests/{key}.py::t",)) for key in keys], "h1", {})
     meet = threading.Barrier(40, timeout=10)
 
-    def together(lease: worker.Lease) -> worker.Finished:
+    def together(lease: worker.Lease, root: Path) -> worker.Finished:
         meet.wait()
         return finished(tmp_path, lease)
 
-    wide = pod(scheduler, {"test": together}, slots=40, grace_s=30)
+    wide = pod(scheduler, {"test": together}, tmp_path, slots=40, grace_s=30)
 
     assert len(wide.run_once()) == 40
     assert wide.drain() == []
@@ -281,11 +289,11 @@ def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
     jobs.enqueue([UNIT_B], "h2", {})
     releases = {"h1": threading.Event(), "h2": threading.Event()}
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         releases[lease.head].wait(10)
         return finished(tmp_path, lease)
 
-    full = pod(scheduler, {"test": held}, slots=2)
+    full = pod(scheduler, {"test": held}, tmp_path, slots=2)
     assert len(full.run_once()) == 2
     threading.Timer(0.3, releases["h1"].set).start()
 
@@ -301,15 +309,21 @@ def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
 
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_crash_stops_the_heartbeat_and_the_lease_reaps(
-    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, capsys: pytest.CaptureFixture[str]
+    scheduler: str,
+    lab: Counted,
+    jobs: queue.Queue,
+    clock: Clock,
+    sink: Sink,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
 
-    def crash(lease: worker.Lease) -> worker.Finished:
+    def crash(lease: worker.Lease, root: Path) -> worker.Finished:
         beating(lab, 2)
         raise RuntimeError("unit process crashed")
 
-    crashing = pod(scheduler, {"test": crash}, heartbeat_s=0.01)
+    crashing = pod(scheduler, {"test": crash}, tmp_path, heartbeat_s=0.01)
 
     crashing.run_once()
 
@@ -331,11 +345,11 @@ def test_a_crash_logs_the_traceback_naming_the_missing_path(
     jobs.enqueue([UNIT_A], "h1", {})
     missing = tmp_path / "tree" / "uv.lock"
 
-    def crash(lease: worker.Lease) -> worker.Finished:
+    def crash(lease: worker.Lease, root: Path) -> worker.Finished:
         missing.read_bytes()
         return finished(tmp_path, lease)
 
-    crashing = pod(scheduler, {"test": crash})
+    crashing = pod(scheduler, {"test": crash}, tmp_path)
 
     crashing.run_once()
 
@@ -360,11 +374,11 @@ def test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery(
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         release.wait(10)
         return finished(tmp_path, lease)
 
-    holding = pod(scheduler, {"test": held}, heartbeat_s=0.01)
+    holding = pod(scheduler, {"test": held}, tmp_path, heartbeat_s=0.01)
     [lease] = holding.run_once()
     assert beating(lab, 1)
 
@@ -396,11 +410,11 @@ def test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_del
                 raise urllib.error.URLError("scheduler unreachable")
             return super().heartbeat(job, token)
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         beating(lab, 1)
         return finished(tmp_path, lease)
 
-    flaky = worker.Worker(Flaky(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    flaky = worker.Worker(Flaky(scheduler), {"test": held}, "pod-1", 1, tmp_path, wait_ms=0, heartbeat_s=0.01)
     flaky.run_once()
 
     assert flaky.drain() == []
@@ -424,11 +438,11 @@ def test_a_heartbeat_whose_reply_is_cut_short_is_skipped_and_the_unit_delivered(
                 raise http.client.IncompleteRead(b"{")
             return super().heartbeat(job, token)
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         beating(lab, 1)
         return finished(tmp_path, lease)
 
-    cut = worker.Worker(Cut(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    cut = worker.Worker(Cut(scheduler), {"test": held}, "pod-1", 1, tmp_path, wait_ms=0, heartbeat_s=0.01)
     cut.run_once()
 
     assert cut.drain() == []
@@ -444,11 +458,11 @@ def test_a_refused_upload_url_ends_the_units_delivery(
 ) -> None:
     jobs.enqueue([UNIT_A], "h1", {})
 
-    def taken(lease: worker.Lease) -> worker.Finished:
+    def taken(lease: worker.Lease, root: Path) -> worker.Finished:
         assert jobs.finish(found(jobs, lease.job), lease.token, "taken")
         return finished(tmp_path, lease)
 
-    refused = pod(scheduler, {"test": taken})
+    refused = pod(scheduler, {"test": taken}, tmp_path)
     refused.run_once()
 
     assert refused.drain() == []
@@ -464,9 +478,9 @@ def test_stop_lets_running_units_finish_within_the_termination_grace(
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
     executors: dict[str, worker.Executor] = {}
-    stopping = pod(scheduler, executors, slots=2, grace_s=10)
+    stopping = pod(scheduler, executors, tmp_path, slots=2, grace_s=10)
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         stopping.stop()
         release.wait(10)
         return finished(tmp_path, lease)
@@ -488,9 +502,9 @@ def test_a_unit_past_the_termination_grace_is_left_to_reap(
     jobs.enqueue([UNIT_A], "h1", {})
     release = threading.Event()
     executors: dict[str, worker.Executor] = {}
-    late = pod(scheduler, executors, slots=2, heartbeat_s=0.01, grace_s=0.05)
+    late = pod(scheduler, executors, tmp_path, slots=2, heartbeat_s=0.01, grace_s=0.05)
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         beating(lab, 1)
         late.stop()
         release.wait(10)
@@ -523,7 +537,7 @@ def test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop(
     release = threading.Event()
     waits: list[float | None] = []
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         release.wait(10)
         return finished(tmp_path, lease)
 
@@ -537,7 +551,7 @@ def test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop(
         return wait(futures, timeout=0)
 
     monkeypatch.setattr(worker, "wait", virtual)
-    built = worker.build({"CI_LAB_SCHEDULER_URL": scheduler}, {"test": held}, "pod-1", 1, None)
+    built = worker.build({"CI_LAB_SCHEDULER_URL": scheduler}, {"test": held}, "pod-1", 1, None, tmp_path)
 
     assert len(built.run_once()) == 1
     built.stop()
@@ -556,10 +570,10 @@ def test_the_termination_grace_counts_every_delivery_call_of_a_unit(
     jobs.enqueue([UNIT_A], "h1", {})
     client = Calls(scheduler)
 
-    def done(lease: worker.Lease) -> worker.Finished:
+    def done(lease: worker.Lease, root: Path) -> worker.Finished:
         return finished(tmp_path, lease)
 
-    one = worker.Worker(client, {"test": done}, "pod-1", 1, wait_ms=0, grace_s=10)
+    one = worker.Worker(client, {"test": done}, "pod-1", 1, tmp_path, wait_ms=0, grace_s=10)
     one.run_once()
 
     assert one.drain() == []
@@ -575,9 +589,9 @@ def test_run_leases_again_as_a_unit_frees_its_slot(
     jobs.enqueue([UNIT_A], "h1", {})
     jobs.enqueue([UNIT_B], "h2", {})
     executors: dict[str, worker.Executor] = {}
-    single = pod(scheduler, executors)
+    single = pod(scheduler, executors, tmp_path)
 
-    def last(lease: worker.Lease) -> worker.Finished:
+    def last(lease: worker.Lease, root: Path) -> worker.Finished:
         if lease.head == "h2":
             single.stop()
         return finished(tmp_path, lease)
@@ -621,9 +635,9 @@ def test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again(
 
     executors: dict[str, worker.Executor] = {}
     paced = Paced()
-    rolling = worker.Worker(Rolling(scheduler), executors, "pod-1", 1, wait_ms=0, stopping=paced)
+    rolling = worker.Worker(Rolling(scheduler), executors, "pod-1", 1, tmp_path, wait_ms=0, stopping=paced)
 
-    def last(lease: worker.Lease) -> worker.Finished:
+    def last(lease: worker.Lease, root: Path) -> worker.Finished:
         if lease.head == "h2":
             rolling.stop()
         return finished(tmp_path, lease)
@@ -651,10 +665,12 @@ def test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again(
 
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
-    scheduler: str, capsys: pytest.CaptureFixture[str]
+    scheduler: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     paced = Paced()
-    misrouted = worker.Worker(worker.Client(f"{scheduler}/elsewhere"), {}, "pod-1", 1, wait_ms=0, stopping=paced)
+    misrouted = worker.Worker(
+        worker.Client(f"{scheduler}/elsewhere"), {}, "pod-1", 1, tmp_path, wait_ms=0, stopping=paced
+    )
 
     with pytest.raises(urllib.error.HTTPError) as error:
         misrouted.run_once()
@@ -666,7 +682,7 @@ def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising_or_backing_off(
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Stale(worker.Client):
         def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
@@ -674,7 +690,7 @@ def test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising
             raise urllib.error.HTTPError("http://scheduler:8800/lease", 426, "Upgrade Required", raised, None)
 
     paced = Paced()
-    stale = worker.Worker(Stale("http://scheduler:8800"), {}, "pod-1", 1, wait_ms=0, stopping=paced)
+    stale = worker.Worker(Stale("http://scheduler:8800"), {}, "pod-1", 1, tmp_path, wait_ms=0, stopping=paced)
 
     assert stale.run_once() == []
 
@@ -693,7 +709,7 @@ def test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_re
     release = threading.Event()
     calls = [0]
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         release.wait(10)
         return finished(tmp_path, lease)
 
@@ -705,7 +721,7 @@ def test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_re
             raised = email.message.Message()
             raise urllib.error.HTTPError(f"{scheduler}/lease", 426, "Upgrade Required", raised, None)
 
-    restarting = worker.Worker(Stale(scheduler), {"test": held}, "pod-1", 2, wait_ms=0, grace_s=10)
+    restarting = worker.Worker(Stale(scheduler), {"test": held}, "pod-1", 2, tmp_path, wait_ms=0, grace_s=10)
     assert len(restarting.run_once()) == 1
 
     threading.Timer(0.2, release.set).start()
@@ -719,13 +735,13 @@ def test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_re
 
 @pytest.mark.wall_clock
 @pytest.mark.feature("lab-worker-pod-loop")
-def test_stop_ends_a_lease_backoff_at_once() -> None:
+def test_stop_ends_a_lease_backoff_at_once(tmp_path: Path) -> None:
     class Down(worker.Client):
         def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
             threading.Timer(0.1, down.stop).start()
             raise ConnectionRefusedError(111, "Connection refused")
 
-    down = worker.Worker(Down("http://scheduler:8800"), {}, "pod-1", 1, wait_ms=0)
+    down = worker.Worker(Down("http://scheduler:8800"), {}, "pod-1", 1, tmp_path, wait_ms=0)
     down.backoff_s = 60.0
     began = time.monotonic()
 
@@ -746,11 +762,11 @@ def test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slo
     jobs.enqueue([UNIT_A, UNIT_B, wide], "h1", requirements)
     release = threading.Event()
 
-    def held(lease: worker.Lease) -> worker.Finished:
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
         release.wait(10)
         return finished(tmp_path, lease)
 
-    three = pod(scheduler, {"test": held}, slots=3)
+    three = pod(scheduler, {"test": held}, tmp_path, slots=3)
 
     assert [lease.unit for lease in three.run_once()] == [UNIT_A]
     assert three.free() == 1
@@ -782,6 +798,72 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert error.value.code == 400
     assert client.complete(lease.job, lease.token, "passed") is True
     assert found(jobs, lease.job).outcome == "passed"
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none(scheduler: str, jobs: queue.Queue) -> None:
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    client = worker.Client(scheduler)
+    [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+    assert client.bundle(lease.job, "wrong", "m" * 40) is None
+    assert client.bundle(lease.job, lease.token, "m" * 40) is None
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: Sink, jobs: queue.Queue) -> None:
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        if (method, target) == lease_api.BUNDLE_ROUTE:
+            return 500, {"error": "boom"}
+        return lease_api.answer(lab, Signer(sink.url), method, target, raw, authorization)
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+        with pytest.raises(urllib.error.HTTPError) as error:
+            client.bundle(lease.job, lease.token, "m" * 40)
+        assert error.value.code == 500
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_bundle_request_body_carries_exactly_job_token_and_sha() -> None:
+    seen: list[bytes] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        seen.append(raw)
+        return 200, {"bundle": ""}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.bundle("job1", "tok1", "m" * 40)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert json.loads(seen[0]) == {"job": "job1", "token": "tok1", "sha": "m" * 40}
+
+
+def test_the_client_decodes_the_bundle_route_s_base64_payload() -> None:
+    import base64
+
+    expected = b"bundle-bytes"
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        return 200, {"bundle": base64.b64encode(expected).decode()}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        assert client.bundle("job1", "tok1", "m" * 40) == expected
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
@@ -864,22 +946,25 @@ def test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
-def test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis() -> None:
+def test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis(tmp_path: Path) -> None:
     environ = {"CI_LAB_SCHEDULER_URL": "http://scheduler:8800", "CI_LAB_SLOTS": "3", "HOME": "/root"}
     executors: dict[str, worker.Executor] = {}
 
-    built = worker.build(environ, executors, "pod-7", 8, 6.0)
+    built = worker.build(environ, executors, "pod-7", 8, 6.0, tmp_path)
 
-    assert (built.client, built.executors, built.name, built.slots) == (
+    assert (built.client, built.executors, built.name, built.slots, built.runs) == (
         worker.Client("http://scheduler:8800"),
         executors,
         "pod-7",
         3,
+        tmp_path,
     )
     assert built.capabilities == CAPABILITIES
-    assert worker.build({"CI_LAB_SCHEDULER_URL": "http://scheduler:8800"}, executors, "pod-7", 8, 2.0).slots == 2
+    assert (
+        worker.build({"CI_LAB_SCHEDULER_URL": "http://scheduler:8800"}, executors, "pod-7", 8, 2.0, tmp_path).slots == 2
+    )
     with pytest.raises(worker.Refused):
-        worker.build({**environ, "REDIS_URL": "redis://redis"}, executors, "pod-7", 8, 6.0)
+        worker.build({**environ, "REDIS_URL": "redis://redis"}, executors, "pod-7", 8, 6.0, tmp_path)
 
 
 @pytest.mark.feature("lab-unit-outcomes")
@@ -890,3 +975,206 @@ def test_an_executor_answer_with_an_unknown_outcome_is_refused(tmp_path: Path) -
     assert str(refused.value) == "unknown lab unit outcome 'taken'"
     kept = worker.Finished(outcome="gate_failed", report=tmp_path / "report.json", log=tmp_path / "log.txt")
     assert kept.outcome == "gate_failed"
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_delivered_units_lease_root_is_removed_and_its_report_and_log_upload_whole(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+    report_body = '{"key": "a", "padding": "' + ("x" * 500) + '"}'
+    log_body = "log of h1\n" + ("y" * 500)
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        report = root / "report.json"
+        report.write_text(report_body)
+        log = root / "log.txt"
+        log.write_text(log_body)
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(
+        worker.Client(scheduler),
+        {"test": held},
+        "pod-1",
+        1,
+        runs,
+        wait_ms=0,
+    )
+
+    one.run_once()
+
+    assert one.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {"/h1:test:a/report": report_body.encode(), "/h1:test:a/log": log_body.encode()}
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_is_removed_even_though_its_executor_raises_and_its_lease_reaps(
+    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def crash(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        raise RuntimeError("unit process crashed")
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    crashing = worker.Worker(
+        worker.Client(scheduler),
+        {"test": crash},
+        "pod-1",
+        1,
+        runs,
+        wait_ms=0,
+        heartbeat_s=0.01,
+    )
+
+    crashing.run_once()
+
+    assert crashing.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {}
+    clock.now += lab.ttl_ms + 1
+    assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_is_removed_though_a_lost_lease_delivers_nothing(
+    scheduler: str, lab: Counted, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        release.wait(10)
+        report = root / "report.json"
+        report.write_text('{"key": "a"}')
+        log = root / "log.txt"
+        log.write_text("log of h1")
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    holding = worker.Worker(
+        worker.Client(scheduler),
+        {"test": held},
+        "pod-1",
+        1,
+        runs,
+        wait_ms=0,
+        heartbeat_s=0.01,
+    )
+    [lease] = holding.run_once()
+    assert beating(lab, 1)
+    assert jobs.finish(found(jobs, lease.job), lease.token, "taken")
+    release.set()
+
+    assert holding.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {}
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_holding_a_read_only_folder_is_fully_removed(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        report = root / "report.json"
+        report.write_text('{"key": "a"}')
+        log = root / "log.txt"
+        log.write_text("log of h1")
+        rules = root / "rules"
+        tests = rules / "tests"
+        tests.mkdir(parents=True)
+        (rules / "features.json").write_text("{}")
+        (tests / "test_alpha.py").write_text("x")
+        tests.chmod(0o555)
+        rules.chmod(0o555)
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, runs, wait_ms=0)
+
+    try:
+        one.run_once()
+        assert one.drain() == []
+        [root] = seen
+        assert not root.exists()
+        assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+    finally:
+        for root in seen:
+            if (root / "rules").exists():
+                (root / "rules" / "tests").chmod(0o700)
+                (root / "rules").chmod(0o700)
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_unit_whose_lease_root_cannot_be_cut_heartbeats_nothing_and_its_lease_reaps(
+    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    ran: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        ran.append(root)
+        return worker.Finished(outcome="passed", report=root / "report.json", log=root / "log.txt")
+
+    missing = tmp_path / "runs"
+    rootless = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, missing, wait_ms=0, heartbeat_s=0.01)
+
+    rootless.run_once()
+
+    assert rootless.drain() == []
+    time.sleep(0.5)
+    assert ran == []
+    assert lab.beats == []
+    assert sink.bodies == {}
+    clock.now += lab.ttl_ms + 1
+    assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_unit_whose_lease_root_resists_removal_is_delivered_and_reports_no_crash(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        root.rmdir()
+        root.write_text("")
+        return finished(tmp_path, lease)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, runs, wait_ms=0)
+
+    one.run_once()
+
+    assert one.drain() == []
+    [root] = seen
+    assert root.is_file()
+    assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert "crashed" not in capsys.readouterr().err

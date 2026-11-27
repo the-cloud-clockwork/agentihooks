@@ -49,7 +49,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         trees[head] = support.folder(tmp_path, name, {executors.venvs.LOCKFILE: "lock", path: tree[path].decode()})
     run = lab(plans)
     for head in plans:
-        run.push(head, lane=head)
+        run.push(head, lane=f"branch-{head}")
     if legacy == "held":
         monkeypatch.setattr(run.engine, "_admit", lambda _now: [])
     run.tick(1000)
@@ -82,7 +82,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
             pod = support.pod_of(tmp_path / lease.head, support.FakeWorktrees(trees))
             suite = executors.Suite(pod.root / "manifest.json", pod.root / "flakes.jsonl")
             assert not suite.manifest.exists()
-            finished = executors.tests(pod, suite, lease)
+            finished = executors.tests(pod, suite, lease, pod.runs)
             assert finished.outcome == PASSED
             assert ran.calls[-1][0] == lease.unit.members
             assert cast("run_tests.Lab", ran.calls[-1][-1]).manifest == expected[lease.head]

@@ -18,10 +18,12 @@ def _claim(tool_name: str, tool_input: dict, session_id: str) -> str | None:
     return check()
 
 
-GATES = () if sys.platform == "win32" else (("claim watch", _claim), ("context recycle gate", _recycle))
+GATES = (("claim watch", _claim), ("context recycle gate", _recycle))
 
 
 def pretool(tool_name: str, tool_input: dict, session_id: str) -> str | None:
+    if sys.platform == "win32":
+        return None
     for label, gate in GATES:
         try:
             block = gate(tool_name, tool_input, session_id)

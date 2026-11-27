@@ -22,7 +22,13 @@ from .services import Services
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
 CONTEXT_RE = re.compile(r"swarm/context/[\w.-]+/[\w.:-]+")
-ORDERS_TOO_LARGE = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
+PAGED_READ = "agentihooks api --slug {slug} get focus/{target}/tasks"
+ORDERS_TOO_LARGE = "The open orders pass the reply limit: read the tasks of one order with " + PAGED_READ
+FOCUS_TOO_LARGE = (
+    "The focus records pass the reply limit: list them with agentihooks api --slug {slug} get freezes "
+    "and read the tasks of one with " + PAGED_READ
+)
+TARGET_TOO_LARGE = "The tasks under {target} pass the reply limit: read them with " + PAGED_READ
 OPEN_ONLY = "State open pages the open rows of a paged section with offset and limit"
 
 
@@ -95,12 +101,13 @@ def ledger_read(services: Services, slug: str, path: str, query: dict[str, Any])
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path.split("/")[0] == "focus":
-        return focus_read(services, slug, path)
+        paged = focus_tasks(services, slug, path, query)
+        return focus_read(services, slug, path) if paged is None else paged
     if path == "orders":
         return orders_read(services, slug)
     if path == "summary":
         data = services.ledger.summary(slug)
-        return resources.bounded({"data": data, "revision": resources.revision(data)})
+        return {"data": data, "revision": resources.revision(data)}
     state: object = query.get("state")
     if state == "open":
         return open_read(services, slug, path, query)
@@ -139,20 +146,38 @@ def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
     def read(state: dict[str, Any], fix: str) -> Any:
         return ports.swarm().focus_check.read(state, path, fix, int(time.time() * 1000))
 
-    return judged_reply(services, slug, read, path == "focus")
+    listed = path == "focus"
+    target = "<target>" if listed else path.removeprefix("focus/")
+    too_large = (FOCUS_TOO_LARGE if listed else TARGET_TOO_LARGE).format(slug=slug, target=target)
+    return judged_reply(services, slug, read, listed, too_large)
+
+
+def focus_tasks(services: Services, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any] | None:
+    """The tasks under one focus target that are not done, in pages, at ``focus/<target>/tasks``: the rows, their
+    revision and the cursor every collection pages by. None for a path that names no such list."""
+    focus_check = ports.swarm().focus_check
+    if not path.endswith(focus_check.TASKS):
+        return None
+    state: dict[str, Any] = services.repository.current(slug).state
+    rows: list[dict[str, Any]] | None = focus_check.task_rows(state, path, fix_phase(services, slug))
+    if rows is None:
+        return None
+    revision = resources.revision(rows)
+    return resources.page(rows, revision, query)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def orders_read(services: Services, slug: str) -> dict[str, Any]:
     """Every open operator order with the claim gate verdict on each unfinished task under it."""
-    return judged_reply(services, slug, ports.swarm().order_check.read, True, ORDERS_TOO_LARGE)
+    too_large = ORDERS_TOO_LARGE.format(slug=slug, target="<item>")
+    return judged_reply(services, slug, ports.swarm().order_check.read, True, too_large)
 
 
 def judged_reply(
-    services: Services, slug: str, read: Callable[[dict[str, Any], str], Any], listed: bool, too_large: str = ""
+    services: Services, slug: str, read: Callable[[dict[str, Any], str], Any], listed: bool, too_large: str
 ) -> dict[str, Any]:
     """The reply of a read that judges the ledger state under the swarm's fix phase: its data and their revision,
-    an empty cursor when it lists, held to the reply limit under the read's own message when it has one. A read
-    that finds no target answers 404."""
+    an empty cursor when it lists, held to the reply limit under the read's own message, which names the read that
+    fits. A read that finds no target answers 404."""
     state: dict[str, Any] = services.repository.current(slug).state
     found = read(state, fix_phase(services, slug))
     if found is None:
@@ -160,7 +185,7 @@ def judged_reply(
     reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
     if listed:
         reply["next_cursor"] = None
-    return resources.bounded(reply, too_large) if too_large else resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return resources.bounded(reply, too_large)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:

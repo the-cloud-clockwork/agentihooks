@@ -288,6 +288,9 @@ TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
+HELD_NOTE = (
+    "Panic held the push, so block saved the unpushed commits as a patch in the task work folder, {count} in all."
+)
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
 CONTROLLER_TICKS = "the controller tick spawns and reaps agents"
@@ -1611,6 +1614,10 @@ def cmd_status(store: Any, args: Any) -> None:
         + "  ".join(f"{name}={modes.label(mode)}" for name, mode in catalog.current(config.gates).items())
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
+    spawned = store.spawns(args.slug)
+    print(
+        "spawns last hour  " + ("  ".join(f"{harness} {count}" for harness, count in sorted(spawned.items())) or "none")
+    )
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
@@ -2327,7 +2334,7 @@ def _close_members(ledger, slug, agent, lead, fields):
             ledger.update_task(slug, member, fields, by=agent.name)
 
 
-def cmd_block(store, args):
+def cmd_block(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     ledger = LedgerClient()
     row = ledger.task(args.slug, agent.task)
@@ -2347,12 +2354,15 @@ def cmd_block(store, args):
     refused = "" if args.dev_red else _block_refusal(store, args.slug, row)
     if refused:
         raise SwarmError(refused)
-    pushed = publish.pushed_branches(_local_repo(store, args.slug), row, agent)
+    pushed, held = publish.block_branches(_local_repo(store, args.slug), row, agent, args.slug)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
         ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
     block_agent(store, args.slug, agent, args.note, ledger, red_run)
-    cause = {"dev_red_run": red_run} if red_run is not None else {}
+    cause: dict[str, Any] = {"dev_red_run": red_run} if red_run is not None else {}
+    if held:
+        ledger.comment(args.slug, agent.task, HELD_NOTE.format(count=sum(p["commits"] for p in held)), by=agent.name)
+        cause["held_patch"] = held
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )

@@ -23,7 +23,9 @@ def test_master_keeps_the_previous_summary_for_when_the_operator_writes(monkeypa
     assert summary in text
     assert "When the operator writes, use this summary to say where the work stopped in plain words." in text
     assert text.index(summary) < text.index("Your standing duties:")
-    assert "Keep records" in text
+    assert "Your seat master@sw carries what earlier occupants left." in text.splitlines()
+    assert "Keep records" not in text
+    assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.mark.parametrize("summary", ["", "Summary\nWe stopped with the parser finished."])

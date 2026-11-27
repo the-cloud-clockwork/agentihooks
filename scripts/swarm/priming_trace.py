@@ -8,36 +8,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm.prompt import OLDER_RECAPS
-
 
 def path(home: Path, slug: str, name: str) -> Path:
     return Path(home) / slug / "prompts" / f"{name}.sources.json"
 
 
-def _row(layer, source, locator, text):
-    return {"layer": layer, "source": source, "locator": locator, "text": text}
-
-
 def rows(slug: str, task: dict[str, Any]) -> list[dict[str, Any]]:
-    seat = task.get("seat", "")
-    found = [
-        _row("culture", f"culture:{slug}#{number}", {"swarm": slug, "line": number}, line)
-        for number, line in enumerate((task.get("culture") or "").splitlines(), 1)
-        if line.strip()
-    ]
-    recaps = task.get("recaps") or []
-    for shown, recap in enumerate(recaps[: 1 + OLDER_RECAPS]):
-        number = len(recaps) - shown
-        found.append(_row("recap", f"recap:{seat}#{number}", {"seat": seat, "recap": number}, recap["text"]))
-    for number, note in enumerate(task.get("learned") or [], 1):
-        if note["maturity"] != "data" and not note.get("withheld"):
-            origin = note.get("seat", seat)
-            ordinal = note.get("number", number)
-            found.append(
-                _row("learned", f"learned:{origin}#{ordinal}", {"seat": origin, "note": ordinal}, note["text"])
-            )
-    return found + list(task.get("withheld") or [])
+    return list(task.get("withheld") or [])
 
 
 def withhold(slug: str, task: dict[str, Any]) -> dict[str, Any]:

@@ -377,7 +377,8 @@ The current workflow grades as follows:
 | Part | Current behavior |
 |---|---|
 | Load pairs | A five job matrix, `pair: [1, 2, 3, 4, 5]`. Each job starts one base and one head gate side by side on its own runner, base first on odd pairs and head first on even pairs |
-| Load measures | Write p50 and the busiest CPU window. Write p95 stays an absolute budget inside each gate run |
+| Load measures | Write p50 and the busiest CPU window, summed over every ledger server process the side started: the ledger API service and the read only ledger server on a revision with the API service, the one ledger server on a revision before the write cutover such as `726353637`. Write p95 stays an absolute budget inside each gate run |
+| Load evidence | Each pair uploads `load-pair-N` holding `base.log`, `head.log` and every server log of each side: `server.log` and `server-read.log`, including logs under `repeat/` when a write breach repeats the window |
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
 | Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'`, described under [Hierarchy CPU grading](#hierarchy-cpu-grading) |
@@ -489,7 +490,7 @@ A compare dispatch skips the `load` job and runs these instead:
 
 | Job | What it does |
 |---|---|
-| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and both server logs either way |
+| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and every server log of each side, `server.log` and `server-read.log`, either way |
 | `compare-grade` | Runs after every pair job that was not cancelled. It downloads the five artifacts and runs `tests.ledger_load.paired` on them with `--margin "$SAME_CODE_MARGIN"` and `--same-code tests/ledger_load/compare_same_code_pairs.json` |
 
 The grade reads the last measure line of each log, takes the head over base
@@ -803,7 +804,7 @@ done
 | Item readers | 10, one single resource read a second each |
 | Page stream | one server-sent event stream held open through the run |
 | Duration | three bin sweeps of the server watcher: `(SWEEPS + 1) × BIN_SWEEP_EVERY × watch interval` = 3 × 15 × 2 s = 90 s |
-| Sampler | once a second: server CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
+| Sampler | once a second, summed over every ledger server process the run started (the ledger API service and the read only ledger server, or the one ledger server of a revision before the write cutover): CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
 
 ## Verdict
 

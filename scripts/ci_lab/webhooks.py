@@ -24,6 +24,8 @@ COMPLETED = "completed"
 CHECK_COMPLETED = "check_completed"
 CHECK_PREFIX = "lab"
 BRANCHES = "refs/heads/"
+DEV = "dev"
+DEV_REF = f"{BRANCHES}{DEV}"
 PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
 CLOSED = "closed"
 PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened", CLOSED})
@@ -35,8 +37,9 @@ NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 @dataclass(frozen=True)
 class HeadEvent:
     """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor.
-    A pull request head also names its lane, the pull request's head branch, and a closed pull request names the lane
-    whose work ends."""
+    A pull request head also names its lane, the pull request's head branch, a push to dev names dev, and a closed
+    pull request names the lane whose work ends. A pull request head also keeps its pull request number, 0 for
+    every other event."""
 
     event: str
     repo: str
@@ -45,6 +48,7 @@ class HeadEvent:
     actor: str
     action: str
     lane: str = ""
+    pull_number: int = 0
 
 
 @dataclass(frozen=True)
@@ -60,14 +64,17 @@ class CheckEvent:
 
 
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
-    if payload["deleted"] or not str(payload["ref"]).startswith(BRANCHES):
+    ref = str(payload["ref"])
+    if payload["deleted"]:
         return []
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
-    if str(payload["ref"]).startswith(PLANT_PREFIX):
+    if ref.startswith(PLANT_PREFIX):
         return [HeadEvent(PLANT, repo, payload["after"], "", actor, PUSHED)]
+    if ref != DEV_REF:
+        return []
     if payload["before"] == "0" * 40:
         return []
-    return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
+    return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED, DEV)]
 
 
 def pull_lane(pull: Mapping[str, Any]) -> str:
@@ -82,7 +89,10 @@ def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
         return []
     pull, repo = payload["pull_request"], payload["repository"]["html_url"]
     head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
-    return [HeadEvent("pull_request", repo, head, base, author, payload["action"], pull_lane(pull))]
+    number = pull.get("number", 0)
+    return [
+        HeadEvent("pull_request", repo, head, base, author, payload["action"], lane=pull_lane(pull), pull_number=number)
+    ]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -113,8 +123,9 @@ def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent | CheckEvent]:
         return []
     pulls = run["pull_requests"]
     base = pulls[0]["base"]["sha"] if pulls else ""
+    number = pulls[0].get("number", 0) if pulls else 0
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
-    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"])]
+    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"], pull_number=number)]
 
 
 HEADS: Mapping[str, Callable[[Mapping[str, Any]], Sequence[HeadEvent | CheckEvent]]] = {
@@ -132,8 +143,9 @@ def head_events(name: str | None, payload: Mapping[str, Any]) -> Sequence[HeadEv
     sender reopening an untrusted author's pull request admits nothing; every other head's actor is
     the delivery's sender. A rerequested check run with no pull request has no base. A push to a
     branch under `PLANT_PREFIX` names a plant head with no base, whatever its before, which the
-    scheduler bases on the head's merge base with dev. A completed check run of any name is a
-    `CheckEvent`, never a head.
+    scheduler bases on the head's merge base with dev. Any other push names a head only on the dev
+    branch, with dev as its lane, so a newer push to dev replaces it; a push to another branch names
+    none. A completed check run of any name is a `CheckEvent`, never a head.
     """
     if name is None or name not in HEADS:
         return []
@@ -149,10 +161,15 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
     return HeadEvent(NOTICE, repo, head, base, actor, PUSHED)
 
 
-def head_data(event: HeadEvent) -> dict[str, str]:
-    """Return the envelope data of a head: its six fields and, for a head that names one, its lane."""
-    data = asdict(event)
-    return data if event.lane else {name: value for name, value in data.items() if name != "lane"}
+def head_data(event: HeadEvent) -> dict[str, str | int]:
+    """Return the envelope data of a head: its six fields and, for a head that names one, its lane and pull request
+    number."""
+    data: dict[str, str | int] = asdict(event)
+    if not event.lane:
+        del data["lane"]
+    if not event.pull_number:
+        del data["pull_number"]
+    return data
 
 
 def envelope(event: HeadEvent | CheckEvent) -> Envelope:

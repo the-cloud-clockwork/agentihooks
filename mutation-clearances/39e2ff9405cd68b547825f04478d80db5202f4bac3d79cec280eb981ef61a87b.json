@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.xǁQueueǁdrain:f826aa71d3a430180fa32d651eb4244e246dd6ce0fd4f8573671761a3d8ea796": {
+    "reader": "standards_reader",
+    "reason": "MULTI/EXEC returns the same HGET replies in order, so heads is unchanged; only atomicity of the read batch differs, which no caller or output observes."
+  }
+}

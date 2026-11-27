@@ -1,0 +1,28 @@
+{
+  "id": "hub-admission-reply-fits-bus",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-reply-size",
+  "behaviour": "A hub admission carries the trimmed recaps, the seat recap total and the learned notes not withheld; the compact opening prompt reads them only to say whether the seat has history and renders none of them, so the prompt and its trace rows are the same for the carried and the whole task at any recap count. A bus reply over the server payload limit is sent compressed and read back whole, and one that does not fit even compressed is answered by the serve's refusal; for an admission that refusal frees the agent, releases the claim, forgets the stored admission and answers held with the named reason, so a claim is never kept for an answer the hive cannot receive.",
+  "seam": "prompt.carried in Admission._claim, nats_payload.fitted in NatsBus.serve, nats_payload.expanded in NatsBus.request, slots.refusal and Admission.unsent",
+  "rules": [
+    "nats-reply-without-size-path"
+  ],
+  "tests": [
+    "tests/events/test_nats_reply_size.py::test_a_reply_at_the_server_limit_is_answered_and_read_as_it_is",
+    "tests/events/test_nats_reply_size.py::test_a_reply_over_the_server_limit_is_answered_compressed_and_read_back_whole",
+    "tests/events/test_nats_reply_size.py::test_a_reply_that_does_not_fit_compressed_is_answered_by_the_refusal",
+    "tests/events/test_nats_reply_size.py::test_a_refusal_answer_over_the_server_limit_is_logged_and_never_sent",
+    "tests/hub/test_admission_reply_size.py::test_an_admission_carries_only_the_recaps_and_learned_notes_its_prompt_shows",
+    "tests/hub/test_admission_reply_size.py::test_an_admission_over_the_bus_limit_reaches_the_hive_compressed",
+    "tests/hub/test_admission_reply_size.py::test_an_admission_that_cannot_cross_the_bus_releases_its_claim_with_a_named_refusal",
+    "tests/hub/test_admission_reply_size.py::test_an_admission_whose_held_answer_cannot_cross_the_bus_releases_its_claim_and_sends_nothing",
+    "tests/hub/test_admission_reply_size.py::test_an_unsent_admission_of_another_hive_releases_nothing",
+    "tests/hub/test_admission_reply_size.py::test_an_unsent_admission_whose_agent_is_gone_forgets_the_offer",
+    "tests/hub/test_admission_reply_size.py::test_another_slot_operation_that_cannot_cross_the_bus_answers_its_error",
+    "tests/swarm/test_prompt_carried.py::test_a_carried_task_renders_the_same_prompt_and_trace_as_the_whole_task",
+    "tests/swarm/test_prompt_carried.py::test_a_task_carried_twice_keeps_the_seat_recap_count",
+    "tests/swarm/test_prompt_carried.py::test_a_carried_task_carries_only_the_learned_notes_not_withheld",
+    "tests/swarm/test_prompt_carried.py::test_a_seat_with_only_the_shown_recaps_names_the_seat_brief_instead_of_them",
+    "tests/swarm/test_prompt_carried.py::test_a_seat_with_one_recap_past_the_shown_ones_prompts_the_same_as_one_without"
+  ]
+}

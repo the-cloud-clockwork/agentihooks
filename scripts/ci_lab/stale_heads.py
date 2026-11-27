@@ -4,7 +4,9 @@
 request and of every plant branch of a repository, from paged listings read until two readings in a row agree and
 never one head at a time. `repositories` names the repositories the first pass of a scheduler lists, `stale` the
 grades it then retires and `listed` the line that counts them. `closing` splits the live grades a lane holds of one
-head into those a closed pull request's base ends and those that stay.
+head into those a closed pull request's base ends and those that stay. `branchless` names the promotion work a push
+that named no branch asks for, which intake refuses and the first pass retires, and `unbranched` the line that
+counts it.
 """
 
 from collections.abc import Callable, Mapping
@@ -128,4 +130,19 @@ def listed(repo: str, heads: int, origins: Origins, gone: Mapping[str, tuple[str
     return (
         f"listed {heads} wanted heads of {repo}: {live} live pull request grades, {retired} retired, "
         f"{dropped} pending units dropped"
+    )
+
+
+def branchless(tier: int, lane: str, head: str, ref: str) -> bool:
+    """Whether a promotion grade or waiting head was asked by a push that named no branch: it holds its own head as
+    its lane and no grade ref."""
+    return tier == Priority.PROMOTION and lane == head and not ref
+
+
+def unbranched(waiting: int, live: int, dropped: int) -> str:
+    """Return the line counting the promotion work of pushes that named no branch that a first pass retired: the
+    waiting heads dropped, the live grades retired and the pending units dropped."""
+    return (
+        f"retired the promotion grades of pushes that named no branch: {waiting} waiting heads dropped, "
+        f"{live} live grades retired, {dropped} pending units dropped"
     )

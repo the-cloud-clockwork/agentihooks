@@ -91,7 +91,15 @@ def rig():
         SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500),
     )
     event = Envelope(
-        "ready-a", "task.ready", "rig", "task", "task-a", 0, 12, "readiness", {"lane": "eng", "generation": 0}
+        "ready-a",
+        "task.ready",
+        "rig",
+        "task",
+        "task-a",
+        0,
+        12,
+        "readiness",
+        {"lane": "eng", "generation": 0, "quota": {}},
     )
     queue = bus.queue("swarm.rig.ready.eng", policy)
     queue.offer(event)
@@ -884,7 +892,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                     0,
                     12,
                     "readiness",
-                    {"lane": "eng", "generation": 0},
+                    {"lane": "eng", "generation": 0, "quota": {}},
                 )
             )
             spoke = Spoke(config, spoke_bus, runtime, tasks, reading)
@@ -1124,7 +1132,7 @@ def test_pending_completion_is_isolated_between_spokes(rig, field):
 
     rig.bus.events.publish = publish
     assert rig.spoke.poll() == "retry"
-    value = SimpleNamespace(slug="other") if field == "swarm" else "other"
+    value = {"hive": "other", "lane": "ci", "swarm": SimpleNamespace(slug="other")}[field]
     config = replace(rig.config, **{field: value})
     ready = replace(rig.event, id="other-ready", key="task-b", swarm=config.swarm.slug)
     rig.bus.queue(queue_name(config.swarm.slug, config.lane), config.policy).offer(ready)

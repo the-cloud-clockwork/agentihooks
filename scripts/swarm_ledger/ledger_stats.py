@@ -5,13 +5,11 @@ Pure functions over a ledger document and its `_meta` events.
 
 import math
 import statistics
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.repository import hierarchy
-
-if TYPE_CHECKING:
-    from ledger_core import Context
 
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
@@ -250,7 +248,7 @@ def review(doc, meta, now, calculation=None):
     )
 
 
-def refresh(doc: dict, ctx: "Context", request_id: str) -> str:
+def refresh(doc: dict[str, Any], ctx: OpContext, request_id: str) -> str:
     state = {"id": request_id, "rev": ctx.rev, "at": ctx.at}
     ctx.meta["stats_refresh"] = state
     events = ctx.meta["events"] + ctx.events

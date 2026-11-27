@@ -60,7 +60,12 @@ BOUND = {
     "mcp_scheme": "",
     "mcp_env": "SWARM_BRAIN_MCP_KEY",
 }
-MANAGED_SERVER = {"type": "http", "url": MCP, "headers": {"X-API-Key": "${SWARM_BRAIN_MCP_KEY}"}}
+MANAGED_SERVER = {
+    "type": "http",
+    "url": MCP,
+    "headers": {"X-API-Key": "${SWARM_BRAIN_MCP_KEY}"},
+    "default_tools_approval_mode": "approve",
+}
 
 
 def _document(lan=None, cluster=None, credentials=None):

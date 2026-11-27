@@ -59,17 +59,28 @@ def test_decision_table_follows_the_configured_counts(outcome: str, attempts: in
     assert retry.decide(UnitResult(outcome, attempts), Policy(lost=2, failed=1)) == expected
 
 
-def test_a_second_loss_is_final_and_red() -> None:
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+def test_a_second_loss_is_final_and_leaves_its_grade_without_a_verdict() -> None:
     first, second = UnitResult("lost", 0), UnitResult("lost", 1)
     assert retry.decide(first) == "retry"
-    assert (retry.decide(second), retry.red(second)) == ("final", True)
+    assert (retry.decide(second), retry.red(second)) == ("final", False)
 
 
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
 @pytest.mark.parametrize(
     ("outcome", "expected"),
-    [("passed", False), ("failed", True), ("gate_failed", True), ("survived", True), ("crash", True)],
+    [
+        ("passed", False),
+        ("failed", True),
+        ("gate_failed", True),
+        ("survived", True),
+        ("lost", False),
+        ("crash", False),
+        ("cannot_run", False),
+        ("dropped", False),
+    ],
 )
-def test_only_a_pass_is_green(outcome: str, expected: bool) -> None:
+def test_only_a_result_with_a_failing_verdict_is_red(outcome: str, expected: bool) -> None:
     assert retry.red(UnitResult(outcome, 0)) is expected
 
 

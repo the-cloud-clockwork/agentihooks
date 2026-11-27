@@ -7,11 +7,13 @@ Redis variable. A unit whose executor raises stops heartbeating and is never com
 lease and requeues it once.
 """
 
+import base64
 import contextlib
 import functools
 import http.client
 import json
 import sys
+import tempfile
 import threading
 import traceback
 import urllib.error
@@ -24,7 +26,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from scripts import ci_cpu_quota
-from scripts.ci_lab import contract
+from scripts.ci_lab import contract, worktrees
 from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.units import Unit
 from scripts.scheduler.process_interval import Interval
@@ -55,6 +57,7 @@ TIMEOUT_SECONDS = 60.0
 DELIVERY_CALLS = 5
 GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+NOT_FOUND = 404
 RESTART = 426
 SERVER_ERROR = 500
 REDIS = "REDIS"
@@ -63,7 +66,8 @@ REDIS = "REDIS"
 @dataclass(frozen=True)
 class Lease:
     """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
-    and grader revision its grade reads."""
+    and grader revision its grade reads, and, for a static unit of a resolved pull request grade, the test merge
+    GitHub built, empty for every other lease."""
 
     job: str
     token: str
@@ -73,6 +77,7 @@ class Lease:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    graded_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,7 +94,7 @@ class Finished:
             raise ValueError(f"unknown lab unit outcome {self.outcome!r}")
 
 
-Executor = Callable[[Lease], Finished]
+Executor = Callable[[Lease, Path], Finished]
 
 
 class Refused(RuntimeError):
@@ -118,6 +123,7 @@ def _lease(grant: Mapping[str, Any]) -> Lease:
         grant["expires_ms"],
         grant["base"],
         grant["grader"],
+        grant.get("graded_commit", ""),
     )
 
 
@@ -158,6 +164,17 @@ class Client:
         reply = self._held("/upload-url?" + urlencode({"job": job, "token": token, "name": name}), None)
         return None if reply is None else reply["url"]
 
+    def bundle(self, job: str, token: str, sha: str) -> bytes | None:
+        """Return the git bundle of the lease's graded commit, or None when the token no longer holds the lease or
+        no served repository's store holds the commit."""
+        try:
+            reply = self._send("/bundle", {"job": job, "token": token, "sha": sha})
+        except urllib.error.HTTPError as error:
+            if error.code in (REFUSED, NOT_FOUND):
+                return None
+            raise
+        return base64.b64decode(reply["bundle"])
+
     def complete(self, job: str, token: str, outcome: str) -> bool:
         """Record the job's outcome; False when the token no longer holds the lease."""
         return self._held("/complete", {"job": job, "token": token, "outcome": outcome}) is not None
@@ -177,6 +194,7 @@ class Worker:
     executors: Mapping[str, Executor]
     name: str
     slots: int
+    runs: Path
     capabilities: frozenset[str] = CAPABILITIES
     wait_ms: int = LEASE_WAIT_MS
     heartbeat_s: float = HEARTBEAT_SECONDS
@@ -254,18 +272,28 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it unless its lease was lost or run abandoned it; an
-        executor that raises leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
+        """Run one unit in its own fresh folder under runs while its lease heartbeats, then deliver it unless its
+        lease was lost or run abandoned it; an executor that raises leaves it to reap, and a heartbeat that hangs
+        only ends the heartbeats. The folder is cut before the first heartbeat, so a unit whose folder cannot be cut
+        sends none and reaps. The folder is removed once the unit ends, delivered or not, after its report and log
+        are read, read only folders inside it included; a folder that resists removal is left for the next
+        restart's wipe."""
+        root = Path(tempfile.mkdtemp(dir=self.runs))
         lost = threading.Event()
         beat = Interval(functools.partial(self._beat, lease, lost), every=self.heartbeat_s)
         beat.start()
         try:
-            finished = self.executors[lease.unit.kind](lease)
+            try:
+                finished = self.executors[lease.unit.kind](lease, root)
+            finally:
+                with contextlib.suppress(RuntimeError):
+                    beat.close()
+            if not (lost.is_set() or self.abandoned.is_set()):
+                self._deliver(lease, finished)
         finally:
-            with contextlib.suppress(RuntimeError):
-                beat.close()
-        if not (lost.is_set() or self.abandoned.is_set()):
-            self._deliver(lease, finished)
+            with contextlib.suppress(OSError):
+                worktrees.empty(root)
+                root.rmdir()
 
     def _beat(self, lease: Lease, lost: threading.Event) -> None:
         """Heartbeat the lease, skipping a beat that cannot reach the scheduler or whose reply is cut short; raise Lost
@@ -307,8 +335,13 @@ def slots(environ: Mapping[str, str], cpus: int, quota: float | None) -> int:
 
 
 def build(
-    environ: Mapping[str, str], executors: Mapping[str, Executor], name: str, cpus: int, quota: float | None
+    environ: Mapping[str, str],
+    executors: Mapping[str, Executor],
+    name: str,
+    cpus: int,
+    quota: float | None,
+    runs: Path,
 ) -> Worker:
     """Return the pod's worker over the scheduler URL its environment names, with its slots from the CPU quota."""
     allowed = environment(environ)
-    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota))
+    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota), runs)

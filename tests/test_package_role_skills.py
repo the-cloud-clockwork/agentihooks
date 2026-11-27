@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
 from tests.test_package_internal_names import LEAKS
@@ -49,6 +50,7 @@ LOOP = {
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["seat"] = lambda argv: seat_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:
@@ -336,6 +338,20 @@ def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
     assert rules["claude"] == rules["codex"]
     assert [phrase for phrase in MASTER_SCALING if phrase not in rules["claude"]] == []
     assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
+
+
+@pytest.mark.feature("master-quota-login-guidance")
+def test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot(world: object) -> None:
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    assert out is not None
+    advice = (
+        "When every master login slot is spent, ask through the inbox for a slot added with "
+        "`agentihooks claude login --master`."
+    )
+    for persona in (out.parent / "claude" / "CLAUDE.md", out / "AGENTS.md"):
+        assert advice in persona.read_text()
 
 
 def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
