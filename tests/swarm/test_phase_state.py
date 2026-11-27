@@ -1,3 +1,4 @@
+import copy
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -133,7 +134,9 @@ class CountedRows(list[dict[str, object]]):
 
 def counted_status_doc(count: int) -> tuple[dict[str, object], dict[str, int]]:
     counts = {"phases": 0, "tasks": 0}
-    phases = [{"id": f"p{i}", "planning": "auto"} for i in range(count)]
+    phases = [
+        {"id": f"p{i}", "planning": "auto", **({"depends_on": [f"p{i - 1}"]} if i % 2 else {})} for i in range(count)
+    ]
     tasks = [plan(f"p{i}") for i in range(count)]
     return {"phases": CountedRows(phases, counts, "phases"), "tasks": CountedRows(tasks, counts, "tasks")}, counts
 
@@ -176,6 +179,7 @@ def test_status_reports_each_phase_s_lifecycle_and_label_exactly() -> None:
         plan("approved", state="done"),
     ]
     data = doc(phases, tasks)
+    before = copy.deepcopy(data)
 
     found = phase_state.status(data)
 
@@ -191,9 +195,14 @@ def test_status_reports_each_phase_s_lifecycle_and_label_exactly() -> None:
         "planning",
     ]
     assert [found[key]["state"] for key in ("reviewing", "approved", "twice")] == ["in_review", "building", "done"]
-    assert list(found) == [p["id"] for p in phases[:-1]]
+    assert list(found) == list(dict.fromkeys(p["id"] for p in phases))
+    assert data == before
     assert phase_state.status({}) == {}
     assert phase_state.status({"tasks": []}) == {}
+    assert phase_state.status({"phases": [{"id": "m"}, {"id": "w", "depends_on": ["m"], "planning": "auto"}]}) == {
+        "m": {"state": "building", "label": phase_state.LABELS["building"]},
+        "w": {"state": "waiting", "label": "Waits for phase m"},
+    }
 
 
 def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):

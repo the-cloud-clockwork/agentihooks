@@ -1,6 +1,7 @@
 """A phase's lifecycle, derived from stored facts only, so the tick, the CLI and the page cannot drift apart."""
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 LABELS = {
@@ -29,16 +30,17 @@ def status(doc: dict[str, Any]) -> dict[str, dict[str, str]]:
     """Each phase's state and label, from one done set, one phase map and one plan task index for the whole doc."""
     phases = doc.get("phases", [])
     done, by_id = _done(phases), {p["id"]: p for p in phases}
-    plans: list[dict[Any, dict[str, Any]]] = []
+    plans: dict[str, dict[str, Any]] | None = None
 
     def plan_task(phase: dict[str, Any]) -> dict[str, Any] | None:
-        if not plans:
-            plans.append(_plan_tasks(doc["tasks"]))
-        return plans[0].get(phase["id"])
+        nonlocal plans
+        if plans is None:
+            plans = _plan_tasks(doc["tasks"])
+        return plans.get(phase["id"])
 
     found: dict[str, dict[str, str]] = {}
     for phase in phases:
-        state = _lifecycle(phase, done, lambda phase=phase: plan_task(phase))
+        state = _lifecycle(phase, done, partial(plan_task, phase))
         found[phase["id"]] = {"state": state, "label": _waits(phase, by_id) if state == "waiting" else LABELS[state]}
     return found
 
@@ -72,17 +74,20 @@ def report(doc):
 
 def _plan_task(phase: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any] | None:
     """The phase's own plan task: its first plan kind task that enhances no other task."""
-    owned = (t for t in doc["tasks"] if t.get("phase") == phase["id"] and t.get("kind") == "plan")
-    return next((t for t in owned if not t.get("enhances")), None)
+    return next((t for t in doc["tasks"] if t.get("phase") == phase["id"] and _own_plan(t)), None)
 
 
-def _plan_tasks(tasks: list[dict[str, Any]]) -> dict[Any, dict[str, Any]]:
+def _plan_tasks(tasks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Each phase's own plan task, as _plan_task finds it, from one pass over the tasks."""
-    found: dict[Any, dict[str, Any]] = {}
+    found: dict[str, dict[str, Any]] = {}
     for task in tasks:
-        if task.get("kind") == "plan" and not task.get("enhances"):
+        if _own_plan(task):
             found.setdefault(task.get("phase"), task)
     return found
+
+
+def _own_plan(task: dict[str, Any]) -> bool:
+    return task.get("kind") == "plan" and not task.get("enhances")
 
 
 def _done(phases: list[dict[str, Any]]) -> set[str]:
