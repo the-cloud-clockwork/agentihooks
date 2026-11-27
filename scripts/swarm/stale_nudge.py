@@ -3,6 +3,7 @@ forty minutes of silence inside a declared named wait, never a typed prompt."""
 
 import hashlib
 
+from scripts.inbox.bound import Recipient
 from scripts.inbox.store import DuplicateItem, InboxStore, Item
 from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord
@@ -72,7 +73,14 @@ def _send_cache_warm(inbox: InboxStore, slug: str, agent: AgentRecord, last_ms: 
     nudge_id = cache_item_id(slug, agent.name, last_ms, now_ms)
     text = CACHE_TEXT.format(slug=slug, task=agent.task)
     try:
-        item = inbox.send(SENDER, agent.name, text, ref=f"{CACHE_REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
+        item = inbox.send(
+            SENDER,
+            Recipient(agent.name, agent.execution_id),
+            text,
+            ref=f"{CACHE_REF}:{nudge_id}",
+            task=agent.task,
+            item_id=nudge_id,
+        )
     except DuplicateItem:
         return []
     return [f"sent {agent.name} a cache warm check through its inbox as message {item.id}"]
@@ -91,7 +99,14 @@ def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str,
     nudge_id = item_id(slug, agent.name, last_ms, now_ms)
     text = TEXT.format(slug=slug, reason=reason, task=agent.task)
     try:
-        item = inbox.send(SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
+        item = inbox.send(
+            SENDER,
+            Recipient(agent.name, agent.execution_id),
+            text,
+            ref=f"{REF}:{nudge_id}",
+            task=agent.task,
+            item_id=nudge_id,
+        )
     except DuplicateItem:
         return []
     redis.set(idle.key(slug, LAST, agent.name), now_ms, ex=idle.BEAT_TTL_S)

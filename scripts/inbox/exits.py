@@ -31,9 +31,11 @@ def settle(inbox, name, seat, exit_text, worlds=None):
 
 
 def _settle_world(inbox: "InboxStore", name: str, seat: str, exit_text: str) -> None:
+    from scripts.inbox import bound
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
+    bound.settle_exit(inbox, name)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
     if names.entry(name).get("type") == "master":
@@ -276,10 +278,11 @@ def _settle_world_seats(
         _settle_unfillable(inbox, store.config(slug), empty)
 
 
-def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
+def _settle_seat_notices(inbox: "InboxStore", seats: set[str], active: set[str]) -> None:
     """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone. Other mail a
     gone life took is settled by its exit record."""
     from scripts.gates import push_stop
+    from scripts.inbox import bound
     from scripts.inbox.store import CLOSED
     from scripts.swarm.waits import notice_task
 
@@ -287,6 +290,8 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
     for seat in sorted(seats - quiet):
         for item in inbox.open_items(seat):
             if item.state in CLOSED:
+                continue
+            if bound.close_expired(inbox, item):
                 continue
             task = notice_task(item)
             if not (task or push_stop.is_notice(item) or _life_notice_end(item, "", "")):

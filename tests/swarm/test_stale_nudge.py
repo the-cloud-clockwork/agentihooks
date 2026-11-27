@@ -23,8 +23,8 @@ def inbox():
     return InboxStore(fakeredis.FakeRedis(decode_responses=True))
 
 
-def agent(started_at=BASE):
-    return AgentRecord(NAME, "eng", "t1", started_at=started_at)
+def agent(started_at: int = BASE) -> AgentRecord:
+    return AgentRecord(NAME, "eng", "t1", started_at=started_at, execution_id="exe-stale")
 
 
 @pytest.mark.parametrize(

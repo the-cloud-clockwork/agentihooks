@@ -6573,6 +6573,30 @@
       ]
     },
     {
+      "id": "inbox-execution-bound-orders",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2823",
+      "behaviour": "An agent order reaches only its recipient execution, closes when that execution ends or loses its seat, and never passes to the next occupant; unbound seat work still passes to successors.",
+      "seam": "InboxStore seat reads and delivery claims, hive stopping orders and inbox exit settlement",
+      "tests": [
+        "tests/inbox/test_execution_bound_orders.py::test_a_successor_does_not_read_the_previous_executions_hive_order",
+        "tests/inbox/test_execution_bound_orders.py::test_a_live_execution_still_receives_its_hive_order",
+        "tests/inbox/test_execution_bound_orders.py::test_unbound_seat_mail_still_reaches_the_next_occupant",
+        "tests/inbox/test_execution_bound_orders.py::test_the_exit_settlement_closes_a_masters_bound_order",
+        "tests/inbox/test_execution_bound_orders.py::test_an_ended_execution_does_not_receive_its_order_before_the_sweep",
+        "tests/inbox/test_execution_bound_orders.py::test_a_bound_order_keeps_its_execution_when_routed_and_loaded",
+        "tests/inbox/test_execution_bound_orders.py::test_an_unbound_order_keeps_string_routing_between_worlds",
+        "tests/inbox/test_execution_bound_orders.py::test_a_legacy_item_with_no_execution_still_loads_unbound",
+        "tests/inbox/test_execution_bound_orders.py::test_an_order_does_not_cross_executions_with_the_same_agent_name",
+        "tests/inbox/test_execution_bound_orders.py::test_a_bound_order_with_no_current_recipient_is_closed",
+        "tests/inbox/test_execution_bound_orders.py::test_a_seat_change_between_read_and_claim_does_not_deliver_the_old_order",
+        "tests/inbox/test_execution_bound_orders.py::test_a_claimant_recipient_uses_the_current_execution_identity",
+        "tests/inbox/test_execution_bound_orders.py::test_the_sweep_closes_generic_bound_seat_orders_after_a_recorded_departure",
+        "tests/inbox/test_execution_bound_orders.py::test_redirecting_a_live_bound_order_never_delivers_it_to_another_agent"
+      ],
+      "rules": ["agent-order-recipient-execution"]
+    },
+    {
       "id": "kind-drain-agent-reads-session-mail",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44956266312-1",

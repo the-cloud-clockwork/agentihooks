@@ -87,7 +87,8 @@ class Swarm:
     def agents(self, slug):
         return list(self.rows) if slug == SLUG else []
 
-    def put_agent(self, slug, agent):
+    def put_agent(self, slug: str, agent: AgentRecord) -> None:
+        agent = replace(agent, execution_id=agent.execution_id or f"exec-{agent.name}")
         self.rows = [row for row in self.rows if row.name != agent.name] + [agent]
 
     def drop_agent(self, slug: str, name: str) -> bool:

@@ -16,7 +16,7 @@ LAUNCH_CHECKED = True
 
 
 @pytest.fixture
-def swarm():
+def swarm() -> tuple[RedisStore, FakeRuntime, FakeLedger, AgentRecord]:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -24,8 +24,9 @@ def swarm():
     runtime, ledger = FakeRuntime(), FakeLedger([])
     tick("sw", store, ledger, runtime, 100)
     master = next(a for a in store.agents("sw") if a.lane == MASTER)
-    master = replace(master, profile="master", model="opus", effort="high", account="team")
-    store.put_agent("sw", master)
+    master = replace(master, profile="master", model="opus", effort="high", account="team", seat="master@sw")
+    master = store.start_execution("sw", master)
+    store.seats.occupy(master.seat, master.name, master.generation)
     launch_check.forget(store, "sw", master.name)
     return store, runtime, ledger, master
 

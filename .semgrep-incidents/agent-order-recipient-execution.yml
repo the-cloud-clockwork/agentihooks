@@ -1,0 +1,21 @@
+rules:
+  - id: agent-order-recipient-execution
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Agent orders must carry a Recipient with the intended execution identity.
+      A plain agent name can resolve to a seat whose next occupant would read the old order.
+    paths:
+      include:
+        - /scripts/hive/remove.py
+        - /scripts/swarm/stale_nudge.py
+        - /scripts/swarm/queue_priority.py
+        - /scripts/swarm/quota_notice.py
+        - /scripts/swarm/quota_handoff.py
+        - /scripts/swarm/master_retire.py
+        - agent-order-recipient-execution.py
+    pattern-either:
+      - pattern: $INBOX.send($SENDER, $AGENT.name, ...)
+      - pattern: $INBOX.send($SENDER, $TASK["claimed_by"], ...)
+      - pattern: $INBOX.send($SENDER, claimant, ...)
+      - pattern: $INBOX.send($SENDER, Recipient($NAME, ""), ...)
