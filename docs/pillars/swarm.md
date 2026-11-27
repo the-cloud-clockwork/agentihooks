@@ -7510,6 +7510,185 @@ records a [red run](https://github.com/the-cloud-clockwork/agentihooks/actions/r
 and a [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39067755131) with the change. The
 pull request does not record a live controller rollout on Anton.
 
+### Controller replicas through a Redis outage
+
+With `controller.replicas` above 1, a Redis outage reaches the leading replica and the standby at the same moment.
+Nothing can lead while Redis refuses, because the replica lock lives in Redis. The leader stops running passes 10 to
+20 seconds into the outage and exits. With the controller API enabled, the standby keeps standing by however long the
+outage lasts. When Redis answers again, the standby takes the lead at its next poll. A replica container restarted
+during the outage waits for Redis at container start, inside the controller's Redis grace window, instead of failing
+on the first refusal.
+
+The clocks below are the defaults:
+
+| Clock | Value | Source |
+|---|---|---|
+| Replica lock lifetime | 30 seconds | `LOCK_MS` in `scripts.swarm.replica` |
+| Leader lock renewal | every 10 seconds | `BEAT_S` in `scripts.swarm.replica` |
+| Standby poll, and the wait after a Redis error | 5 seconds | `POLL_S` in `scripts.swarm.replica` |
+| Controller tick | 60 seconds | `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` |
+| Redis grace window | 120 seconds | `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` |
+
+#### What each replica does
+
+1. **The standby stands by.** `controller._lead` repeats one stand by attempt until the replica takes the lock. An
+   attempt tries to take the lock, names the leader and waits behind the held lock, never longer than that lock has
+   left to live. A Redis error anywhere in the attempt is printed to standard error, and the replica waits one stand by
+   poll and tries again. The wait is `controller._tick_wait`. It waits on the scheduler timer and, when Redis refuses
+   the timer as well, falls back to the local clock. A standby holds no lock and runs no passes, so the Redis grace
+   window does not bound it, and the process stands by through an outage of any length. Whether the kubelet leaves
+   it running depends on `controller.api.enabled`:
+   - **API enabled.** The standby answers `/v2/health/live` itself with a shallow `{"probe": "shallow", "status":
+     "standby"}` that reads no Redis, so the liveness probe keeps passing. `/v2/health/ready` answers 503 with
+     `{"redis": "unavailable"}` while Redis refuses, which takes the standby out of the Service endpoints without
+     restarting it.
+   - **API disabled, the chart default.** The liveness probe is an exec that connects to Redis, so it fails while
+     Redis refuses. With the chart's probe settings (every 10 seconds, three failures) the kubelet restarts the
+     standby's container about 30 seconds into the outage, and the restarted container waits for Redis as in step 3.
+     Enable the API on a controller with more than one replica to keep the standby running.
+2. **The leader fences itself.** The leader's renewal thread renews the lock every 10 seconds. A renewal that Redis
+   refuses is logged, and the leader keeps the lead while its last renewed lock still has more than one renewal
+   interval of its 30 seconds left. The first renewal attempt 20 seconds or more after the last successful renewal
+   ends the process with exit status 75 (`LOST_EXIT`). Depending on when the last renewal landed, that is 10 to 20
+   seconds into the outage. The exit skips the lock release, and the lock lapses in Redis 30 seconds after its last
+   renewal. Until the fence, each pass that hits a Redis error inside the grace window ends, and the next pass starts
+   one tick later.
+3. **A restarted container waits for Redis.** The kubelet restarts the fenced leader's container, with its usual
+   restart back off. The container first runs `agentihooks hive controller --holder "$AGENTIHOOKS_CONTROLLER_REPLICA"`
+   to issue the replica's own controller credential, then `exec agentihooks controller run`. While Redis refuses, the
+   credential step retries one tick apart until the grace window has passed since the step started. It then raises
+   the last Redis error, and the container exits for another restart. With the defaults it tries at 0, 60 and 120
+   seconds. `controller run` then connects to Redis with the same grace window retry and stands by like the other
+   replica.
+4. **Redis answers.** The first replica whose stand by attempt takes the lock closes its standby API servers, prints
+   that it leads the passes and starts renewing the lock; `controller.main` then hosts the control service and runs
+   passes. The other replica keeps standing by behind it. A lock left by the fenced leader is
+   gone once it lapses, or at once when Redis restarted without its data. The replica that stood by through the
+   outage tries the lock again every 5 seconds, while a restarted container waits one tick between credential
+   attempts.
+5. **A replica stopped during the outage.** The release of the lock in `controller.main` fails with a Redis error,
+   which is logged, and the lock lapses 30 seconds after its last renewal. The controller still stops its control
+   service, closes its controller bus and restores its signal handlers.
+
+#### Redis outage configuration
+
+The grace window and the tick are environment settings of the controller container. Set them through the chart's
+`controller.env`. The chart sets `AGENTIHOOKS_CONTROLLER_REPLICA` to the Pod name on every controller, with one
+replica or more, which turns the replica lock on. A controller started outside the chart without it takes no lock
+and never fences.
+
+```yaml
+controller:
+  replicas: 2
+  api:
+    enabled: true
+  env:
+    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "120"
+```
+
+| Setting | Default | What it bounds in an outage |
+|---|---|---|
+| `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` | `120` seconds | How long the leader's passes, the startup connect of `controller run` and the credential step at container start ride out Redis refusals. It never bounds a standby. A chart controller's leader fences 20 seconds after its last renewal, so an outage that refuses renewals ends the leader before the default window does; the window ends the passes only of a controller without the replica lock, or of a leader whose renewals still succeed. `0` makes the credential step fail on the first refusal. |
+| `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` | `60` seconds, at least 1 | The wait between credential retries at container start, between startup connect retries and between passes. |
+
+The lock lifetime, the renewal interval and the stand by poll are module constants in `scripts.swarm.replica`, and
+change only through a reviewed pull request. The leader fences at the first refused renewal that comes at least the
+lock lifetime minus one renewal interval after its last successful renewal: 30 minus 10, so 20 seconds with the
+defaults.
+
+The example writes out the default window. The grace window decides how long a container restarted during a Redis
+restart keeps waiting at container start before it exits into another restart back off. It does not shorten the time
+with no leader, which ends when Redis answers.
+
+Two waits run at container start before the API answers: the credential step and the startup connect of
+`controller run`. Each tries one tick apart and gives up at its first failed attempt at or after the window ends, so
+it lasts a whole number of ticks: 120 seconds with the defaults, and 180 seconds for a window of 121 to 180 seconds
+at the default tick. The container's probes bound both waits together:
+
+- **API enabled.** The startup probe gives a new container 300 seconds (60 probes 5 seconds apart) to answer
+  `/v2/health/live`. At the default tick the default window of 120 seconds is the longest whose two waits fit inside
+  it; a longer window can outlast the probe when Redis refuses through both waits.
+- **API disabled.** The exec liveness probe starts 60 seconds after the container and fails it after three failed
+  probes 10 seconds apart, about 80 seconds in while Redis refuses, whatever the grace window.
+
+#### Redis outage logs and troubleshooting
+
+The controller container prints these lines during an outage:
+
+```text
+controller: replica <pod> stands by through a Redis error, trying again after 5s: <error>
+controller: the scheduled wait failed, waiting on the local clock: <error>
+controller: renewing the replica lock failed: <error>
+controller: keeping the controller credential failed: <error>
+controller: pass ended inside the Redis grace window, next pass after one tick: <error>
+controller: Redis is unreachable past the <n>s grace window (<error>)
+controller: another replica took the lead; exiting
+hive controller: Redis refused, retrying after one tick inside the Redis grace window: <error>
+controller: <error>; retrying after one tick inside the Redis grace window
+controller: the last pass before exit ended: <error>
+controller: releasing the replica lock failed, it lapses on its own: <error>
+```
+
+The credential line prints each time a replica's renewal of its own controller credential fails, every 60 seconds
+while Redis refuses. The `past the
+grace window` line ends a controller whose passes failed for the whole window, with exit status 1. The `last pass
+before exit` line comes from a pass a stop signal let finish.
+
+After the outage they print these lines on standard output:
+
+```text
+controller: replica <pod> stands by while <leader pod> leads
+controller: replica <pod> leads the passes
+```
+
+A pass that ends inside the grace window also writes `{"event": "controller_pass_end", "pass": <n>, "outcome":
+"redis_grace"}` to standard output. A real takeover and a Redis outage print the same fence line, `another replica
+took the lead; exiting`. The `renewing the replica lock failed` lines before it mark the outage.
+
+Read both replicas, and the previous container of a fenced leader:
+
+```bash
+kubectl get pods -n <namespace> -l app.kubernetes.io/component=controller
+kubectl logs <pod> -n <namespace> -c controller | grep -E 'Redis error|scheduled wait failed|renewing the replica lock|leads the passes|stands by while'
+kubectl logs <pod> -n <namespace> -c controller --previous | grep -E 'renewing the replica lock|another replica took the lead|grace window'
+```
+
+| Symptom | Meaning | Action |
+|---|---|---|
+| `stands by through a Redis error` every 5 seconds on one replica | Redis refuses and the replica stands by. Expected. | Check Redis. The replica leads once Redis answers. |
+| A standby's container restarts about 30 seconds into an outage, with a failed liveness probe in `kubectl describe pod` | `controller.api.enabled` is false, so the liveness probe connects to Redis. | Enable the controller API. |
+| `renewing the replica lock failed` lines, then `another replica took the lead; exiting` and exit status 75 | The leader fenced itself about 20 seconds into an outage. Expected. | None; the standby takes the lead when Redis answers. |
+| `hive controller: Redis refused` lines, then a Redis error traceback, and the container in CrashLoopBackOff | Redis refused for longer than the grace window at container start. | Check Redis. At the default tick, `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` above its default of 120 seconds can outlast the startup probe, so bring Redis back rather than raise the window. |
+| `the scheduled wait failed, waiting on the local clock` | The scheduler timer is in Redis too, so the wait fell back to the local clock. Expected. | None. |
+| `releasing the replica lock failed, it lapses on its own` | The replica stopped during an outage. | None; the other replica takes the lead after Redis answers and the lock lapses. |
+| A standby prints `stands by while <leader pod> leads` for a Pod that is gone | The dead leader's lock has not lapsed yet. | Wait up to 30 seconds after the leader's last renewal; the standby takes the lock as it lapses. |
+| A standby exits with status 1 and a Redis error traceback from the replica lock, with no `stands by through a Redis error` line before it | The controller image predates [pull request #11631](https://github.com/the-cloud-clockwork/agentihooks/pull/11631). | Roll the controller onto a newer release. |
+
+#### Before and after the change
+
+Before [pull request #11631](https://github.com/the-cloud-clockwork/agentihooks/pull/11631), the standby called the
+lock's take, holder and lead with no Redis error handling, and waited on the Redis backed scheduler timer directly.
+A Redis error therefore ended the standby, and the unguarded lock release in `controller.main` raised again during
+shutdown. The credential step at container start had no retry, so a container restarted during the outage failed
+again at once. The pull request body records both outages from kube-state-metrics in Prometheus:
+
+| Event | Standby | Leader |
+|---|---|---|
+| Redis restart, 15 November 2026, image 2.17.905 | exit 1 at 14:03:36 UTC, then CrashLoopBackOff | exit 75 at 14:03:41 UTC |
+| DNS failure, 16 November 2026, image 2.17.952 | exit 1 at 21:26:34 UTC after 17 minutes running, a crash at container start, up at 21:26:55 UTC | no restart |
+
+On 15 November no controller container ran from 14:03:41 to 14:03:43 UTC, and no replica could lead until a
+restarted container started and took the lock.
+
+Pull request #11631 records a [red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43969285638) of
+the new tests on the old code, where four tests failed with the Redis `ConnectionError` escaping, and a
+[green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43969728410) with the change. The feature
+map entry `controller-standby-rides-out-redis-outage` lists five regression tests. They cover a standby that stands by
+through an outage and then leads, a standby started inside an outage that waits on the local clock, a shutdown whose
+lock release Redis refuses, and the credential step riding out refusals and failing once they outlast the grace
+window. The Semgrep incident rule `controller-standby-unguarded-redis-call` refuses a `lead` or `release` call on the
+replica lock in `scripts/swarm/controller.py` outside a `store_errors()` handler.
+
 ### Staged and prerequisite pull requests
 
 A task that lands in stages, or registers a prerequisite pull request before its own, declares the scope each such pull request delivers when it records it:
