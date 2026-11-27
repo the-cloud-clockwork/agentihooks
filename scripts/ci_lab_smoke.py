@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in names:
         try:
             importlib.import_module(name)
-        except Exception as error:
+        except (Exception, SystemExit) as error:
             print(f"{name} does not import: {type(error).__name__}: {error}", file=sys.stderr)
             return 1
     print("imported:", ", ".join(names))
