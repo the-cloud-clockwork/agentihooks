@@ -231,7 +231,9 @@ def _order(
 ) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            sent = inbox.send(SENDER, agent.name, text.format(hive=hive, slug=slug))
+            from scripts.inbox.bound import Recipient
+
+            sent = inbox.send(SENDER, Recipient(agent.name, agent.execution_id), text.format(hive=hive, slug=slug))
             ordered[(slug, agent.name)] = sent.id
 
 

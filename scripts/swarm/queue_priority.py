@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from scripts.inbox.bound import recipient_for
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import freeze, lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
@@ -95,7 +96,7 @@ def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason:
     for task in owners(tasks, [url]):
         InboxStore(store.redis).send(
             "swarm",
-            task["claimed_by"],
+            recipient_for(store, task["claimed_by"]),
             f"Your pull request {url} left the merge queue in an interrupted priority and stays out "
             f"because {reason}. Queue it again once its checks pass.",
             fyi=True,
@@ -111,7 +112,7 @@ def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: d
         for claimant in claimants:
             InboxStore(store.redis).send(
                 "swarm",
-                claimant,
+                recipient_for(store, claimant),
                 f"Your pull request {pull['url']} left the merge queue in a priority and could not be queued "
                 f"again: {reason}. The swarm retries it at the end of the queue on every refresh until it is back "
                 "or stays out for a reason.",
@@ -180,7 +181,7 @@ def reorder(
     for task in owners(tasks, result["displaced"]):
         InboxStore(store.redis).send(
             sender,
-            task["claimed_by"],
+            recipient_for(store, task["claimed_by"]),
             f"Your pull request {task['pr_url']} was requeued in its original order after priority request {url}.",
             fyi=True,
         )

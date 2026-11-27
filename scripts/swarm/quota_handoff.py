@@ -2,6 +2,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+from scripts.inbox.bound import Recipient
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, quota_notice
 from scripts.swarm.store import MASTER, RedisStore
@@ -100,7 +101,9 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         if not due:
             continue
         crossed = [window for window, _, _ in due]
-        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, crossed))
+        item = InboxStore(store.redis).send(
+            "swarm", Recipient(agent.name, agent.execution_id), directive(slug, account, crossed)
+        )
         if store.redis.hget(lives, agent.name) != life:
             store.redis.hset(key, agent.name, item.id)
         store.redis.hset(lives, agent.name, life)

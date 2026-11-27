@@ -31,9 +31,11 @@ def settle(inbox, name, seat, exit_text, worlds=None):
 
 
 def _settle_world(inbox: "InboxStore", name: str, seat: str, exit_text: str) -> None:
+    from scripts.inbox import bound
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
+    bound.settle_exit(inbox, name)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
     if names.entry(name).get("type") == "master":

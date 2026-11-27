@@ -7,10 +7,12 @@ import hashlib
 import json
 import uuid
 from dataclasses import replace
+from typing import Any
 
+from scripts.inbox import bound
 from scripts.inbox.receipts import Delivery, DispatchError, Receipts, check_owner, delivery_fields, transact
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import close_reason, now_ms, owner_key, owner_ttl_s
+from scripts.inbox.store import Item, close_reason, now_ms, owner_key, owner_ttl_s
 
 SHOWN = "its ref was already accepted or shown"
 
@@ -81,7 +83,7 @@ class Dispatcher:
         items = self.store.pending_mail(recipient)
         return transact(self.redis, lambda pipe: self._reserve(pipe, recipient, owner, items))
 
-    def _reserve(self, pipe, recipient, owner, items):
+    def _reserve(self, pipe: Any, recipient: str, owner: str, items: list[Item]) -> list[Delivery]:
         check_owner(pipe, recipient, owner, self.store.world)
         plan = self._plan(pipe, recipient, items)
         pipe.multi()
@@ -90,10 +92,11 @@ class Dispatcher:
             delivery = Delivery(
                 uuid.uuid4().hex[:12], recipient, owner, item.id, item.ref, digest(item), "reserved", now_ms()
             )
-            if state == "shown":
-                superseded = replace(delivery, state="superseded", reason=SHOWN)
+            if state in ("shown", "expired"):
+                detail = bound.ENDED if state == "expired" else SHOWN
+                superseded = replace(delivery, state="superseded", reason=detail)
                 pipe.hset(self.key("delivery", delivery.id), mapping=delivery_fields(superseded))
-                reason = close_reason("done", SEEN_ON_LEDGER)[1]
+                reason = close_reason("done", bound.ENDED if state == "expired" else SEEN_ON_LEDGER)[1]
                 self.store.stage_move(
                     pipe, item, replace(item, state="done", updated_at=now_ms(), reason=reason), recipient, last
                 )
@@ -106,8 +109,7 @@ class Dispatcher:
             reserved.append(delivery)
         return reserved
 
-    def _plan(self, pipe, recipient, items):
-        """(item, free or shown, last pending) for each item still pending for recipient and not reserved."""
+    def _plan(self, pipe: Any, recipient: str, items: list[Item]) -> list[tuple[Item, str, bool]]:
         plan, taken = [], set()
         for listed in items:
             pipe.watch(self.key("item", listed.id), self.key("reservation", listed.id))
@@ -115,6 +117,9 @@ class Dispatcher:
             if item.state != "pending" or pipe.exists(self.key("reservation", item.id)):
                 continue
             if not self.store.acts_for(recipient, item.address, pipe):
+                continue
+            if bound.expired(self.store, item, pipe):
+                plan.append((item, "expired", self.store.last_pending(pipe, item)))
                 continue
             state = self._ref_state(pipe, recipient, item.ref, taken, replayed=bool(item.delivery_session))
             if state == "held":

@@ -13,6 +13,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
+from scripts.inbox import bound
+from scripts.inbox.bound import Recipient
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
@@ -82,6 +84,7 @@ class Item:
     fyi: bool = False
     task: str = ""
     delivery_session: str = ""
+    execution: str = ""
 
 
 def now_ms():
@@ -211,10 +214,18 @@ class InboxStore:
         )
 
     def send(
-        self, sender: str, address: str, text: str, ref: str = "", fyi: bool = False, task: str = "", item_id: str = ""
+        self,
+        sender: str,
+        address: str | Recipient,
+        text: str,
+        ref: str = "",
+        fyi: bool = False,
+        task: str = "",
+        item_id: str = "",
     ) -> Item:
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
+        address, execution = bound.recipient(address)
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         from scripts.hive import scope
@@ -225,7 +236,7 @@ class InboxStore:
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
-            return routed.send(sender, requested, text, ref, fyi, task, item_id)
+            return routed.send(sender, Recipient(requested, execution), text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -237,6 +248,7 @@ class InboxStore:
             at,
             ref=ref,
             sequence=self.redis.incr(self.key("sequence", address)),
+            execution=execution,
             fyi=fyi,
             task=task,
         )
@@ -506,7 +518,7 @@ class InboxStore:
             raise InboxError(f"aliases for {original} changed meanwhile")
         if seat and not self.seats.left(me, seat):
             addresses.append(seat)
-        items = [item for address in addresses for item in read(address)]
+        items = bound.visible(self, [item for address in addresses for item in read(address)])
         return sorted({item.id: item for item in items}.values(), key=_order)
 
     def acts_for(self, by: str, address: str, pipe: Any = None) -> bool:
@@ -1155,7 +1167,15 @@ class InboxStore:
                 continue
         raise Contended(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_move(self, item_id, by, actors, state, reason, only_from):
+    def _try_move(
+        self,
+        item_id: str,
+        by: str,
+        actors: Callable[[Item], Any],
+        state: str,
+        reason: str,
+        only_from: tuple[str, ...] | None,
+    ) -> Item | None:
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
@@ -1168,6 +1188,7 @@ class InboxStore:
                 return None
             if item.state in CLOSED:
                 raise InboxError(f"message {item_id} is closed: {item.reason}")
+            state, reason, discard = bound.transition(self, item, state, reason, pipe)
             if item.fyi and state in ("read", "confirmed"):
                 state, reason = "done", "done: information received"
             if state == "done" and not item.fyi and reason == "done":
@@ -1185,7 +1206,7 @@ class InboxStore:
             pipe.multi()
             self.stage_move(pipe, item, moved, by, last)
             pipe.execute()
-            return moved
+            return bound.result(moved, discard)
 
     def _owned(self, pipe, by):
         key = owner_key(NameRegistry(pipe).resolve(by), self.world)

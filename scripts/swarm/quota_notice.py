@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from scripts.inbox.bound import Recipient
 from scripts.inbox.store import InboxStore, Item
 from scripts.swarm import capacity
 from scripts.tick import pool
@@ -59,7 +60,7 @@ def apply(slug: str, store: RedisStore, decision: dict[str, Any]) -> list[str]:
         ):
             return []
         text = HANDOFF.format(slug=slug) if kind == "handoff" else HURRY
-        InboxStore(store.redis).send("swarm", agent.name, text)
+        InboxStore(store.redis).send("swarm", Recipient(agent.name, agent.execution_id), text)
         store.redis.hset(key, life, kind)
         return [f"sent {agent.name} the quota {kind}"]
 

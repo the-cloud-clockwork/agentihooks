@@ -2,7 +2,8 @@ import fakeredis
 import pytest
 
 from scripts.hive import handoff_order, remove
-from scripts.inbox import exits
+from scripts.inbox import bound, exits, seen
+from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -86,3 +87,93 @@ def test_an_ended_execution_does_not_receive_its_order_before_the_sweep(store: R
     assert store.drop_agent("sw", agent.name, expected=agent)
     assert inbox.pending_mail(agent.name) == []
     assert inbox.get(item_id).state == "done"
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+def test_a_bound_order_keeps_its_execution_when_routed_and_loaded(store: RedisStore) -> None:
+    agent = life(store, "eng")
+    sender = InboxStore(store.redis, world="another-world")
+    sent = sender.send(
+        "operator",
+        bound.Recipient(agent.name, agent.execution_id),
+        "Finish this step",
+        "ref",
+        False,
+        "t1",
+        "fixed-item",
+    )
+    loaded = InboxStore(store.redis).get(sent.id)
+    assert (loaded.id, loaded.execution, loaded.address, loaded.ref, loaded.task) == (
+        "fixed-item",
+        agent.execution_id,
+        agent.name,
+        "ref",
+        "t1",
+    )
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+def test_a_legacy_item_with_no_execution_still_loads_unbound(store: RedisStore) -> None:
+    agent = life(store, "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", agent.name, "Continue the work")
+    store.redis.hdel(inbox.key("item", item.id), "execution")
+    assert InboxStore(store.redis).get(item.id).execution == ""
+    assert inbox.pending_mail(agent.name)[0].id == item.id
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+def test_an_order_does_not_cross_executions_with_the_same_agent_name(store: RedisStore) -> None:
+    previous = life(store, "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", bound.Recipient(previous.seat, previous.execution_id), "Finish this step")
+    current = store.start_execution(
+        "sw", AgentRecord(previous.name, "eng", "t1", seat=previous.seat), previous.execution_id
+    )
+    store.seats.occupy(current.seat, current.name, current.generation)
+    assert inbox.pending_mail(current.name) == []
+    assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+@pytest.mark.parametrize("change", ["unknown", "unoccupied", "different-occupant"])
+def test_a_bound_order_with_no_current_recipient_is_closed(store: RedisStore, change: str) -> None:
+    agent = life(store, "eng")
+    inbox = InboxStore(store.redis)
+    execution = "missing-execution" if change == "unknown" else agent.execution_id
+    item = inbox.send("operator", bound.Recipient(agent.name, execution), "Finish this step")
+    if change == "unoccupied":
+        store.redis.delete(inbox.seats.key(agent.seat))
+    elif change == "different-occupant":
+        store.seats.occupy(agent.seat, store.next_name("sw", "eng"), 2)
+    assert inbox.pending_mail(agent.name) == []
+    assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+@pytest.mark.parametrize("transport", ["hook", "reservation"])
+def test_a_seat_change_between_read_and_claim_does_not_deliver_the_old_order(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, transport: str
+) -> None:
+    previous = life(store, "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", bound.Recipient(previous.seat, previous.execution_id), "Finish this step")
+    listed = inbox.pending_mail(previous.name)
+    successor = life(store, "eng", previous)
+    monkeypatch.setattr(inbox, "pending_mail", lambda _: listed)
+    if transport == "hook":
+        assert seen.claim(inbox, successor.name) == []
+    else:
+        dispatcher = Dispatcher(inbox)
+        dispatcher.own(successor.name, "owner")
+        assert dispatcher.reserve(successor.name, "owner") == []
+    assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+def test_a_claimant_recipient_uses_the_current_execution_identity(store: RedisStore) -> None:
+    agent = life(store, "eng")
+    recipient = bound.recipient_for(store, agent.name)
+    assert (recipient.name, recipient.execution) == (agent.name, agent.execution_id)
+    unknown = bound.recipient_for(store, "unregistered")
+    assert (unknown.name, unknown.execution) == ("unregistered", "")
