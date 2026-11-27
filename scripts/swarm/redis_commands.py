@@ -33,6 +33,15 @@ CONSUMERS = {
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),
     "nats trust": Consumer("nats-trust", ("scripts.hive.nats_trust:bootstrap",), scheduler=False),
 }
+
+
+@dataclass(frozen=True)
+class Lab:
+    entry: str
+    package: str
+
+
+LAB = Lab("scripts.ci_lab.contract:scheduler", "scripts.ci_lab")
 STATE_STORE = "scripts.events.redis_state:RedisStateStore."
 PROTOCOL = "scripts.events.bus:StateStore."
 KEYLESS = frozenset({"MULTI", "EXEC"})
@@ -81,9 +90,20 @@ def store_keys(store: Store) -> list[str]:
     return [opened._current, opened._revision, f"{opened._history}probe", opened._projected, opened._published]
 
 
+def lab_commands(program: Program, lab: Lab) -> dict[str, list[str]]:
+    """Each Redis command the ci lab scheduler code sends, client calls and Lua script calls alike, with the units that
+    send it. Every unit of each lab package module the entry point reaches counts, so a method no reached code names
+    still counts, while a reached module outside the package does not."""
+    reached = {program.units[key].module for key in program.reach((lab.entry,))}
+    inside = {module for module in reached if module == lab.package or module.startswith(f"{lab.package}.")}
+    units = [key for key, unit in program.units.items() if unit.module in inside]
+    return {command: sorted(senders) for command, senders in sorted(program.commands(units).items())}
+
+
 def consumer_map(deployment: str, root: Path = ROOT) -> dict:
     """Each consumer's Redis role, the commands it reaches with the code that sends each, its scheduler keys, and the
-    keys of each hive state store it opens with every command the storage protocol may send on them."""
+    keys of each hive state store it opens with every command the storage protocol may send on them, then the
+    commands the ci lab scheduler code sends."""
     program = Program(parse(root))
     keys = scheduler_keys(deployment)
     protocol = tuple(STATE_STORE + unit.removeprefix(PROTOCOL) for unit in program.units if unit.startswith(PROTOCOL))
@@ -105,7 +125,7 @@ def consumer_map(deployment: str, root: Path = ROOT) -> dict:
             "keys": keys if consumer.scheduler else {},
             "stores": stores,
         }
-    return {"deployment": deployment, "consumers": consumers}
+    return {"deployment": deployment, "consumers": consumers, "lab": {"commands": lab_commands(program, LAB)}}
 
 
 def main(argv: list[str] | None = None) -> int:
