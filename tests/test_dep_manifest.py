@@ -329,7 +329,7 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it() -> None:
     job = _job("dep-manifest")
     assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
     assert "sonar" not in job["needs"]
@@ -346,7 +346,7 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     assert "python -m scripts.dep_manifest build" in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
-    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
+    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
     assert build["run"].index(contexts) < build["run"].index("python -m scripts.dep_manifest build")
     upload = _step("dep-manifest", "Upload the test dependency manifest")
@@ -422,6 +422,7 @@ def test_the_manifest_job_preserves_records_and_releases_coverage(tmp_path: Path
     assert dep_manifest.unpack(json.loads((output / "packed.json").read_text())) == expected
     assert sentinel.read_text() == "keep"
     assert all(report.is_file() for report in reports)
+    assert not any(database.exists() for database in databases), "Consumed coverage databases remain"
 
 
 @pytest.mark.parametrize("torn", ["", "line", "database"])
