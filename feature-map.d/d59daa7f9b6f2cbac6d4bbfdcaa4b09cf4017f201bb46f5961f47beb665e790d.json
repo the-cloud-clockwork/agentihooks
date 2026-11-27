@@ -32,6 +32,10 @@
     "tests/test_op_context_typed_check.py::test_handed_ignores_a_call_to_a_module_outside_the_folder",
     "tests/test_op_context_typed_check.py::test_handed_ignores_a_call_that_does_not_pass_the_context_on",
     "tests/test_op_context_typed_check.py::test_handed_skips_a_call_bound_to_a_module_that_cannot_be_resolved",
+    "tests/test_op_context_typed_check.py::test_handed_ignores_a_module_whose_spec_is_none",
+    "tests/test_op_context_typed_check.py::test_handed_discovers_a_module_in_a_subfolder_of_the_package",
+    "tests/test_op_context_typed_check.py::test_handed_lets_an_in_tree_import_error_propagate",
+    "tests/test_op_context_typed_check.py::test_handed_never_imports_a_module_outside_the_folder",
     "tests/test_op_context_typed_check.py::test_registry_modules_keeps_the_module_values_of_a_mixed_dict",
     "tests/test_op_context_typed_check.py::test_a_module_the_core_hands_the_context_to_is_discovered_and_graded_untyped",
     "tests/test_op_context_typed_check.py::test_a_core_function_with_an_untyped_context_fails",
@@ -40,6 +44,8 @@
     "tests/test_op_context_typed_check.py::test_the_rule_glob_covers_every_module_the_live_check_discovers",
     "tests/test_op_context_typed_check.py::test_rebound_names_a_function_that_renames_the_op_context",
     "tests/test_op_context_typed_check.py::test_rebound_is_empty_when_no_function_renames_the_op_context",
+    "tests/test_op_context_typed_check.py::test_rebound_names_an_annotated_rename_of_the_op_context",
+    "tests/test_op_context_typed_check.py::test_rebound_names_a_walrus_rename_of_the_op_context",
     "tests/test_op_context_typed_check.py::test_the_real_core_never_renames_its_op_context"
   ]
 }

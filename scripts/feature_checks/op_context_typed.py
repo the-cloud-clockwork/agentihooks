@@ -115,25 +115,25 @@ def _passes_ctx(call: ast.Call) -> bool:
     return any(isinstance(argument, ast.Name) and argument.id == NAME for argument in named)
 
 
-def _in_package(module: ModuleType, folder: Path) -> bool:
-    """Whether the module's own source file lives directly inside the given folder."""
-    origin = getattr(module, "__file__", None)
-    return origin is not None and Path(origin).resolve().parent == folder
-
-
-def _resolve(dotted: str) -> ModuleType | None:
-    """The module the dotted path names, or None when it cannot be found or is not a real module."""
+def _spec_origin(dotted: str) -> str | None:
+    """The source file the dotted path names, without importing it, or None when it names no real module."""
     try:
         found = importlib.util.find_spec(dotted)
     except (ImportError, ValueError):
         return None
-    return importlib.import_module(dotted) if found is not None else None
+    return found.origin if found is not None else None
+
+
+def _inside(origin: str | None, folder: Path) -> bool:
+    """Whether the origin file lies inside the given folder, or a folder below it."""
+    return origin is not None and folder in Path(origin).resolve().parents
 
 
 def handed(tree: ast.AST, folder: Path) -> set[ModuleType]:
-    """Every module whose source file lives inside the given folder that a call in the tree hands the op context
-    to: through an attribute of a module bound by import, or by calling something bound bare from a `from`
-    import."""
+    """Every module whose source file lives inside the given folder, or a folder below it, that a call in the
+    tree hands the op context to: through an attribute of a module bound by import, or by calling something
+    bound bare from a `from` import. Only a module already placed inside the folder is imported; an import that
+    then raises is left to raise, the same as it would for the core that dispatches to it."""
     modules, functions = _bound_modules(tree), _bound_functions(tree)
     found: set[ModuleType] = set()
     for node in ast.walk(tree):
@@ -147,9 +147,8 @@ def handed(tree: ast.AST, folder: Path) -> set[ModuleType]:
             dotted = functions[func.id]
         if dotted is None:
             continue
-        resolved = _resolve(dotted)
-        if resolved is not None and _in_package(resolved, folder):
-            found.add(resolved)
+        if _inside(_spec_origin(dotted), folder):
+            found.add(importlib.import_module(dotted))
     return found
 
 

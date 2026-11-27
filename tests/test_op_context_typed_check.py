@@ -293,6 +293,56 @@ def test_handed_skips_a_call_bound_to_a_module_that_cannot_be_resolved(tmp_path:
 
 
 @pytest.mark.feature("ledger-op-context-typed")
+def test_handed_ignores_a_module_whose_spec_is_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "plant_no_spec", module("plant_no_spec"))
+    tree = ast.parse(
+        "import plant_no_spec\n\n\ndef apply_op(doc, op, ctx):\n    return plant_no_spec.apply(doc, op, ctx)\n"
+    )
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_discovers_a_module_in_a_subfolder_of_the_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sub = tmp_path / "plant_sub_folder"
+    sub.mkdir()
+    (sub / "__init__.py").write_text("")
+    (sub / "plant_deep.py").write_text("def apply(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "from plant_sub_folder import plant_deep\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    return plant_deep.apply(doc, op, ctx)\n"
+    )
+    discovered = check.handed(tree, tmp_path)
+    assert {found.__name__ for found in discovered} == {"plant_sub_folder.plant_deep"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_lets_an_in_tree_import_error_propagate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "plant_raises.py").write_text("raise RuntimeError('boom')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "import plant_raises\n\n\ndef apply_op(doc, op, ctx):\n    return plant_raises.apply(doc, op, ctx)\n"
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        check.handed(tree, tmp_path)
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_never_imports_a_module_outside_the_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "plant_inside"
+    folder.mkdir()
+    (tmp_path / "plant_outside.py").write_text("raise RuntimeError('must not be imported')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "import plant_outside\n\n\ndef apply_op(doc, op, ctx):\n    return plant_outside.apply(doc, op, ctx)\n"
+    )
+    assert check.handed(tree, folder) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
 def test_registry_modules_keeps_the_module_values_of_a_mixed_dict() -> None:
     held = module("plant_registry_held")
     owner = module("plant_registry_owner")
@@ -370,6 +420,18 @@ def test_rebound_names_a_function_that_renames_the_op_context() -> None:
 def test_rebound_is_empty_when_no_function_renames_the_op_context() -> None:
     tree = ast.parse("def apply_op(doc, op, ctx):\n    return ctx.rev\n")
     assert check.rebound(tree, "plant_core") == []
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_rebound_names_an_annotated_rename_of_the_op_context() -> None:
+    tree = ast.parse("def apply_op(doc, op, ctx):\n    c: object = ctx\n    return c\n")
+    assert check.rebound(tree, "plant_core") == ["FAIL: plant_core.apply_op renames the op context to c"]
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_rebound_names_a_walrus_rename_of_the_op_context() -> None:
+    tree = ast.parse("def apply_op(doc, op, ctx):\n    return (c := ctx).rev\n")
+    assert check.rebound(tree, "plant_core") == ["FAIL: plant_core.apply_op renames the op context to c"]
 
 
 @pytest.mark.feature("ledger-op-context-typed")
