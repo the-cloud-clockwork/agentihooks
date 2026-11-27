@@ -52,9 +52,14 @@ ROWS = [
 ]
 
 
+def item(ledger: Any, path: str) -> dict[str, Any]:
+    found: dict[str, Any] = ledger.resource(SLUG, path)
+    return found
+
+
 def held(ledger: Any) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    phase = ledger.resource(SLUG, "phases/p1")
-    tasks = [ledger.resource(SLUG, f"tasks/{task}") for task in ("t1", "t2")]
+    phase = item(ledger, "phases/p1")
+    tasks = [item(ledger, f"tasks/{task}") for task in ("t1", "t2")]
     slices = ledger.resource(SLUG, "slices", collection=True)
     return (
         {key: phase.get(key) for key in ("plan", "plan_url", "plan_ref")},
@@ -100,7 +105,7 @@ def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_si
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
     printed = json.loads(capsys.readouterr().out)
     assert held(ledger) == before
-    target = ledger.resource(SLUG, "tasks/t3")
+    target = item(ledger, "tasks/t3")
     assert {key: target.get(key) for key in ("plan_url", "plan_slice", "plan_lines")} == {
         "plan_url": printed["plan_url"],
         "plan_slice": "t3-plan",
@@ -110,5 +115,5 @@ def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_si
     assert capsys.readouterr().out == SECTION
     point = ["task", "set", "t3", f"plan_url={printed['plan_url']}", "plan_slice=t3-plan"]
     ledger.cmd_task(parse(["--slug", SLUG, "--as", PLANNER, *point]))
-    assert ledger.resource(SLUG, "tasks/t3")["plan_lines"] == "2-4"
+    assert item(ledger, "tasks/t3")["plan_lines"] == "2-4"
     assert held(ledger) == before
