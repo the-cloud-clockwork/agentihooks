@@ -902,6 +902,20 @@ agentihooks quick tick                    # one quick tick round, as the hourly 
 agentihooks quick stop                    # remove the room and the registry; seat folders stay
 ```
 
+## `agentihooks seat brief`
+
+Print the seat this session holds, read only, in reading order: its handoff, the
+swarm culture, the latest recap and the learned notes. A swarm seat reads the swarm
+Redis seat store (its own notes plus shared canon and insight, corrected notes
+withheld); a quick seat reads its seat folder and the quick swarm's culture file,
+with the recap taken from the handoff's Done, Stopped at and Next sections. A
+session with no seat prints one line saying so and exits 0; a store failure prints
+the error and exits 1.
+
+```bash
+agentihooks seat brief
+```
+
 ## `agentihooks classify`, `classifier stats`, `classifier eval`
 
 Ask the LiteLLM decision models typed questions, and read the decision log. Details in

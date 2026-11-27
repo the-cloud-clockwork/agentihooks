@@ -60,7 +60,7 @@ from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
-from scripts.ci_lab.intake import GradeRequest, admit
+from scripts.ci_lab.intake import GradeRequest, admit, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
@@ -407,6 +407,10 @@ class Poster(Protocol):
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         ...
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of a check run the grade holds no id of, so its next post creates it."""
+        ...
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
         ...
@@ -436,12 +440,14 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane, the retries of a lost unit and how long a settled job's record
-    outlives its settling."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit, the served repositories by slug and
+    how long a settled job's record outlives its settling; with no set of served repositories every repository is
+    served."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    served: frozenset[str] | None = None
     retention_ms: int = RETENTION_MS
 
 
@@ -920,6 +926,9 @@ class Scheduler:
         fixes = self.ports.hotfixes() if heads else frozenset[str]()
         actions: list[str] = []
         for head in heads:
+            if not serves(self.settings.served, head.event.repo):
+                actions.append(f"ignored {head.event.head}: {head.event.repo} is not a served repository")
+                continue
             if head.event.action == CLOSED:
                 actions.append(self._close(head.event, head.lane))
                 continue
@@ -1535,7 +1544,9 @@ class Scheduler:
     def _post(self, state: State, now_ms: int) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
-        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
+        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. One the grade
+        holds no id of is forgotten by the poster first, so a grade started again under the run name of a grade the
+        scheduler forgot opens new check runs instead of meeting the statuses of the forgotten one. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
         head before the relay pushes it. A post the App token or the network refuses holds every post of the
         repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
@@ -1555,6 +1566,8 @@ class Scheduler:
             shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
+            else:
+                poster.forget(state.head, check, state.run, shadow)
             output = self._output(state, check, status)
             try:
                 state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
@@ -2145,9 +2158,10 @@ def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev, its mirrors falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
-    names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
-    the scheduler's registry; without it completed checks are acknowledged unrecorded."""
+    repository's dev, serving the repositories the environment lists or else that one repository, its mirrors
+    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP` names the lab's GitHub App, its
+    bus inbox hands each completed check of the repository to a shadow recorder on the scheduler's registry; without
+    it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
     credentials: dict[str, GitHubAppAuth] = {}
@@ -2171,7 +2185,8 @@ def build(
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
-    settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
+    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)
     if app:
@@ -2319,6 +2334,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
         scheduler.settings.retention_ms,
+        shed=lambda: spending.status().shed,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
