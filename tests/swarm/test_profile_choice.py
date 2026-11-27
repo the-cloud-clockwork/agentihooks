@@ -524,6 +524,7 @@ def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_t
     assert placed.profile_decision["source"] == "classifier"
     text = Path(argv[argv.index("--prompt-file") + 1]).read_text()
     assert "Go on from seam two" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
     assert text.count(prompt.SEAT_BRIEF) == 1
 
 

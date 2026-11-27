@@ -439,7 +439,7 @@ def artifact_line(led):
 
 def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
-    transfer = task.get("transfer") if (task.get("transfer") or {}).get("handoff") else None
+    transfer = task.get("transfer") if task.get("seat") and (task.get("transfer") or {}).get("handoff") else None
     history = transfer or any(task.get(key) for key in ("handoff", "culture", "recaps", "learned"))
     lines = [
         f"{seat} carries what earlier occupants left."

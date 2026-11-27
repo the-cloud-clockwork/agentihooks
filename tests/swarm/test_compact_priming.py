@@ -101,8 +101,11 @@ def test_compact_transfer_keeps_exact_confirmation_without_the_document() -> Non
 
 
 @pytest.mark.feature("seat-brief")
-def test_a_seatless_transfer_without_a_handoff_reads_as_no_history() -> None:
-    assert prompt.priming_lines({"id": "p", "transfer": {"avoid_harness": "codex"}}) == [
+@pytest.mark.parametrize(
+    "transfer", [{"avoid_harness": "codex"}, {"id": "transfer-fixed", "next": ACTION, "handoff": "# Handoff v2\n"}]
+)
+def test_a_seatless_transfer_reads_as_no_history(transfer: dict[str, Any]) -> None:
+    assert prompt.priming_lines({"id": "p", "transfer": transfer}) == [
         "Your seat has no history yet: no handoff document, no recap and no learned notes.",
         prompt.SEAT_BRIEF,
     ]

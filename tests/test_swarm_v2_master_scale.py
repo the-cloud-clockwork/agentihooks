@@ -595,7 +595,7 @@ def test_an_extra_master_handoff_through_the_swarm_command_reaches_the_lead(swar
     assert forwarded == [master_scale.HANDED.format(address=FOURTH, slug=SLUG) + text]
 
 
-def test_a_launched_seat_is_primed_with_its_seat_handoff(swarm):
+def test_a_launched_seat_carries_its_seat_handoff_for_the_seat_brief(swarm):
     store, runtime = swarm
     store.put_handoff(SLUG, "master-2", "# Handoff v2\nseat two notes", seat=SECOND)
     grown(swarm)
@@ -605,6 +605,7 @@ def test_a_launched_seat_is_primed_with_its_seat_handoff(swarm):
     assert task["handoff"] == "# Handoff v2\nseat two notes"
     text = prompt.build(SLUG, "/repo", MASTER, name, task)
     assert "seat two notes" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
     assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
     assert store.handoff(SLUG, "master-2") == ""
 

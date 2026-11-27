@@ -9,7 +9,7 @@
     "tests/swarm/test_compact_priming.py::test_growing_continuity_does_not_grow_any_opening",
     "tests/swarm/test_compact_priming.py::test_carried_saved_openings_stay_verbatim",
     "tests/swarm/test_compact_priming.py::test_compact_transfer_keeps_exact_confirmation_without_the_document",
-    "tests/swarm/test_compact_priming.py::test_a_seatless_transfer_without_a_handoff_reads_as_no_history",
+    "tests/swarm/test_compact_priming.py::test_a_seatless_transfer_reads_as_no_history",
     "tests/swarm/test_compact_priming.py::test_deferred_bodies_are_not_traced_as_delivered_inline",
     "tests/swarm/test_compact_priming.py::test_the_same_continuity_still_renders_as_the_complete_four_part_brief",
     "tests/swarm/test_resume.py::test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff",
