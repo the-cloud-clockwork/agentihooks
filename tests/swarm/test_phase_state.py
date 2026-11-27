@@ -134,9 +134,8 @@ class CountedRows(list[dict[str, object]]):
 
 def counted_status_doc(count: int) -> tuple[dict[str, object], dict[str, int]]:
     counts = {"phases": 0, "tasks": 0}
-    phases = [
-        {"id": f"p{i}", "planning": "auto", **({"depends_on": [f"p{i - 1}"]} if i % 2 else {})} for i in range(count)
-    ]
+    phases = [{"id": f"p{i}", "planning": "auto"} for i in range(count)]
+    phases += [{"id": f"w{i}", "depends_on": [f"p{i}"]} for i in range(count)]
     tasks = [plan(f"p{i}") for i in range(count)]
     return {"phases": CountedRows(phases, counts, "phases"), "tasks": CountedRows(tasks, counts, "tasks")}, counts
 

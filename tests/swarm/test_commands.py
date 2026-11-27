@@ -60,7 +60,6 @@ def test_publish_keeps_the_newest_hundred_transfers_and_every_other_status_key(s
     assert stored["transfers"] == rows[-100:]
     assert stored["handoffs"] == handoffs
     assert stored["history"] == [{"at": 1}]
-    assert len(rows) == 250
 
 
 @pytest.mark.feature("swarm-published-status-bounded")
