@@ -12965,7 +12965,7 @@
     {
       "id": "quick-swarm",
       "origin": "inventory",
-      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; without an explicit authentication selection a seat starts on a routed account and never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
       "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, init-agent --pane and its quick seat route check, and the token block read of scripts.claude_quota_balancer.select_launch_credential",
       "tests": [
         "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
@@ -13022,7 +13022,9 @@
         "tests/quick/test_room_tick_launch.py::test_force_never_ends_a_seat_being_launched_or_a_missing_seat",
         "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
         "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
-        "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced"
+        "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced",
+        "tests/quick/test_cli.py::test_an_invalid_harness_count_never_creates_panes",
+        "tests/quick/test_launch_tick_mutants.py::test_start_all_launches_every_engineer_with_its_own_prompt_file_and_command"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },
@@ -17145,8 +17147,8 @@
       "id": "quick-native-authentication",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2900",
-      "behaviour": "Native Claude and Codex launchers retain explicit local or named authentication independently of automatic selection and persist safe Seat policy fields.",
-      "seam": "init-agent native authentication, saved Seat policy and isolated execution homes",
+      "behaviour": "Native quick engineers persist routed, default or named authentication independently of the master and retain explicit choices outside automatic quota tiers through initial and successor launches.",
+      "seam": "quick CLI selection, atomic native launch and binding, verified quota membership, safe status and master context",
       "tests": [
         "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes",
         "tests/quick/test_authentication.py::test_common_and_per_engineer_native_authentication_resolve_safe_references",
@@ -17175,12 +17177,29 @@
         "tests/test_named_native_authentication.py::test_codex_named_execution_never_enumerates_or_reads_automatic_tiers",
         "tests/test_named_native_authentication.py::test_missing_named_default_reference_never_falls_back_to_codex_local_login",
         "tests/quick/test_authentication_successors.py::test_initial_routed_launch_records_its_actual_native_session",
-        "tests/quick/test_room_tick_launch.py::test_saved_native_authentication_reaches_the_launcher"
+        "tests/quick/test_room_tick_launch.py::test_saved_native_authentication_reaches_the_launcher",
+        "tests/quick/test_cli.py::test_up_persists_default_for_mixed_engineers_without_changing_master",
+        "tests/quick/test_cli.py::test_invalid_authentication_never_creates_panes",
+        "tests/quick/test_cli.py::test_up_resolves_named_native_references_per_engineer",
+        "tests/quick/test_cli.py::test_status_exposes_saved_authentication_and_tier_metadata",
+        "tests/quick/test_cli.py::test_master_context_exposes_each_safe_authentication_selection",
+        "tests/quick/test_authentication_quota.py::test_bound_explicit_quick_engineers_bypass_automatic_quota_switching",
+        "tests/quick/test_authentication_quota.py::test_routed_or_unverified_quick_members_retain_quota_policy",
+        "tests/quick/test_authentication_successors.py::test_initial_native_launch_binds_the_selected_engineer_before_ready",
+        "tests/quick/test_authentication_successors.py::test_native_successors_retain_saved_authentication_when_caller_routing_changes",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_keeps_failed_or_unbound_native_engineers_pending",
+        "tests/quick/test_authentication_successors.py::test_competing_initial_launchers_take_the_native_engineer_once",
+        "tests/quick/test_authentication_successors.py::test_initial_native_spawn_failure_releases_the_seat_for_retry",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_preserves_an_already_launching_native_engineer",
+        "tests/quick/test_cli.py::test_up_reports_an_unbound_native_engineer_as_pending",
+        "tests/quick/test_authentication_quota.py::test_bound_default_claude_without_a_target_marker_keeps_explicit_authentication"
       ],
       "rules": [
         "native-default-shared-login",
         "native-named-route-stripped",
-        "native-named-route-empty"
+        "native-named-route-empty",
+        "quick-authentication-unconditional-route",
+        "quick-initial-native-launch-without-take"
       ]
     }
   ],
