@@ -1,0 +1,32 @@
+rules:
+  - id: event-claim-before-account-eligibility
+    languages: [python]
+    severity: ERROR
+    message: Check permitted account seats before claiming an event offer. Hold a full offer through the nonconsuming fit path.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - /scripts/hive/spoke.py
+        - event-claim-before-account-eligibility.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def admit(self, ...):
+                  ...
+          - pattern: self._claim(...)
+          - pattern-not-inside: |
+              if not offer_quota.available(...):
+                  ...
+              ...
+          - pattern-not-inside: |
+              if <... self._account_hold(...) ...>:
+                  ...
+              ...
+      - patterns:
+          - pattern-inside: |
+              def _poll(self, ...):
+                  ...
+          - pattern: self._apply(...)
+          - pattern-not-inside: |
+              $FIT = offer_quota.Fit(...)
+              ...

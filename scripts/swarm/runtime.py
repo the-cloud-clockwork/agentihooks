@@ -616,9 +616,10 @@ class HerdrRuntime:
         self._quota_accounts = read(environ, time.time(), refresh=False)
         self._quota_spawn_owned = True
 
-    def _quota_refresh(self, environ: dict[str, str]) -> None:
-        """Read the spawn owned quota rows again, so a long running process never decides on an earlier spawn's rows."""
-        if self._quota_spawn_owned:
+    def _quota_refresh(self, environ: dict[str, str], fresh: bool) -> None:
+        """Read the spawn owned quota rows again, so a long running process never decides on an earlier spawn's rows;
+        ``fresh``, a hub admitted task with no saved launch, reads them first when no pass gave any."""
+        if self._quota_spawn_owned or (fresh and not hasattr(self, "_quota_accounts")):
             with self._reserving:
                 self._quota_read(environ)
 
@@ -809,9 +810,9 @@ class HerdrRuntime:
         from scripts.hive import daemon
 
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        self._quota_refresh(environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
+        self._quota_refresh(environ, bool(task.get("admitted_execution_id")) and not saved)
         decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
