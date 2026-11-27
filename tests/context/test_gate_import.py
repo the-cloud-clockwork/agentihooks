@@ -3,6 +3,7 @@ the call goes through, a fail-open row names the gate and the import error, and 
 names the gate and the interpreter."""
 
 import json
+import os
 import shutil
 import sys
 import time
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "profiles" / "package" / "roles" / "engineer" / ".claude" / "conditions"
 RERUNS = ROLE / "pre-bash.gh-rerun_budget.py"
 IDENTITY = next(ROLE.glob("pre-*-identity_pin.py"))
+QUIET = ROLE / "pre-any-quiet_claim.sh"
 SLUG, ME, TASK = "sw", "engineer@1-2", "t2"
 START, HOUR = 1_800_000_000.0, 3600
 IMPORTED = 'from scripts.gates.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
@@ -157,11 +159,38 @@ def test_a_module_launched_gate_is_reported_from_its_launch_traceback(world: Wor
     assert result.decision is None and LOST in " ".join(result.contexts)
     rows = world.rows()
     assert [(row["gate"], row["kind"]) for row in rows] == [("quiet", "fail-open")]
-    assert (
-        rows[0]["reason"]
-        == f"import failed under an unknown interpreter: ModuleNotFoundError: No module named '{LOST}'"
-    )
+    assert rows[0]["reason"] == f"import failed under {sys.executable}: ModuleNotFoundError: No module named '{LOST}'"
     assert world.items() == ["gate-import-quiet"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_the_quiet_claim_shim_names_the_agentihooks_interpreter(
+    world: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    world.place(QUIET)
+    marker = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "quiet" / ME
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+    command = tmp_path / "bin" / "agentihooks"
+    command.parent.mkdir()
+    command.write_text(f"#!{sys.executable}\n")
+    command.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{command.parent}:{os.environ['PATH']}")
+    assert world.run("ls").decision is None
+    rows = world.rows()
+    assert [(row["gate"], row["kind"]) for row in rows] == [("quiet", "fail-open")]
+    assert rows[0]["reason"] == f"import failed under {sys.executable}: ModuleNotFoundError: No module named '{LOST}'"
+    assert sys.executable in world.sent[0]["text"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_condition_naming_several_gates_reports_each(world: World) -> None:
+    world.write(
+        "pre-bash-pair.py", 'from scripts.gates.entry import main\n\nraise SystemExit(main(["reruns", "identity"]))\n'
+    )
+    assert world.run("ls").decision is None
+    assert [(row["gate"], row["kind"]) for row in world.rows()] == [("reruns", "fail-open"), ("identity", "fail-open")]
+    assert world.items() == ["gate-import-reruns", "gate-import-identity"]
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
@@ -248,48 +277,82 @@ def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_cal
 
 @pytest.mark.feature("gate-import-failure-alerts")
 @pytest.mark.parametrize(
-    "body, gate",
+    "body, gates",
     [
-        (IMPORTED, "reruns"),
-        ("exec python -P -m scripts.gates quiet\n", "quiet"),
-        (IMPORTED + 'main(["identity"])\n', ""),
-        ("print('no gate here')\n", ""),
+        (IMPORTED, ["reruns"]),
+        ("exec python -P -m scripts.gates quiet\n", ["quiet"]),
+        ("exec python -m scripts.gates build recon\n", ["build", "recon"]),
+        (IMPORTED + 'main(["identity"])\n', ["reruns", "identity"]),
+        ('main(["reruns", "identity", "reruns"])\n', ["reruns", "identity"]),
+        ("print('no gate here')\n", []),
     ],
 )
-def test_a_condition_names_its_gate_only_when_it_runs_exactly_one(tmp_path: Path, body: str, gate: str) -> None:
-    path = tmp_path / "condition"
-    path.write_text(body)
-    assert gate_import.gate_name(path) == gate
+def test_a_condition_names_every_gate_it_runs_once(body: str, gates: list[str]) -> None:
+    assert gate_import.gate_names(body) == gates
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_an_unreadable_condition_names_no_gate(tmp_path: Path) -> None:
-    assert gate_import.gate_name(tmp_path / "missing.py") == ""
+def test_an_unreadable_condition_reads_as_empty(tmp_path: Path) -> None:
+    assert gate_import.read_condition(tmp_path / "missing.py") == ""
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
 @pytest.mark.parametrize(
-    "stderr, ext, found",
+    "text, found",
     [
-        (f"Traceback\n  File x\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\n\n", ".py", "runner"),
-        (f"Traceback\n{SHIM_LINE}\nImportError: cannot import name 'main'", ".sh", "an unknown interpreter"),
-        ("/opt/python/bin/python3: No module named scripts.gates\n", ".sh", "/opt/python/bin/python3"),
-        (f"Traceback\n{RUNPY}\nModuleNotFoundError: No module named '{LOST}'\n", ".sh", "an unknown interpreter"),
-        ("Traceback\n  File x, line 198, in _run_code\nModuleNotFoundError: No module named 'hooks.x'\n", ".sh", None),
-        (f"Traceback\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\nRuntimeError: later\n", ".py", None),
-        (
-            "Traceback\n    raise SystemExit(main(['brain']))\nModuleNotFoundError: No module named 'hooks.x'\n",
-            ".py",
-            None,
-        ),
-        ("Traceback\n    import requests\nModuleNotFoundError: No module named 'requests'\n", ".py", None),
-        ("/opt/python/bin/python3: No module named requests\n", ".sh", None),
-        ("", ".py", None),
+        ('exec "/opt/python/bin/python3" -P -m scripts.gates quiet\n', "/opt/python/bin/python3"),
+        ("exec /opt/python/bin/python3 -m scripts.gates quiet\n", "/opt/python/bin/python3"),
+        ("exec python -m scripts.gates quiet\n", ""),
     ],
 )
-def test_only_a_child_that_died_importing_the_gates_counts(stderr: str, ext: str, found: str | None) -> None:
-    failed = gate_import.import_failure(stderr, ext)
-    assert (failed[1] if failed else None) == (sys.executable if found == "runner" else found)
+def test_a_shell_condition_names_its_literal_launcher(text: str, found: str) -> None:
+    assert gate_import.launcher(text) == found
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_shell_condition_reading_the_agentihooks_shebang_names_that_interpreter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    command = tmp_path / "agentihooks"
+    command.write_text("#!/opt/agentihooks/bin/python\nimport sys\n")
+    monkeypatch.setattr(gate_import.shutil, "which", lambda name: str(command) if name == "agentihooks" else None)
+    assert gate_import.launcher(QUIET.read_text()) == "/opt/agentihooks/bin/python"
+    assert gate_import.launcher("exec python -m scripts.gates quiet\n") == ""
+    command.unlink()
+    assert gate_import.launcher(QUIET.read_text()) == ""
+    monkeypatch.setattr(gate_import.shutil, "which", lambda name: None)
+    assert gate_import.launcher(QUIET.read_text()) == ""
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_condition_runs_under_the_hook_interpreter_or_its_launcher_or_an_unknown_one() -> None:
+    assert gate_import._ran_under(".py", "exec /opt/python/bin/python3 -m scripts.gates quiet") == sys.executable
+    assert (
+        gate_import._ran_under(".sh", "exec /opt/python/bin/python3 -m scripts.gates quiet")
+        == "/opt/python/bin/python3"
+    )
+    assert gate_import._ran_under(".sh", "exec python -m scripts.gates quiet") == "an unknown interpreter"
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.parametrize(
+    "stderr, found",
+    [
+        (f"Traceback\n  File x\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\n\n", ""),
+        (f"Traceback\n{SHIM_LINE}\nImportError: cannot import name 'main'", ""),
+        ("/opt/python/bin/python3: No module named scripts.gates\n", "/opt/python/bin/python3"),
+        (f"Traceback\n{RUNPY}\nModuleNotFoundError: No module named '{LOST}'\n", ""),
+        ("Traceback\n  File x, line 198, in _run_code\nModuleNotFoundError: No module named 'hooks.x'\n", None),
+        (f"Traceback\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\nRuntimeError: later\n", None),
+        ("Traceback\n    raise SystemExit(main(['brain']))\nModuleNotFoundError: No module named 'hooks.x'\n", None),
+        ("Traceback\n    import requests\nModuleNotFoundError: No module named 'requests'\n", None),
+        ("/opt/python/bin/python3: No module named requests\n", None),
+        ("", None),
+    ],
+)
+def test_only_a_child_that_died_importing_the_gates_counts(stderr: str, found: str | None) -> None:
+    failed = gate_import.import_failure(stderr)
+    assert (failed[1] if failed else None) == found
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
