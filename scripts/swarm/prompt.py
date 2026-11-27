@@ -65,6 +65,10 @@ RECON_FIRST = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+SEAT_BRIEF = (
+    "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
+    "learned notes from the store that keeps them."
+)
 ORDERS_OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 ORDERS_NONE = "Operator orders: none were open at the handoff."
 ORDERS_UNKNOWN = (
@@ -433,12 +437,12 @@ def artifact_line(led):
     )
 
 
-def priming_lines(task):
+def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
     handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
     culture = task.get("culture", "")
     if not (handoff or culture or recaps or learned):
-        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
+        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes.", SEAT_BRIEF]
     lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
     if task.get("transfer"):
         from scripts.handoff import transfers
@@ -459,13 +463,13 @@ def priming_lines(task):
     lines += learned_lines(learned)
     older = recaps[1:]
     if not older:
-        return [*lines, "5. Older recaps: none."]
+        return [*lines, "5. Older recaps: none.", SEAT_BRIEF]
     lines.append("5. Older recaps, newest first:")
     for recap in older[:OLDER_RECAPS]:
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
     if len(older) > OLDER_RECAPS:
         lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
-    return lines
+    return [*lines, SEAT_BRIEF]
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:

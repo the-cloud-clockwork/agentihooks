@@ -164,6 +164,9 @@ class Poster:
     def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
         pass
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        pass
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         self.posts.append((head, gate, status, conclusion, output, shadow))
         return len(self.posts)
@@ -1731,6 +1734,7 @@ class Delivery:
 class Consumer:
     deliveries: list[bus.Delivery]
     asked: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+    created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[bus.Delivery]:
         self.asked.append((batch, timeout_ms))

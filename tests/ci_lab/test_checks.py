@@ -184,6 +184,24 @@ def test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status(monkeypa
     assert [call.args for call in request.call_args_list] == [("PATCH", f"{URL}/41")]
 
 
+@pytest.mark.feature("lab-scheduler-regrade-opens-new-check-runs")
+def test_a_forgotten_check_run_is_created_again_and_every_other_keeps_its_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, _ = lab(monkeypatch, answer(201, {"id": 7}), answer(201, {"id": 8}), answer(201, {"id": 9}))
+    other = replace(OUTPUT, run="run-8")
+    poster.post(HEAD, "lint", "completed", "success", OUTPUT, True)
+    poster.post(HEAD, "lint", "completed", "success", other, True)
+    poster.forget(HEAD, "lint", OUTPUT.run, True)
+    poster.forget(HEAD, "docs", OUTPUT.run, True)
+    poster.forget(HEAD, "lint", other.run, False)
+    assert poster.status((HEAD, "lab-shadow/lint", OUTPUT.run)) is None
+    assert poster.post(HEAD, "lint", "queued", None, OUTPUT, True) == 9
+    with pytest.raises(ValueError, match=FORWARD):
+        poster.post(HEAD, "lint", "completed", "success", other, True)
+    assert [call.args for call in request.call_args_list] == [("POST", URL)] * 3
+
+
 def test_the_output_lists_every_unit_key_the_run_id_the_grader_revision_and_the_details_link() -> None:
     assert checks.render(OUTPUT) == {
         "title": "2 units",
