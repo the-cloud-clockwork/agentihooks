@@ -29,6 +29,29 @@ def validate(client: Client, subject: str, data: bytes, headers: dict[str, str] 
         raise PayloadTooLarge(f"{subject}: payload {size} exceeds server limit {client.max_payload}")
 
 
+def fitted(
+    client: Client, subject: str, data: bytes, refusal: Callable[[PayloadTooLarge], bytes] | None = None
+) -> bytes:
+    """A reply as it is when it fits the server limit, else in the compressed form state values take when that fits,
+    else the refusal's answer to its PayloadTooLarge; with no refusal, or a refusal answer over the limit, it raises."""
+    if len(data) <= client.max_payload:
+        return data
+    compact = COMPRESSED + zlib.compress(data)
+    if len(compact) <= client.max_payload:
+        return compact
+    error = PayloadTooLarge(f"{subject}: payload {len(data)} exceeds server limit {client.max_payload}")
+    if refusal is None:
+        raise error
+    answer = refusal(error)
+    validate(client, subject, answer)
+    return answer
+
+
+def expanded(value: bytes) -> bytes:
+    """A reply fitted in the compressed form, decompressed to the bytes its handler answered; any other as it is."""
+    return zlib.decompress(value[len(COMPRESSED) :]) if value.startswith(COMPRESSED) else value
+
+
 async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: str, headers: dict[str, str]) -> PubAck:
     validate(js._nc, subject, data, {**headers, "Nats-Expected-Stream": stream})
     return await js.publish(subject, data, stream=stream, headers=headers)
