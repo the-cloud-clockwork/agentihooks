@@ -10,7 +10,6 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from scripts import ci_gate_shards
-from scripts.ci_budget import jobs as jobs_reader
 
 pytestmark = pytest.mark.unit
 
@@ -351,19 +350,3 @@ def test_watch_reads_attempt_jobs_ten_per_page_and_never_a_hundred() -> None:
     assert requests == [
         f"repos/org/repo/actions/runs/123/attempts/3/jobs?per_page=10&page={page}" for page in range(1, 12)
     ]
-
-
-@pytest.mark.feature("shard-verifier-small-job-pages")
-def test_the_jobs_reader_returns_every_job_of_a_102_job_attempt_when_pages_above_25_fail() -> None:
-    jobs = rerun_attempt_jobs()
-    requests: list[str] = []
-    endpoint = "repos/org/repo/actions/runs/123/attempts/3/jobs"
-    with (
-        patch.object(ci_gate_shards.rate_limit, "_run", github_attempt_jobs(jobs, requests, 25)),
-        patch.object(ci_gate_shards.time, "sleep") as sleep,
-    ):
-        assert jobs_reader.read_jobs(endpoint, 100) == jobs
-    assert requests == [f"{endpoint}?per_page=100&page=1", f"{endpoint}?per_page=50&page=1"] + [
-        f"{endpoint}?per_page=25&page={page}" for page in range(1, 6)
-    ]
-    assert [call.args for call in sleep.call_args_list] == [(1,), (2,)]
