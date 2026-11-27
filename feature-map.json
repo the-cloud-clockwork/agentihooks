@@ -2615,6 +2615,22 @@
       ]
     },
     {
+      "id": "codex-scan-survives-a-vanishing-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2913",
+      "behaviour": "Codex session and managed execution detection judge a process from one read of its command line and answer no session for an empty one, so a Codex process that exits while the hive daemon beat walks local processes no longer raises and ends the daemon with every agent on the hive.",
+      "seam": "hooks.context.account_sessions._codex_argv, _is_codex_session, _managed_execution and local_processes",
+      "tests": [
+        "tests/context/test_account_sessions.py::test_codex_session_detection_reads_the_command_line_once",
+        "tests/context/test_account_sessions.py::test_a_codex_process_with_an_empty_command_line_is_no_session",
+        "tests/context/test_account_sessions.py::test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read",
+        "tests/context/test_account_sessions.py::test_a_managed_execution_is_judged_from_one_command_line_read"
+      ],
+      "rules": [
+        "codex-session-second-cmdline-read"
+      ]
+    },
+    {
       "id": "legacy-state-migration-command",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
