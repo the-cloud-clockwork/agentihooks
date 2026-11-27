@@ -662,7 +662,7 @@ def test_publish_plan_for_a_phaseless_task_links_its_plan_and_slice_and_plan_rea
     url = publish_for_task(monkeypatch, plan_ledger, tmp_path, "doc")
     state = core.sync(plan_ledger)[0]
     doc = task(state, "doc")
-    assert (doc["phase"], doc["plan_url"], doc["plan_slice"], doc["plan_lines"]) == ("", url, "ledger-docs", "15-17")
+    assert (doc["phase"], doc["plan_url"], doc["plan_slice"], doc["plan_lines"]) == ("", url, "ledger-docs", "14-17")
     assert [(row["artifact"], row["url"], row["title"]) for row in state["plans"]] == [
         (url, url, "Document the ledger")
     ]
@@ -674,8 +674,8 @@ def test_publish_plan_for_a_phaseless_task_links_its_plan_and_slice_and_plan_rea
         "plan_slice": "ledger-docs",
     }
     printed = plan_read.read(state, plan_ledger, "doc", None)
-    assert printed == "".join(f"{row}\n" for row in TASK_PLAN.splitlines()[4:])
-    assert "Context 3\n" not in printed
+    assert printed == "".join(f"{row}\n" for row in TASK_PLAN.splitlines()[3:])
+    assert "Context 2\n" not in printed
 
 
 @pytest.mark.feature("plan-publish-task")
@@ -690,8 +690,8 @@ def test_two_phaseless_tasks_whose_plans_span_the_same_lines_both_publish(plan_l
     state = core.sync(plan_ledger)[0]
     assert first != second
     assert [(task(state, t)["plan_url"], task(state, t)["plan_lines"]) for t in ("doc", "guide")] == [
-        (first, "15-17"),
-        (second, "15-17"),
+        (first, "14-17"),
+        (second, "14-17"),
     ]
 
 
