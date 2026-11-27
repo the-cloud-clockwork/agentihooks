@@ -37,6 +37,7 @@ __all__ = [
     "head",
     "heads_of",
     "holds",
+    "inside",
     "lab",
     "main",
     "mismatch",
@@ -79,34 +80,44 @@ class Verdict:
 
 @dataclass(frozen=True)
 class Head:
-    """One head's Actions verdict on a gate and its lab verdict, None when the lab posted no completed verdict."""
+    """One head's Actions verdict on a gate, its lab verdict and when its lab-verdict job started.
+
+    The lab verdict is None when the lab posted no completed verdict, the start None when the head holds no started
+    lab-verdict job.
+    """
 
     sha: str
     actions: Verdict
     lab: Verdict | None
+    started: datetime | None = None
 
 
 @dataclass(frozen=True)
 class Rule:
-    """The acceptance rule over a window of heads: how many heads, lab verdicts present and lab verdicts first."""
+    """The acceptance rule over a window of heads: how many heads, lab verdicts present, lab verdicts first and, for
+    an event whose job waits for the lab, lab verdicts inside that wait; None where no job waits."""
 
     heads: int
     present: int
     first: int
+    inside: int | None = None
 
 
 @dataclass(frozen=True)
 class Tally:
-    """The counts the rule judges: heads, lab verdicts present, mismatches and lab verdicts first."""
+    """The counts the rule judges: heads, lab verdicts present, mismatches, lab verdicts first and lab verdicts inside
+    the wait of the lab-verdict job."""
 
     heads: int
     present: int
     mismatches: int
     first: int
+    inside: int = 0
 
 
-def rule(heads: int) -> Rule:
+def rule(heads: int, event: str = MERGE_GROUP) -> Rule:
     """Return the rule for a window of heads: lab verdicts present on 48 and first on 45 of every 50, rounded up."""
+    del event
     return Rule(heads, math.ceil(heads * PRESENT / HEADS), math.ceil(heads * FIRST / HEADS))
 
 
@@ -171,6 +182,12 @@ def mismatch(found: Head) -> bool:
 def first(found: Head) -> bool:
     """Whether the lab verdict completed before the last graded Actions job of the gate."""
     return found.lab is not None and found.lab.completed_at < found.actions.completed_at
+
+
+def inside(found: Head) -> bool:
+    """Whether the lab verdict completed inside the wait of the head's lab-verdict job."""
+    del found
+    return False
 
 
 def tally(heads: Sequence[Head]) -> Tally:

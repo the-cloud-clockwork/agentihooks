@@ -13863,8 +13863,8 @@
       "id": "lab-shadow-acceptance-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
-      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
-      "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up. For the pull_request event each head also keeps when its newest github-actions lab-verdict job started, a lab verdict is inside the wait when it completed no later than the wait of that job after its start, each row ends with the seconds from that start to the lab verdict, and the rule also asks for a lab verdict inside the wait on 48 of every 50, rounded up; the merge_group report keeps three counts and five columns.",
+      "seam": "scripts.ci_lab.shadow_report actions, lab, head, inside, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
         "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
@@ -13877,7 +13877,14 @@
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
         "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
-        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages",
+        "tests/ci_lab/test_shadow_report.py::test_a_head_keeps_when_its_newest_lab_verdict_job_started",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_job_whose_check_run_names_no_start_leaves_the_head_readable",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_is_inside_the_wait_up_to_its_last_second",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_rule_asks_for_lab_verdicts_inside_the_wait_on_48_of_every_50_heads",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_seconds_each_head_took",
+        "tests/ci_lab/test_shadow_report.py::test_the_merge_group_report_keeps_three_counts_and_five_columns",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_command_fails_a_window_whose_verdicts_are_first_yet_late_for_the_wait"
       ]
     },
     {
