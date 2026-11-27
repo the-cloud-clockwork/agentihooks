@@ -14,7 +14,7 @@ from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.scope import LANES
-from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
+from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, offer_quota, release_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.probe import ROOT
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
@@ -169,7 +169,11 @@ def queue_name(slug: str, lane: str) -> str:
 
 
 def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
-    data: dict[str, Any] = {"lane": task["lane"], "generation": generation(task)}
+    data: dict[str, Any] = {
+        "lane": task["lane"],
+        "generation": generation(task),
+        "quota": offer_quota.restrictions(task),
+    }
     if hive := task.get("hive") or (ROOT if task.get("workstation") else None):
         data["hive"] = hive
     if needs := task.get("needs"):
@@ -284,7 +288,7 @@ def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
     kept: list[Envelope] = []
 
     def swept(event: Envelope) -> bool:
-        if stale(event, view):
+        if stale(event, view) or event.data.get("quota") != offer_quota.restrictions(view.rows[event.key]):
             return True
         kept.append(event)
         return False

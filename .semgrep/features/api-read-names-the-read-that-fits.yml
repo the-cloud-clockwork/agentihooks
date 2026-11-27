@@ -1,0 +1,18 @@
+rules:
+  - id: feature-api-read-names-the-read-that-fits
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A read of the ledger API routes that holds its own reply to the reply limit names the read that fits:
+      resources.bounded(reply, message). The message of the default names the export, which holds no verdict, so a
+      read past the limit would send its reader to an operation that cannot answer it. Only handle, the last bound
+      of every reply, calls resources.bounded with the reply alone.
+    patterns:
+      - pattern: resources.bounded($REPLY)
+      - pattern-not-inside: |
+          def handle(...):
+              ...
+    paths:
+      include:
+        - /scripts/swarm_ledger/api/routes.py
+        - api-read-names-the-read-that-fits.test.py

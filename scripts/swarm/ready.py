@@ -31,7 +31,7 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_alerts, ledger_kinds
 from scripts.tick.deadline import Deadline
 
 AWAITING = "merge"
@@ -56,7 +56,7 @@ UNREAD_EXIT = "left the merge queue green and its merge group runs could not all
 DROPPED_GREEN = "left the merge queue green and was dropped again after {tries} requeues"
 BACKOFF_MS = 60_000
 RECOVER = "recover"
-ALERT_SOURCE = "requeue"
+ALERT_SOURCE = ledger_alerts.MERGE
 TRANSIENT = "unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green"
 STUCK = "stayed unmergeable after leaving the merge queue"
 MOVED = "changed its head after leaving the merge queue"

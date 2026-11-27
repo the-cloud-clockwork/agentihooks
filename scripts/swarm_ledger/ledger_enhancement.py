@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("task_enhancement",)
 OPERATOR = "operator"
@@ -31,7 +32,7 @@ def check(op: dict[str, Any]) -> None:
         raise ValueError(SHAPE)
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc["tasks"] if t["id"] == task_id), None)
     refusal = UNKNOWN.format(task=task_id) if task is None else refused(doc, op, task_id)

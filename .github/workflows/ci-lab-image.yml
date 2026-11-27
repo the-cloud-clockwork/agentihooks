@@ -10,6 +10,7 @@ on:
       - .github/test-excludes.txt
       - pyproject.toml
       - scripts/ci_lab/**
+      - scripts/ci_lab_smoke.py
       - scripts/cli_delegates.py
   release:
     types: [published]

@@ -86,9 +86,10 @@ def linked(source: str, lines: str, margin: int = 0) -> str:
 def pointer(task: dict) -> str:
     if not task.get("plan_lines"):
         return ""
+    whole = f"; add --phase {task['phase']} for the whole phase" if task.get("phase") else ""
     return (
         f"Plan: run {COMMAND} to read only your slice of the plan, lines {task['plan_lines']} "
-        f"with ten lines of margin each side; add --phase {task.get('phase')} for the whole phase."
+        f"with ten lines of margin each side{whole}."
     )
 
 
@@ -99,15 +100,19 @@ def _lead(task: dict) -> str:
 def sharers(doc: dict, task: dict) -> list[str]:
     if not task.get("plan_lines"):
         return []
-    held = (task.get("phase"), task["plan_lines"])
+    held = _region(task)
     return [
         other["id"]
         for other in doc.get("tasks", [])
         if other["id"] != task["id"]
         and other.get("state") != "done"
-        and (other.get("phase"), other.get("plan_lines")) == held
+        and _region(other) == held
         and _lead(other) != _lead(task)
     ]
+
+
+def _region(task: dict[str, Any]) -> tuple[Any, Any]:
+    return task.get("phase") or task.get("plan_url"), task.get("plan_lines")
 
 
 def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
@@ -160,8 +165,22 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
-    ref = phase.get("plan_ref")
+def _own_ref(doc: Mapping[str, Any], phase: Mapping[str, Any], task: Mapping[str, Any]) -> dict[str, str] | None:
+    link = task.get("plan_url")
+    if not link or link == phase.get("plan_url"):
+        return None
+    rows: list[dict[str, Any]] = doc.get("plans") or []
+    artifact = next(
+        (str(row["artifact"]) for row in rows if row.get("artifact") and link in (row.get("url"), row["artifact"])),
+        None,
+    )
+    return {"artifact": artifact, "lines": str(task["plan_lines"])} if artifact else None
+
+
+def _stored(
+    doc: dict[str, Any], phase: dict[str, Any], task: dict[str, Any], load: Callable[[str, str], bytes] | None = None
+) -> str:
+    ref = _own_ref(doc, phase, task) or phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
     if not ref:
@@ -176,7 +195,7 @@ def read(
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
     phase_id = phase_id or task.get("phase")
-    phase = _phase(doc, phase_id)
+    phase = _phase(doc, phase_id) if phase_id else {}
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     packaged = _packaged(phase, task)
@@ -241,7 +260,7 @@ def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, C
     return doc, functools.partial(_served, env) if hosted else None
 
 
-def main(argv=None, environ=None) -> int:
+def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -260,7 +279,7 @@ def main(argv=None, environ=None) -> int:
     from scripts.swarm_ledger.storage import read_ledger
 
     hosted = ledger_link.remote(env)
-    keys = ("tasks", "phases", "artifacts")
+    keys = ("tasks", "phases", "artifacts", "plans")
     doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")

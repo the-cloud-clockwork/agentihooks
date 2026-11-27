@@ -351,6 +351,10 @@ the session unread. SessionStart with `source=compact` clears only that session'
 marker. The pre condition exits in Bash before starting Python for standalone
 sessions and for sessions whose marker already exists.
 
+SessionStart also caches resolved seat membership under
+`first-read/.members/<session-id>`, so a swarm identity supplied by the session
+registry follows the same fast path as one supplied by environment variables.
+
 Use the existing gate controls to select `first-read-gate=off` on a swarm.
 `AGENTIHOOKS_GATE_FIRST_READ=off` selects off when the swarm configuration does
 not supply a mode. Changing the default to enforce is a separate rollout after

@@ -1,0 +1,17 @@
+{
+  "id": "herdr-enabled-when-installed",
+  "origin": "inventory",
+  "behaviour": "herdr is enabled whenever its binary is on the machine, on PATH or in ~/.local/bin: init configures it and init-agent opens agents in it whatever was answered or recorded before, the recorded choice only decides whether a missing herdr gets installed, and herdr cannot be disabled while installed.",
+  "seam": "scripts.herdr_host binary, scripts.herdr_setup binary, init_step, status and main, scripts.init_agent _select_host",
+  "tests": [
+    "tests/test_herdr_setup.py::test_an_installed_herdr_is_configured_whatever_was_answered",
+    "tests/test_herdr_setup.py::test_status_reports_herdr_enabled_while_it_is_installed",
+    "tests/test_herdr_setup.py::test_every_herdr_action_still_runs",
+    "tests/test_herdr_setup.py::test_an_installed_herdr_cannot_be_disabled",
+    "tests/test_herdr_setup.py::test_setup_finds_herdr_where_the_terminal_host_does",
+    "tests/test_herdr_host.py::test_herdr_is_found_in_the_local_bin_its_installer_uses",
+    "tests/test_herdr_host.py::test_herdr_on_path_comes_before_the_local_bin",
+    "tests/test_herdr_host.py::test_no_herdr_anywhere_is_none",
+    "tests/test_herdr_host.py::test_host_selection"
+  ]
+}

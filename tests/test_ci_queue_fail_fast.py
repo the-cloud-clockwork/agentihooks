@@ -165,6 +165,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
         "coverage-baseline",
         "coverage-ratchet",
         "dep-manifest",
+        "sonar-after-unit",
         "stage-budget",
         "kind-due",
         "worker-image",
@@ -176,6 +177,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
         "hierarchy-cpu",
         "tick-scale",
         "tick-pattern-tree",
+        "type-gate-tree",
         "launch-hotfix",
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():

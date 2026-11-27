@@ -191,6 +191,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_input_key.py",
         "scripts/ci_lab/__main__.py",
         "scripts/ci_lab/scheduler.py",
+        "scripts/ci_lab_smoke.py",
         "scripts/ci_lab_verdict.py",
         "scripts/ci_launch_hotfix.py",
         "scripts/ci_marker_vectors.py",
@@ -320,6 +321,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
+        "scripts/ci_lab/discovery_parity.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))

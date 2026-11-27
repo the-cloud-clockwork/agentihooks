@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -492,15 +493,21 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
 def test_a_codex_planner_starts_with_a_read_only_repo_and_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts.hive import daemon
+
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setenv("LEDGER_DIR", "/l")
     monkeypatch.setenv("AGENTIHOOKS_HOME", "/state")
+    monkeypatch.delenv("WORKTREE_ROOT", raising=False)
+    monkeypatch.setattr(daemon, "local_checkout", lambda repo: "/hive/dev/repo")
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
     passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
     assert passed[-4:] == [
         "-c",
         'permissions.planner={extends=":read-only", network={enabled=true}, '
         'filesystem={"/l"="write", "/h/.agentihooks/swarm"="write", "/h/scratchpad"="write", '
-        '"/state/ledger-exports"="write"}}',
+        '"/state/ledger-exports"="write", "/hive/dev/repo/.git"="write", "/h/dev/worktrees"="write", '
+        '"/t"="write"}}',
         "-c",
         'default_permissions="planner"',
     ]
@@ -510,7 +517,7 @@ def _grants(ledger: str, home: str, exports: str) -> str:
     return (
         'permissions.planner={extends=":read-only", network={enabled=true}, '
         f'filesystem={{"{ledger}"="write", "{home}/.agentihooks/swarm"="write", "{home}/scratchpad"="write", '
-        f'"{exports}"="write"}}}}'
+        f'"{exports}"="write", "/repo/.git"="write", "{home}/dev/worktrees"="write", "/t"="write"}}}}'
     )
 
 
@@ -528,7 +535,8 @@ def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(
 ) -> None:
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setattr(Path, "home", lambda: Path("/p"))
-    assert codex_plan_mode(environ) == [
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
+    assert codex_plan_mode(environ, "/repo") == [
         "-c",
         _grants(ledger, home, "/p/.agentihooks/ledger-exports"),
         "-c",
@@ -538,7 +546,8 @@ def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(
 
 def test_a_codex_planner_quotes_each_granted_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: Path("/p"))
-    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants(
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
+    assert codex_plan_mode({"HOME": '/q"x'}, "/repo")[1] == _grants(
         r"/q\"x/development-ledger", r"/q\"x", "/p/.agentihooks/ledger-exports"
     )
 
@@ -787,6 +796,83 @@ def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
     runtime.resume(config, replace(agent, account=""), "you were restored")
     assert "--route" not in _passed(seen["runs"][0])
+
+
+SHELL = {"name": "bash", "argv": ["bash"]}
+CLAUDE = {"name": "claude", "argv": ["claude", "--resume", "c0ffee"]}
+
+
+def _restored_pane(runtime, session, processes, fails=False):
+    from scripts.herdr_host import HerdrError
+
+    listed = runtime.herdr
+    asked = []
+
+    def herdr(args):
+        if args[0] == "pane":
+            asked.append(args)
+            if fails:
+                raise HerdrError("herdr pane get: no such pane")
+            if args[1] == "get":
+                return {"pane": {"pane_id": args[2], "agent_session": session}}
+            return {"process_info": {"foreground_processes": processes}}
+        return listed(args)
+
+    runtime.herdr = herdr
+    return asked
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_resume_reopens_the_agent_in_the_pane_herdr_restored_for_it(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    asked = _restored_pane(runtime, {"kind": "id", "value": "c0ffee"}, [SHELL])
+    placed = runtime.resume(config, replace(agent, pane_id="w2:p9"), "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--pane") + 1] == "w2:p9"
+    assert argv.index("--pane") < argv.index("--")
+    assert asked == [["pane", "get", "w2:p9"], ["pane", "process-info", "--pane", "w2:p9"]]
+    assert placed.pane_id == "w2:p9"
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+@pytest.mark.parametrize(
+    ("session", "processes", "fails"),
+    [
+        ({"kind": "id", "value": "someone-else"}, [SHELL], False),
+        ({"kind": "id", "value": "c0ffee"}, [CLAUDE], False),
+        ({"kind": "id", "value": "c0ffee"}, [SHELL, CLAUDE], False),
+        ({"kind": "id", "value": "c0ffee"}, [], False),
+        (None, [SHELL], False),
+        ({"kind": "id", "value": "c0ffee"}, [SHELL], True),
+    ],
+)
+def test_resume_opens_a_new_pane_unless_its_own_waits_as_a_bare_shell(tmp_path, session, processes, fails):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    _restored_pane(runtime, session, processes, fails)
+    runtime.resume(config, replace(agent, pane_id="w2:p9"), "you were restored")
+    assert "--pane" not in seen["runs"][0]
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_an_agent_without_a_recorded_pane_never_asks_herdr_about_one(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    asked = _restored_pane(runtime, {"kind": "id", "value": "c0ffee"}, [SHELL])
+    runtime.resume(config, agent, "you were restored")
+    assert asked == [] and "--pane" not in seen["runs"][0]
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_an_agent_without_a_conversation_never_takes_a_pane_without_one(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "")
+    asked = _restored_pane(runtime, None, [SHELL])
+    runtime.resume(config, replace(agent, pane_id="w2:p9", conversation_id=""), "you were restored")
+    assert asked == [] and "--pane" not in seen["runs"][0]
 
 
 def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path, scratch):

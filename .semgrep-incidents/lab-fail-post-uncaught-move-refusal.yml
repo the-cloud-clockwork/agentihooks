@@ -1,0 +1,24 @@
+rules:
+  - id: lab-fail-post-uncaught-move-refusal
+    languages: [python]
+    severity: ERROR
+    message: >-
+      `_fail` posts a completed required check run with no handler for a check run already completed. When the lab
+      scheduler's release step refuses or retires the same head from two waiting entries in one pass, the second
+      post raises MoveRefused, which escapes `_release` and ends the scheduler process. On 26 November the
+      scheduler crashed six times in twenty minutes this way while no grade advanced. Catch MoveRefused around
+      `_fail`'s post, record it as an action of the pass and let the pass go on.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-fail-post-uncaught-move-refusal.py
+    patterns:
+      - pattern-inside: |
+          def _fail(...):
+              ...
+      - pattern: $POSTER.post($HEAD, $CHECK, "completed", $CONCLUSION, $OUTPUT, $SHADOW)
+      - pattern-not-inside: |
+          try:
+              ...
+          except MoveRefused:
+              ...

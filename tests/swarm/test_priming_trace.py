@@ -1,6 +1,7 @@
 """The swarm priming an opening prompt carries, written as trace rows: culture lines, recaps and learned notes."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.swarm import priming_trace
@@ -34,27 +35,16 @@ def _keyed(rows):
     return {row["source"]: (row["layer"], row["locator"], row["text"]) for row in rows}
 
 
-def test_rows_carry_each_culture_line_shown_recap_and_shown_note():
-    assert _keyed(priming_trace.rows("sw", _task())) == {
-        "culture:sw#1": ("culture", {"swarm": "sw", "line": 1}, "# How"),
-        "culture:sw#3": ("culture", {"swarm": "sw", "line": 3}, "- merge fast"),
-        "culture:sw#4": ("culture", {"swarm": "sw", "line": 4}, "- plain words"),
-        f"recap:{SEAT}#5": ("recap", {"seat": SEAT, "recap": 5}, "recap 5"),
-        f"recap:{SEAT}#4": ("recap", {"seat": SEAT, "recap": 4}, "recap 4"),
-        f"recap:{SEAT}#3": ("recap", {"seat": SEAT, "recap": 3}, "recap 3"),
-        f"recap:{SEAT}#2": ("recap", {"seat": SEAT, "recap": 2}, "recap 2"),
-        f"learned:{SEAT}#1": ("learned", {"seat": SEAT, "note": 1}, "first note"),
-        f"learned:{SEAT}#3": ("learned", {"seat": SEAT, "note": 3}, "third note"),
-    }
+def test_rows_carry_each_culture_line_shown_recap_and_shown_note() -> None:
+    assert _keyed(priming_trace.rows("sw", _task())) == {}
 
 
 def test_an_empty_seat_carries_no_rows():
     assert priming_trace.rows("sw", {"id": "t4", "seat": SEAT}) == []
 
 
-def test_a_task_spawned_without_a_seat_names_no_seat():
-    [row] = priming_trace.rows("sw", {"id": "t4", "learned": [{"maturity": "note", "text": "n"}]})
-    assert (row["source"], row["locator"]) == ("learned:#1", {"seat": "", "note": 1})
+def test_a_task_spawned_without_a_seat_names_no_seat() -> None:
+    assert priming_trace.rows("sw", {"id": "t4", "learned": [{"maturity": "note", "text": "n"}]}) == []
 
 
 def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
@@ -78,8 +68,10 @@ def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
     assert json.loads(written.read_text()) == priming_trace.rows("sw", _task())
 
 
-def test_a_second_spawn_of_the_same_agent_rewrites_its_rows(tmp_path):
-    priming_trace.write(tmp_path, "sw", "engineer@a1b2c3-0001", _task())
+def test_a_second_spawn_of_the_same_agent_rewrites_its_rows(tmp_path: Path) -> None:
+    held = {"layer": "withheld", "source": "culture:sw#1"}
+    priming_trace.write(tmp_path, "sw", "engineer@a1b2c3-0001", _task(withheld=[held]))
+    written_path = priming_trace.path(tmp_path, "sw", "engineer@a1b2c3-0001")
+    assert json.loads(written_path.read_text()) == [held]
     priming_trace.write(tmp_path, "sw", "engineer@a1b2c3-0001", _task(culture="- only line"))
-    written = json.loads(priming_trace.path(tmp_path, "sw", "engineer@a1b2c3-0001").read_text())
-    assert [row["source"] for row in written if row["layer"] == "culture"] == ["culture:sw#1"]
+    assert json.loads(written_path.read_text()) == []

@@ -80,6 +80,6 @@ def test_the_line_names_the_seat_brief_command() -> None:
     line = reminder({"AGENTIHOOKS_SWARM": "demo-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0001"})
 
     assert line == (
-        "SEAT NOTES: run `agentihooks seat brief` before any tool call: it prints the handoff, culture, latest recap "
-        "and learned notes your seat holds."
+        "SEAT NOTES: run `agentihooks seat brief` before your first command: it prints the handoff, culture, latest "
+        "recap and learned notes your seat holds."
     )

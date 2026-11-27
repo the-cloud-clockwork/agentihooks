@@ -1,0 +1,15 @@
+rules:
+  - id: shard-verifier-full-jobs-page
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The unit shard verifier reads a run attempt's jobs 100 per page and retries that same page. On a rerun attempt
+      each listed job costs about 0.12 seconds, so on 27 November every 100 job page of Tests run 45928450389
+      attempts two and three answered HTTP 502 after about eleven seconds, all eight tries failed and the shard check
+      went red with every unit shard green. Read attempt jobs through scripts.ci_budget.jobs.read_jobs at a page of
+      ten, which halves the page on a server error or timeout.
+    paths:
+      include:
+        - /scripts/ci_gate_shards.py
+        - '**/shard-verifier-full-jobs-page.py'
+    pattern-regex: '/attempts/[^/\s"'']+/jobs\?(?:[^"''\s]*&)?per_page=100(?!\d)'

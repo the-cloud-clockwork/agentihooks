@@ -1,0 +1,24 @@
+rules:
+  - id: platform-chosen-at-import
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hook module that picks its behaviour from sys.platform at import keeps the platform of its first import, so a
+      test that patches the platform to win32 before that import leaves the choice wrong for the rest of the worker.
+      The swarm gates froze empty that way and the replaced claimant test failed at random in the merge queue. Read
+      sys.platform inside the function that acts on it.
+    paths:
+      include:
+        - /hooks/
+        - platform-chosen-at-import.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: $NAME = $VALUE
+          - pattern-inside: "$NAME: $TYPE = $VALUE"
+      - pattern-not-inside: |
+          def $FUNC(...):
+              ...
+      - pattern-not-inside: |
+          async def $FUNC(...):
+              ...
+      - pattern: sys.platform

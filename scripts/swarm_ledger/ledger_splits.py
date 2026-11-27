@@ -1,5 +1,8 @@
+from typing import Any
+
 from scripts.swarm_ledger import ledger_kinds, ports
 from scripts.swarm_ledger.ledger_groups import AUTHOR_RE, ITEM_RE, REFUSED_LANES
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("task_split",)
 MIN_HALVES, MAX_HALVES = 2, 4
@@ -61,7 +64,7 @@ def _covers(whole, ranges):
     return all(before == after for before, after in zip(edges[::2], edges[1::2]))
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     lane_of = ports.swarm().naming.lane_of
 
     if lane_of(op["by"]) in REFUSED_LANES:

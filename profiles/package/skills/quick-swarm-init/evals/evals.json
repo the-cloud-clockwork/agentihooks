@@ -14,5 +14,32 @@
   {
     "query": "master types a message into an engineer's pane",
     "expected_behavior": "Reads the pane back and confirms the seat started working on the message or queued it, instead of assuming delivery; if the text still sits unsent presses Enter again and rechecks, and if it still cannot confirm delivery reports NOT SENT and sends the message through the room with agentihooks quick send <seat> \"<text>\"."
+  },
+  {
+    "query": "start a quick swarm with Claude and Codex engineers using default authentication outside quota tiers",
+    "files": [],
+    "expected_behavior": [
+      "Runs quick up with three agents, claude,codex harnesses and --auth default.",
+      "Keeps the current master login and global credentials unchanged.",
+      "Reads status to verify both engineers saved default mode."
+    ]
+  },
+  {
+    "query": "start a quick swarm with Claude on named alpha and Codex on named beta",
+    "files": [],
+    "expected_behavior": [
+      "Uses three agents, claude,codex harnesses and --auth named:alpha,named:beta.",
+      "Passes names or environment variable references only.",
+      "Reports a missing reference refusal and never silently falls back to routed authentication."
+    ]
+  },
+  {
+    "query": "start three Codex engineers with no authentication preference",
+    "files": [],
+    "expected_behavior": [
+      "Uses --agents 4 because the count includes the current master.",
+      "Uses --harness codex and retains routed authentication.",
+      "Reads status to verify three Codex engineers and the current master."
+    ]
   }
 ]

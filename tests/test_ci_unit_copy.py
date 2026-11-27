@@ -4,6 +4,7 @@ import hashlib
 import http.client
 import io
 import json
+import shlex
 import threading
 import urllib.error
 import urllib.request
@@ -15,8 +16,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
+from coverage import CoverageData
 
-from scripts import ci_unit_copy
+from scripts import ci_unit_copy, coverage_check
+from tests import coverage_summary
 
 pytestmark = pytest.mark.unit
 
@@ -61,6 +65,20 @@ def _files(folder: Path) -> dict[str, str]:
     }
 
 
+def _inode(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino
+
+
+def _stamps(*folders: Path) -> dict[Path, tuple[str, int]]:
+    return {
+        path: (hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns)
+        for folder in folders
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+    }
+
+
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto(tmp_path: Path) -> None:
     queue = _queue(tmp_path, 16, reused=True)
@@ -101,6 +119,77 @@ def test_a_missing_queue_leg_stops_the_layout(tmp_path: Path) -> None:
     (queue / "coverage-3.12-2").rmdir()
     with pytest.raises(FileNotFoundError):
         ci_unit_copy.layout(queue, _mapped(3), tmp_path / "out")
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_push_leg_coverage_shares_the_queue_leg_file(tmp_path: Path) -> None:
+    queue = _queue(tmp_path, 16, reused=True)
+    out = tmp_path / "out"
+    legs = _mapped(16)
+    ci_unit_copy.layout(queue, legs, out)
+    for leg in range(1, 21):
+        source = queue / f"coverage-3.12-{legs[str(leg)]}"
+        pushed = out / f"coverage-3.12-{leg}"
+        assert _files(pushed).keys() == _files(source).keys()
+        assert all((pushed / name).samefile(source / name) for name in _files(source))
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_the_layout_adds_no_coverage_bytes(tmp_path: Path) -> None:
+    queue = _queue(tmp_path, 16, reused=True)
+    restored = {_inode(path) for path in queue.rglob("*") if path.is_file()}
+    out = tmp_path / "out"
+    ci_unit_copy.layout(queue, _mapped(16), out)
+    written = {
+        path.relative_to(out).parts[0] for path in out.rglob("*") if path.is_file() and _inode(path) not in restored
+    }
+    assert written == {f"{kind}-3.12-{leg}" for kind in ("durations", "flakes") for leg in range(1, 21)}
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_rewritten_duplicate_leg_durations_leaves_the_queue_leg_unchanged(tmp_path: Path) -> None:
+    queue = _queue(tmp_path, 4)
+    restored = _files(queue)
+    out = tmp_path / "out"
+    ci_unit_copy.layout(queue, _mapped(4), out)
+    assert _files(out / "durations-3.12-5") == {"durations.json": "{}\n", "durations.sha256": "sha 1\n"}
+    assert _files(queue) == restored
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_layout_queue_and_out_share_the_runner_temp_file_system() -> None:
+    workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
+    steps = workflow["jobs"]["unit"]["steps"]
+    restored = {step["with"]["path"] for step in steps if "queue-legs" in str(step.get("with", {}).get("path"))}
+    laid = shlex.split(
+        next(step["run"] for step in steps if step.get("name") == "Lay out every push leg from its queue leg")
+    )
+    assert restored == {"${{ runner.temp }}/queue-legs"}
+    assert laid[laid.index("--queue") + 1] == "$RUNNER_TEMP/queue-legs"
+    assert laid[laid.index("--out") + 1] == "$RUNNER_TEMP/push-legs"
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_the_summary_readers_leave_the_shared_coverage_database_unchanged(tmp_path: Path) -> None:
+    queue = _queue(tmp_path, 4)
+    database = queue / "coverage-3.12-1" / ".coverage"
+    database.unlink()
+    data = CoverageData(basename=str(database))
+    data.add_arcs(
+        {"scripts/ci_unit_copy.py": {(-1, 1), (1, 2), (2, -1)}, "tests/test_ci_unit_copy.py": {(-1, 1), (1, -1)}}
+    )
+    data.write()
+    data.close()
+    out = tmp_path / "out"
+    ci_unit_copy.layout(queue, _mapped(4), out)
+    stamped = _stamps(queue, out)
+    shared = [out / f"coverage-3.12-{leg}" / ".coverage" for leg in (1, 17)]
+    assert all(path.samefile(database) for path in shared)
+    assert [coverage_check.problem(path) for path in shared] == [None, None]
+    summary = tmp_path / "executed-lines.json"
+    coverage_summary.write(shared, summary)
+    assert json.loads(summary.read_text()) == {str(path): {"scripts/ci_unit_copy.py": [1, 2]} for path in shared}
+    assert _stamps(queue, out) == stamped
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")

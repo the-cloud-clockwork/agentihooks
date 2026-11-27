@@ -21,7 +21,9 @@ class LoginError(RuntimeError):
     pass
 
 
-def check(environ: Mapping[str, str], account: str, run: Callable = subprocess.run) -> dict:
+def check(
+    environ: Mapping[str, str], account: str, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+) -> dict[str, object]:
     try:
         status = run(
             [shutil.which("claude") or "claude", *COMMAND],

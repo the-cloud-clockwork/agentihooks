@@ -1,0 +1,17 @@
+rules:
+  - id: review-kind-launch-steps
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The launch prompt step table has no review entry. Every review lane task carries the review kind, and
+      prompt.kind_steps() indexes STEPS by kind, so prompt.build raises KeyError review and no reviewer seat ever
+      launches. Keep "review": review_steps in STEPS.
+    paths:
+      include:
+        - /scripts/swarm/prompt.py
+        - review-kind-launch-steps.py
+    patterns:
+      - pattern: |
+          STEPS = {...}
+      - pattern-not: |
+          STEPS = {..., "review": $STEP, ...}

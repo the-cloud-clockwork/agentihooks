@@ -31,7 +31,7 @@ def offered(key: str, generation: int, lane: str = "eng") -> Envelope:
         version=generation,
         time=1,
         author=readiness.AUTHOR,
-        data={"lane": lane, "generation": generation},
+        data={"lane": lane, "generation": generation, "quota": {}},
     )
 
 

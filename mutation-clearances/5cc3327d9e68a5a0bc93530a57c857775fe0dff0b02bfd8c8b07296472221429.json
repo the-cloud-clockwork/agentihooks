@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x\u01c1Scheduler\u01c1_advance:2b99669279a570b6299da3146e95c3171ae50028e8e25c9b6ff45b74d4189d57": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: _hold creates repo|lane|tier; _release preserves keys. Neither \"\" nor \"XXXX\" matches valid waiting entries."
+  }
+}

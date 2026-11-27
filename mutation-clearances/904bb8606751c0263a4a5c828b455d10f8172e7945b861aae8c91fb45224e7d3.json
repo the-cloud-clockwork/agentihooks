@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.xǁQueueǁdrain:0437fdb0991c6357fa81f8200b386c92c09a4c9fca93a48067cd525db1bb46e0": {
+    "reader": "standards_reader",
+    "reason": "transaction=None is falsy like False, so redis-py sends no MULTI and the same HGET commands run in the same order with the same replies."
+  }
+}

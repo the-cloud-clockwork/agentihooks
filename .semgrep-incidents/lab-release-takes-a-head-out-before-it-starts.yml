@@ -1,0 +1,22 @@
+rules:
+  - id: lab-release-takes-a-head-out-before-it-starts
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler release loop deletes a waiting head's field from the waiting hash before it starts the
+      head. A process stopped or killed while the start checks or expands the head then leaves that head in no
+      hash: it never gets a grade or a check run and nothing reports it. Keep the field until the start cannot be
+      repeated, and delete it inside the start itself, never in the release loop before calling it.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-release-takes-a-head-out-before-it-starts.py
+    patterns:
+      - pattern-inside: |
+          for $ENTRY in $WAITING:
+              ...
+      - pattern: $CLIENT.hdel($HASH, $NAME)
+      - pattern-inside: |
+          $CLIENT.hdel($HASH, $NAME)
+          ...
+          $SCHEDULER._start(...)

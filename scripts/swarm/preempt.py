@@ -19,7 +19,9 @@ WAITING = "preempt-waiting"
 ASKED = "preempt-asked"
 VICTIMS = "preempt-victims"
 EPISODE = "preempt-episode"
+RECENT = "preempt-recent-victim"
 ANSWER_MS = 10 * 60_000
+VICTIM_MS = 30 * 60_000
 URGENT = "urgent"
 YIELDED = 0.5
 TEXT = (
@@ -132,12 +134,18 @@ def step(
                 continue
             if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
-            victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
+            victim = _victim(
+                [a for a in holders if a.name not in asked and not _recent_victim(slug, store, a.task, now_ms)],
+                rows,
+                doc,
+                graph,
+            )
             if victim is not None and not probe(lane, task):
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
                 redis.set(store.key(slug, EPISODE, task["id"]), now_ms, px=ANSWER_MS)
+                redis.set(store.key(slug, RECENT, victim.task), now_ms, px=VICTIM_MS)
                 actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"], now_ms)
     redis.delete(store.key(slug, WAITING))
     if waiting:
@@ -163,6 +171,11 @@ def _refused(wait, lane, now_ms):
 
 def take_victim(store, slug: str, name: str) -> bool:
     return bool(store.redis.hdel(store.key(slug, VICTIMS), name))
+
+
+def _recent_victim(slug: str, store: RedisStore, task: str, now_ms: int) -> bool:
+    at = store.redis.get(store.key(slug, RECENT, task))
+    return at is not None and now_ms - int(at) < VICTIM_MS
 
 
 def _victim(holders, rows, doc, graph):

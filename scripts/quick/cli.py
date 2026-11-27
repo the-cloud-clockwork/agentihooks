@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts.quick import guard, handoff, launch, layout, member, paths, registry, room, tick
+from scripts.quick import guard, handoff, launch, layout, member, paths, recipe, registry, room, tick
 from scripts.quick.guard import QuickError
 from scripts.swarm import safety_nudge
 
@@ -27,7 +27,21 @@ def parser() -> argparse.ArgumentParser:
     sub = root.add_subparsers(dest="command", required=True)
     up = sub.add_parser("up", help="Split this herdr pane's tab and launch the engineers; this session is master")
     up.add_argument("--agents", type=int, default=layout.DEFAULT_AGENTS, help="Agents with the master, 2 to 5")
-    up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex")
+    up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex,program")
+    up.add_argument(
+        "--command",
+        dest="command_argv",
+        default="",
+        help="JSON argument list every engineer runs instead of its built in launch",
+    )
+    up.add_argument(
+        "--engineer-command",
+        action="append",
+        help="N=JSON argument list engineer N runs instead of the common command",
+    )
+    up.add_argument(
+        "--auth", default="routed", help="routed, default or named:reference; one choice or one per engineer"
+    )
     up.add_argument("--dir", default="", help="Directory the engineers work in; default the current one")
     sub.add_parser("status", help="Print every seat of this session's quick swarm")
     given = sub.add_parser("handoff", help="Accept this seat's Handoff v2 and start its successor in this pane")
@@ -63,22 +77,39 @@ def _harnesses(value: str, engineers: int) -> list[str]:
 def _swarm_for(
     args: argparse.Namespace, environ: dict[str, str], caller: str, quick_id: str, directory: Path
 ) -> registry.Swarm:
+    from scripts.quick.authentication import selections
+
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
+    policies = selections(args.auth, harnesses, environ)
+    commands = recipe.recipes(
+        args.command_argv, args.engineer_command or [], harnesses, {**environ, "PWD": str(directory)}
+    )
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
     master = registry.Seat(1, names[0], caller, harness, f"{quick_id}-{names[0]}", session_id=session)
     engineers = [
-        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}")
-        for position, (name, pane, harness) in enumerate(zip(names[1:], panes[1:], harnesses, strict=True), 2)
+        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}", auth=mode, account=account, command=command)
+        for position, (name, pane, harness, (mode, account), command) in enumerate(
+            zip(names[1:], panes[1:], harnesses, policies, commands, strict=True), 2
+        )
     ]
     return registry.Swarm(quick_id, str(directory), (master, *engineers))
+
+
+def _launch_registry(folder: Path) -> registry.Swarm:
+    saved = registry.load(folder)
+    if saved is None:
+        raise QuickError("quick swarm registry disappeared during startup")
+    return saved
 
 
 def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     caller = guard.require(environ)
     directory = Path(args.dir or os.getcwd()).resolve()
+    if not directory.is_dir():
+        raise QuickError("the requested engineer directory is unavailable")
     quick_id = paths.quick_id(environ)
     folder = paths.folder_for(environ, quick_id, directory)
     with paths.host_locked(environ):
@@ -94,12 +125,13 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
         paths.register(environ, quick_id, folder)
     started = launch.start_all(folder, swarm, environ)
     exited = launch.exited(swarm.seats[1:], tick.LiveHerdr(environ).bare)
-    failed = sorted({name for name, code in started.items() if code != 0} | set(exited))
+    pending = {seat.seat for seat in _launch_registry(folder).seats[1:] if seat.state == registry.PENDING}
+    failed = sorted({name for name, code in started.items() if code != 0} | set(exited) | pending)
     for name in failed:
         registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
-    for seat in swarm.seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+    for seat in _launch_registry(folder).seats:
+        print(json.dumps(_status_row(seat)))
     if failed:
         print(f"agentihooks quick: {', '.join(failed)} did not start; the next round retries it", file=sys.stderr)
     return 1 if failed else 0
@@ -112,9 +144,16 @@ def _member(environ: Mapping[str, str]) -> member.Member:
     return found
 
 
+def _status_row(seat: registry.Seat) -> dict[str, object]:
+    row: dict[str, object] = {key: value for key, value in dataclasses.asdict(seat).items() if key != "command"}
+    if seat.position > 1:
+        row["automatic_tiers"] = recipe.kind(seat) != recipe.PROGRAM and seat.auth == "routed"
+    return {**row, "identity": recipe.identity(seat), "capabilities": recipe.capabilities(seat)}
+
+
 def _status(environ: Mapping[str, str]) -> int:
     for seat in _member(environ).swarm.seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+        print(json.dumps(_status_row(seat)))
     return 0
 
 

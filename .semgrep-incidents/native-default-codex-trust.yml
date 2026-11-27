@@ -1,0 +1,19 @@
+rules:
+  - id: native-default-codex-trust
+    languages: [python]
+    severity: ERROR
+    message: Rebase Codex hook trust after copying configuration into the execution home.
+    paths:
+      include:
+        - /scripts/routing/native_default.py
+        - native-default-codex-trust.py
+    patterns:
+      - pattern: _configuration($SOURCE, $HOME)
+      - pattern-not-inside: |
+          def $PREPARE(...):
+              ...
+              _configuration($SOURCE, $HOME)
+              ...
+              if $AGENT == "codex":
+                  _codex_trust($SOURCE, $HOME)
+              ...

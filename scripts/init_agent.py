@@ -400,6 +400,10 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _auth_route(auth: str) -> str:
+    return "native-default" if auth == "default" else auth
+
+
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
@@ -426,7 +430,7 @@ def _app_server_command(
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *_codex_otel_args(environ),
         *_codex_trust_args(directory, environ),
         *_model_args("codex", agent_args, environ),
@@ -483,7 +487,7 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
-            *(["--route", spec.auth] if spec.auth else []),
+            *(["--route", _auth_route(spec.auth)] if spec.auth else []),
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
@@ -501,7 +505,7 @@ def _agent_command(
     command = [
         agentihooks_bin,
         "claude",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
         *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
         "--agentihooks-report",
@@ -891,6 +895,12 @@ def _transport(args: argparse.Namespace, agent: str) -> str:
     return APP_SERVER
 
 
+def _auth_value(value: str) -> str:
+    if value in ("", "interactive", "default") or (value.startswith("named:") and value != "named:"):
+        return value
+    raise argparse.ArgumentTypeError("authentication must be interactive, default or named:reference")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -955,7 +965,9 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
-    parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
+    parser.add_argument(
+        "--auth", type=_auth_value, default="", help="interactive, default or named:reference authentication"
+    )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
@@ -981,22 +993,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _herdr_enabled(environ: dict[str, str]) -> bool:
-    home = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
-    try:
-        state = json.loads((home / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True
-    herdr = state.get("herdr") if isinstance(state, dict) else None
-    return not (isinstance(herdr, dict) and herdr.get("enabled") is False)
-
-
 def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
-    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed and enabled."""
+    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed."""
     choice = requested or environ.get("AGENTIHOOKS_TERMINAL_HOST", "")
     if choice:
         return choice, True
-    return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
+    return ("herdr" if herdr_host.binary() else "native"), False
 
 
 def _start_herdr(
@@ -1145,11 +1147,17 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
 
     if args.auth and native("sign-ins", "init-agent-auth", environ):
         raise ValueError("explicit authentication refused by the sign ins gate")
+    if args.auth and args.auth != "interactive" and args.routed_only:
+        raise ValueError("explicit authentication cannot combine with --routed-only")
+    if args.auth and args.auth != "interactive":
+        from scripts.quick.authentication import selections
+
+        mode, account = selections(args.auth, [args.agent or "claude"], environ)[0]
+        args.auth = mode if mode == "default" else f"named:{account}"
 
 
 def _routed_only(args: argparse.Namespace) -> bool:
-    """A handoff must land on another account and a --routed-only launch on a routed one; neither starts bare."""
-    return bool(args.handoff or args.routed_only)
+    return bool(args.handoff or args.routed_only or (args.auth and args.auth != "interactive"))
 
 
 def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str] | None:
@@ -1187,9 +1195,7 @@ def main(
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
             else (
-                (args.agent or "claude", "interactive")
-                if args.auth
-                else agent_choice.choose(rotation_default, active_env)
+                (args.agent or "claude", args.auth) if args.auth else agent_choice.choose(rotation_default, active_env)
             )
         )
         agent = agent or "claude"

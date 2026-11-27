@@ -1,9 +1,12 @@
+import argparse
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.doctor import traces
 from scripts.swarm import cli, idle, waits
+from scripts.swarm.store import RedisStore
 
 
 def record(held, start=60_000, end=12_540_000):
@@ -23,7 +26,7 @@ def record(held, start=60_000, end=12_540_000):
     }
 
 
-def test_dependency_block_and_wake_cover_the_wait_between_turns(monkeypatch):
+def test_dependency_block_and_wake_cover_the_wait_between_turns(monkeypatch: pytest.MonkeyPatch) -> None:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -34,7 +37,7 @@ def test_dependency_block_and_wake_cover_the_wait_between_turns(monkeypatch):
     monkeypatch.setattr(cli, "_worker", lambda store, args: agent)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "now_ms", lambda: 60_001)
-    cli.cmd_block(store, SimpleNamespace(slug="sw", note="waiting for dependency"))
+    cli.cmd_block(cast(RedisStore, store), argparse.Namespace(slug="sw", note="waiting for dependency"))
     inbox = SimpleNamespace(send=lambda *args: None)
     waits.end_pass(store, "sw", {"dep": {"state": "done"}}, inbox, None, 12_539_000, None)
 

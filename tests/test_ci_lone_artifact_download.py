@@ -31,6 +31,7 @@ UNAFFECTED = {
     ("workflows/test.yml", "unit", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
     ("workflows/test.yml", "unit-rerun", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
     REUSED_PLAN,
+    ("workflows/test.yml", "sonar-after-unit", "{reused-branch,reused}-3.12"),
     ("workflows/test.yml", "dep-manifest", "coverage-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "executed-lines-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "coverage-3.12-*"),
@@ -163,6 +164,20 @@ def test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran(
     monkeypatch.chdir(tmp_path)
     assert merge.main(command[3:]) == 0
     assert f"Merged {count} of {count} mutation shard reports" in capsys.readouterr().out
+
+
+@pytest.mark.feature("mutation-merge-defaults-to-the-prefix-the-tests-workflow-passes")
+def test_the_mutation_merge_defaults_to_the_prefix_the_tests_workflow_passes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    command = shlex.split(_steps(MUTATION[0], MUTATION[1])["Merge the shard reports"]["run"])
+    assert command[:3] == ["python", "-m", "scripts.ci_mutation.merge"]
+    prefix = command[command.index("--prefix") + 1]
+    report = tmp_path / f"{prefix}0" / "report.json"
+    report.parent.mkdir()
+    report.write_text(json.dumps({**GREEN, "shard": {"index": 0, "expected": 0, "graded": 0}}))
+    argv = [str(tmp_path), "--shards", "1", "--output", str(tmp_path / "gate")]
+    assert merge.main(argv) == 0, capsys.readouterr().out
 
 
 @pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")

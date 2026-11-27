@@ -43,6 +43,41 @@ def test_update_changes_one_seat_and_keeps_the_rest(tmp_path):
     assert registry.set_state(tmp_path, "eng-9", registry.PENDING) is None
 
 
+@pytest.mark.feature("quick-native-authentication")
+def test_legacy_registry_and_saved_authentication_survive_state_changes(tmp_path: Path) -> None:
+    import dataclasses
+    import json
+
+    original = _swarm(tmp_path)
+    legacy = dataclasses.asdict(original)
+    for row in legacy["seats"]:
+        row.pop("auth")
+        row.pop("account")
+    registry.path(tmp_path).write_text(json.dumps(legacy))
+    loaded = registry.load(tmp_path)
+    assert loaded == original
+    assert loaded is not None
+    assert [(row["auth"], row["account"]) for row in map(dataclasses.asdict, loaded.seats)] == [
+        ("routed", ""),
+        ("routed", ""),
+        ("routed", ""),
+    ]
+    legacy["seats"][1].update(auth="named", account="alpha")
+    registry.path(tmp_path).write_text(json.dumps(legacy))
+    saved = registry.load(tmp_path)
+    assert saved is not None
+    expected = saved.seats[1]
+    assert registry.set_state(tmp_path, "eng-1", registry.PENDING) == dataclasses.replace(
+        expected, state=registry.PENDING
+    )
+    assert registry.take(tmp_path, "eng-1", registry.PENDING, registry.LAUNCHING) == dataclasses.replace(
+        expected, state=registry.LAUNCHING
+    )
+    after = registry.load(tmp_path)
+    assert after is not None
+    assert after.seats[0] == saved.seats[0] and after.seats[2] == saved.seats[2]
+
+
 @pytest.mark.feature("quick-swarm")
 def test_a_pending_seat_is_taken_for_launch_only_once(tmp_path):
     _swarm(tmp_path)

@@ -1,6 +1,7 @@
 import fcntl
 import json
 import os
+from typing import Any
 
 import pytest
 
@@ -70,8 +71,12 @@ def answer(needed=0.95, covered=0.05):
     return decide
 
 
-def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence(world, monkeypatch):
+@pytest.mark.feature("documentation-session-skips-plan-sources")
+def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence(
+    world: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root, payload, ledger, jobs = world
+    ledger.source.update(lane="eng", kind="code")
     monkeypatch.setattr(documentation.runner, "decide", answer())
     unrelated(root)
     documentation_session.end(payload)
@@ -179,6 +184,27 @@ def test_documentation_tasks_do_not_generate_more_documentation_tasks(world, mon
     fn, args = jobs.pop()
     fn(*args)
     assert ledger.added == []
+
+
+@pytest.mark.feature("documentation-session-skips-plan-sources")
+@pytest.mark.parametrize(("lane", "kind"), [("plan", "code"), ("eng", "plan")])
+def test_plan_sources_finish_without_queuing_documentation(
+    world: Any, monkeypatch: pytest.MonkeyPatch, lane: str, kind: str
+) -> None:
+    _, payload, ledger, jobs = world
+    ledger.source.update(lane=lane, kind=kind)
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    records = list((documentation_session.HOME / "documentation").glob("*.json"))
+    assert len(records) == 1
+    row = json.loads(records[0].read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"]["needs_documentation"] is False
+    assert ledger.added == []
+    assert "documentation_task" not in row
+    assert "notice" not in row
 
 
 def test_classifier_children_schedule_no_documentation_work(world, monkeypatch):

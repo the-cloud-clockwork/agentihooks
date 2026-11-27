@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import redirect_stderr
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +21,7 @@ from scripts.gates import entry as gate_entry
 from scripts.swarm import continuation, git_https, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_ledger import ledger_workspace
 
 
 class PublicationRefusal(SwarmError):
@@ -284,8 +285,9 @@ def session_root(slug: str, cwd: Path) -> Path | None:
         return None
 
 
-def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
-    record, resolved = {}, []
+def task_worktrees(repo: str, task: dict[str, Any], agent: AgentRecord) -> Iterator[tuple[Path, dict[str, Any], Path]]:
+    """Yield each task repository found here with its scoped task and the worktree that holds the task's work."""
+    resolved: list[Path] = []
     for value in task.get("repositories") or []:
         try:
             resolved.append(local_repository(value, repo))
@@ -295,9 +297,63 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     for repository in dict.fromkeys(candidates):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
-        if root and stack.pushed(root, scoped["branch"]):
+        if root:
+            yield repository, scoped, root
+
+
+def pushed_branches(repo: str, task: dict[str, Any], agent: AgentRecord) -> dict[str, Any]:
+    record: dict[str, Any] = {}
+    for repository, scoped, root in task_worktrees(repo, task, agent):
+        if stack.pushed(root, scoped["branch"]):
             record = branch_record(checkout_fields(root), repository, {**task, **record})
     return record
+
+
+def block_branches(
+    repo: str, task: dict[str, Any], agent: AgentRecord, slug: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return the branch record block writes and the patches it saved: the pushed branches check, or, when it refuses,
+    each task worktree judged again against the swarm's panic."""
+    try:
+        return pushed_branches(repo, task, agent), []
+    except stack.Unpushed:
+        return held_branches(repo, task, agent, slug)
+
+
+def held_branches(
+    repo: str, task: dict[str, Any], agent: AgentRecord, slug: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Record each pushed task worktree and, once no unpushed worktree refuses as the pushed branches check does, save
+    each unpushed one whose push the swarm's panic holds as a patch in the task work folder."""
+    record: dict[str, Any] = {}
+    waiting: list[tuple[Path, Path, stack.Unpushed]] = []
+    for repository, scoped, root in task_worktrees(repo, task, agent):
+        try:
+            if stack.pushed(root, scoped["branch"]):
+                record = branch_record(checkout_fields(root), repository, {**task, **record})
+        except stack.Unpushed as unpushed:
+            if not blocker_window.held_push(str(root), unpushed.branch, slug):
+                raise
+            waiting.append((root, repository, unpushed))
+    folder = ledger_workspace.folder(slug, agent.task)
+    return record, [save_patch(root, repository, unpushed, folder) for root, repository, unpushed in waiting]
+
+
+def save_patch(root: Path, repository: Path, unpushed: stack.Unpushed, folder: Path) -> dict[str, Any]:
+    """Write the worktree's commits after the unpushed base as one patch file in folder and return its record."""
+    span = f"{unpushed.base}..HEAD"
+    text = execute(["git", "format-patch", "--stdout", span], root)
+    folder.mkdir(parents=True, exist_ok=True)
+    patch = folder / f"{repository.name}.patch"
+    patch.write_bytes(text.encode())
+    return {
+        "repository": str(repository),
+        "branch": unpushed.branch,
+        "head": git(root, "rev-parse", "HEAD"),
+        "base": unpushed.base,
+        "commits": int(git(root, "rev-list", "--count", span)),
+        "patch": str(patch),
+    }
 
 
 def merged_record(repo: Path, task: dict[str, str]) -> bool:

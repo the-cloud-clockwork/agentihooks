@@ -29,7 +29,11 @@ OPENING = (
     "You claim no ledger task and file no follow up. You complete every instruction of the mission: no exception, no "
     "workaround, no excuse. A problem you meet is solved at its root, inside the mission.\n"
 )
-NO_HISTORY = "Your seat expert-1@sw has no history yet: no handoff document, no recap and no learned notes.\n"
+NO_HISTORY = (
+    "Your seat expert-1@sw has no history yet: no handoff document, no recap and no learned notes.\n"
+    "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
+    "learned notes from the store that keeps them.\n"
+)
 LOOP = (
     "\n"
     "Your loop is the swarm-expert skill: every change goes through the dev cycle, a pull request is queued on green "
@@ -51,6 +55,7 @@ LOOP = (
     "Write messages in plain words: no ids, paths, hashes or dashes.\n"
 )
 COMMANDS = (
+    "agentihooks seat brief",
     f"{ME} expert mission",
     f"{ME} merge queue <url>",
     'agentihooks msg send master@sw "<plain words>"',
@@ -88,15 +93,14 @@ def test_a_successor_is_told_to_confirm_the_handoff_it_inherits_and_carries_it()
     assert built.endswith(LOOP)
     middle = built[len(OPENING) : -len(LOOP)]
     for carried in (
-        "Your seat expert-1@sw carries what earlier occupants left. Read it in this order:\n",
-        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
-        f"{ME} confirm-handoff 9f2c --next '1. Finish slice two.'\n{HANDOFF}",
-        "1. Handoff runtime envelope:\n" + json.dumps(ENVELOPE, indent=2) + "\n",
-        "Handoff document: continue from it:\n" + HANDOFF,
-        "Read first: Open each address in rank order and answer its question before reading older recaps.\n"
-        f"- {MISSION} the mission and its deliverables\n",
+        "Your seat expert-1@sw carries what earlier occupants left.\n",
+        "After reading the handoff in your seat brief, confirm you read it and will take its first Next action by running "
+        f"{ME} confirm-handoff 9f2c --next '1. Finish slice two.'",
+        "Handoff runtime envelope:\n" + json.dumps(ENVELOPE, indent=2) + "\n",
+        prompt.SEAT_BRIEF,
     ):
         assert carried in middle, carried
+    assert HANDOFF not in middle
     assert NO_HISTORY not in built
 
 

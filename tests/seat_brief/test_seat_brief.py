@@ -3,12 +3,12 @@
 from dataclasses import replace
 from pathlib import Path
 
-import fakeredis
 import pytest
 
 import scripts.seat_brief as seat_brief
 from hooks.context import injection_trace
 from scripts import cli_delegates
+from scripts.handoff import transfers
 from scripts.quick import member, paths, registry, seeds
 from scripts.seat_brief import sources
 from scripts.swarm import prompt
@@ -52,6 +52,8 @@ def plain_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     found.put_agent("sw", AgentRecord(NAME, "eng", "t1", seat=SEAT))
     monkeypatch.setattr(sources, "connect", lambda: found)
@@ -129,6 +131,22 @@ def test_a_corrected_learned_note_stays_withheld_from_the_brief(
 
 
 @pytest.mark.feature("seat-brief")
+def test_a_corrected_culture_line_stays_withheld_by_its_swarm_source(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store.culture.set("sw", "# How\n- Push straight to dev because review is slow\n- plain words\n")
+    source = "culture:sw#2"
+    injection_trace.record("sess-culture", "culture", source, "an older wording", {"swarm": "sw", "line": 2})
+    injection_trace.correct("sess-culture", source, "/repos/agentihooks", "dev is protected")
+
+    assert seat_brief.main(["brief"], SEATED) == 0
+
+    culture = _part(capsys.readouterr().out, "Culture")
+    assert "Push straight to dev" not in culture
+    assert "- plain words" in culture
+
+
+@pytest.mark.feature("seat-brief")
 def test_a_quick_seat_brief_prints_its_handoff_culture_derived_recap_and_learned_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -160,6 +178,45 @@ def test_a_quick_seat_with_empty_files_names_each_part_as_none(
         "Seat eng-1 of quick swarm quick-abc.\nHandoff:\nnone\nCulture:\nnone\nLatest recap:\nnone\n"
         "Learned notes:\nnone\n"
     )
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_successor_reads_the_handoff_its_transfer_kept_after_the_live_key_is_cleared(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predecessor = AgentRecord("engineer@323133-0000", "eng", "t1", seat=SEAT)
+    store.put_handoff("sw", "t1", HANDOFF, seat=SEAT)
+    transfers.record(store, "sw", predecessor, "context", HANDOFF, 1)
+    store.clear_handoff("sw", "t1")
+
+    assert seat_brief.main(["brief"], SEATED) == 0
+
+    assert _part(capsys.readouterr().out, "Handoff") == HANDOFF.strip()
+
+
+@pytest.mark.feature("seat-brief")
+def test_an_unreadable_quick_seat_file_prints_the_error_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    environ = _quick(tmp_path)
+    paths.learned(tmp_path, "eng-1").unlink()
+    paths.learned(tmp_path, "eng-1").mkdir()
+
+    assert seat_brief.main(["brief"], environ) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("seat brief: [Errno 21] Is a directory")
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_missing_quick_seat_file_reads_as_none(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    environ = _quick(tmp_path)
+    paths.culture(tmp_path).unlink()
+
+    assert seat_brief.main(["brief"], environ) == 0
+
+    assert _part(capsys.readouterr().out, "Culture") == "none"
 
 
 @pytest.mark.feature("seat-brief")
@@ -207,7 +264,43 @@ def test_a_store_failure_prints_the_error_and_exits_one(
 
 
 @pytest.mark.feature("seat-brief")
+def test_a_redis_error_while_reading_prints_the_error_and_exits_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    def refused() -> RedisStore:
+        raise RedisConnectionError("Connection refused")
+
+    monkeypatch.setattr(sources, "connect", refused)
+
+    assert seat_brief.main(["brief"], SEATED) == 1
+
+    assert capsys.readouterr().err == "seat brief: Connection refused\n"
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_quick_seat_is_read_before_a_swarm_seat_the_session_also_names(
+    store: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert seat_brief.main(["brief"], {**SEATED, **_quick(tmp_path)}) == 0
+
+    assert capsys.readouterr().out.startswith("Seat eng-1 of quick swarm quick-abc.\n")
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_swarm_name_outside_every_lane_holds_no_seat(store: RedisStore, capsys: pytest.CaptureFixture[str]) -> None:
+    store.put_agent("sw", AgentRecord("someone", "eng", "t2", seat="eng-2@sw"))
+
+    assert seat_brief.main(["brief"], {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "someone"}) == 0
+
+    assert capsys.readouterr().out == f"{seat_brief.NO_SEAT}\n"
+
+
+@pytest.mark.feature("seat-brief")
 def test_a_swarm_seat_reads_the_swarm_store_the_environment_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(swarm_store, "connect", lambda: found)
 
@@ -220,7 +313,11 @@ def test_a_swarm_seat_reads_the_swarm_store_the_environment_names(monkeypatch: p
 @pytest.mark.feature("seat-brief")
 def test_the_seat_command_runs_through_the_agentihooks_command_line() -> None:
     assert cli_delegates.delegated_cli(["seat", "brief"]) is seat_brief.main
-    assert "handoff, culture, latest recap and learned notes" in seat_brief.build_parser().format_help()
+    parser = seat_brief.build_parser()
+    assert parser.prog == "agentihooks seat"
+    assert parser.description == "Read the seat this session holds."
+    shown = " ".join(parser.format_help().split()) + " "
+    assert " brief Print the seat's handoff, culture, latest recap and learned notes, in order " in shown
     with pytest.raises(SystemExit):
         seat_brief.main([], {})
 
@@ -233,7 +330,12 @@ def test_priming_lines_end_with_the_seat_brief_command_with_or_without_history()
         {"seat": SEAT, "culture": "Merge on green."},
         {"seat": SEAT, "culture": "Merge on green.", "recaps": recaps},
     ):
-        assert prompt.priming_lines(task)[-1].startswith("Run agentihooks seat brief before your first command")
+        assert prompt.priming_lines(task)[-1] == prompt.SEAT_BRIEF
+    assert "Merge on green." not in "\n".join(prompt.priming_lines({"seat": SEAT, "culture": "Merge on green."}))
+    assert prompt.SEAT_BRIEF == (
+        "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap "
+        "and learned notes from the store that keeps them."
+    )
 
 
 @pytest.mark.feature("seat-brief")

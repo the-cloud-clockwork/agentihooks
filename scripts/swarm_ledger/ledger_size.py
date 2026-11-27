@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("size_set",)
 SIZES = ("small", "swarm")
@@ -30,7 +31,7 @@ def bound_swarm(slug: str) -> str:
         return ""
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     swarm = bound_swarm(ctx.slug) if op["size"] == "small" else ""
     if swarm:
         ctx.refused.append(f"size_set refused: swarm {swarm} works this ledger and a small ledger sends it no events")
