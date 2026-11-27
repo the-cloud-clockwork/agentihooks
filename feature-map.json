@@ -2615,6 +2615,22 @@
       ]
     },
     {
+      "id": "codex-scan-survives-a-vanishing-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2913",
+      "behaviour": "Codex session and managed execution detection judge a process from one read of its command line and answer no session for an empty one, so a Codex process that exits while the hive daemon beat walks local processes no longer raises and ends the daemon with every agent on the hive.",
+      "seam": "hooks.context.account_sessions._codex_argv, _is_codex_session, _managed_execution and local_processes",
+      "tests": [
+        "tests/context/test_account_sessions.py::test_codex_session_detection_reads_the_command_line_once",
+        "tests/context/test_account_sessions.py::test_a_codex_process_with_an_empty_command_line_is_no_session",
+        "tests/context/test_account_sessions.py::test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read",
+        "tests/context/test_account_sessions.py::test_a_managed_execution_is_judged_from_one_command_line_read"
+      ],
+      "rules": [
+        "codex-session-second-cmdline-read"
+      ]
+    },
+    {
       "id": "legacy-state-migration-command",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
@@ -13886,8 +13902,8 @@
       "id": "lab-shadow-acceptance-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
-      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
-      "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up. For the pull_request event each head also keeps when its newest github-actions lab-verdict job started, a lab verdict is inside the wait when it completed no later than the wait of that job after its start, each row ends with the seconds from that start to the lab verdict, and the rule also asks for a lab verdict inside the wait on 48 of every 50, rounded up; the merge_group report keeps three counts and five columns.",
+      "seam": "scripts.ci_lab.shadow_report actions, lab, head, inside, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
         "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
@@ -13900,7 +13916,14 @@
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
         "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
-        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages",
+        "tests/ci_lab/test_shadow_report.py::test_a_head_keeps_when_its_newest_lab_verdict_job_started",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_job_whose_check_run_names_no_start_leaves_the_head_readable",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_is_inside_the_wait_up_to_its_last_second",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_rule_asks_for_lab_verdicts_inside_the_wait_on_48_of_every_50_heads",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_seconds_each_head_took",
+        "tests/ci_lab/test_shadow_report.py::test_the_merge_group_report_keeps_three_counts_and_five_columns",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_command_fails_a_window_whose_verdicts_are_first_yet_late_for_the_wait"
       ]
     },
     {
@@ -17079,6 +17102,20 @@
       "seam": "ci_branch_lanes.problems",
       "tests": [
         "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
+      ]
+    },
+    {
+      "id": "swarm-gates-platform-invocation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-watch-flake",
+      "behaviour": "Swarm guards skip Windows and enforce Linux claim ownership before context recycling at each call, regardless of the platform during the first import.",
+      "seam": "hooks.context.swarm_gates.pretool",
+      "rules": [
+        "platform-chosen-at-import"
+      ],
+      "tests": [
+        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call",
+        "tests/test_claim_watch.py::test_windows_runs_neither_swarm_gate_at_the_call"
       ]
     },
     {

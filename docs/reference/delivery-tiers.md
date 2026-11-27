@@ -436,11 +436,11 @@ Any other pull request keeps its first in, first out place.
 
 The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
 
-The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
+The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`, or a failure of the priority step under `priority_error`:
 
 ```bash
 agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<number> \
-  | jq -c 'with_entries(select(.key == "queued" or .key == "priority"))'
+  | jq -c 'with_entries(select(.key == "queued" or .key == "priority" or .key == "priority_error"))'
 ```
 
 | `priority` | Meaning |
@@ -449,6 +449,7 @@ agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<num
 | `null` | No task naming the pull request is urgent or focused |
 | `{"url", "displaced", "errors", "lab"}` | The priority ran; `displaced` lists the entries it moved behind the pull request |
 | `{"url", "errors"}` | The priority was refused or a step failed, for example `another merge queue priority is running; try again when it ends`. Entries it left out are requeued as below |
+| absent, with `priority_error` | The priority step raised before it could report an outcome, for example `HTTP Error 409: Conflict` from the ledger hierarchy read. GitHub accepted the entry, so the command prints the queue outcome and exits zero |
 
 The merge watcher does not read that outcome and never retries a refused priority, because its next pass finds the pull request already queued. The master or the operator can then run `merge priority <url>`.
 
