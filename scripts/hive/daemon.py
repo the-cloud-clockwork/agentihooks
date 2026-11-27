@@ -654,14 +654,14 @@ def _checkouts() -> list[Path]:
 def origin(checkout: Path) -> str:
     """The checkout's origin remote as a lowercase host/owner/name, the name a hosted swarm gives its repo."""
     try:
-        found = ORIGIN.search((_common_gitdir(checkout) / "config").read_text())
+        found = ORIGIN.search((common_gitdir(checkout) / "config").read_text())
     except OSError:
         return ""
     remote = found and REMOTE.fullmatch(found.group(1).strip())
     return f"{remote.group(1)}/{remote.group(2)}".lower() if remote else ""
 
 
-def _common_gitdir(checkout: Path) -> Path:
+def common_gitdir(checkout: Path) -> Path:
     git = checkout / ".git"
     if git.is_file():
         git = checkout / git.read_text().removeprefix("gitdir:").strip()

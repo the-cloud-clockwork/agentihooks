@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -69,14 +70,23 @@ TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
-def codex_plan_mode(environ: Mapping[str, str]) -> list[str]:
+def codex_plan_mode(environ: Mapping[str, str], checkout: str) -> list[str]:
+    from scripts.hive import daemon
+
     home = Path(environ.get("HOME") or Path.home())
     ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
     exports = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-exports"
-    grants = ", ".join(
-        f'{json.dumps(str(root))}="write"'
-        for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad", exports)
+    worktrees = Path(environ.get("WORKTREE_ROOT") or home / "dev" / "worktrees")
+    roots = (
+        ledger,
+        home / ".agentihooks" / "swarm",
+        home / "scratchpad",
+        exports,
+        daemon.common_gitdir(Path(checkout)).resolve(),
+        worktrees,
+        Path(tempfile.gettempdir()),
     )
+    grants = ", ".join(f'{json.dumps(str(root))}="write"' for root in roots)
     return [
         "-c",
         f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{grants}}}}}',
@@ -796,6 +806,8 @@ class HerdrRuntime:
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
     def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
+        from scripts.hive import daemon
+
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         self._quota_refresh(environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
@@ -897,7 +909,13 @@ class HerdrRuntime:
         picked = replace(picked, model=model_pick.suited(agent, _set(picked.model) or harness_model, harness_model))
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         picked = expert_launch.pin(lane, picked, agent, task.get(expert_launch.EFFORT_KEY))
-        mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
+        mode = (
+            []
+            if lane != "plan"
+            else PLAN_MODE
+            if agent == "claude"
+            else codex_plan_mode(environ, daemon.local_checkout(config.repo))
+        )
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = bool(forced)
         repick = route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer))
