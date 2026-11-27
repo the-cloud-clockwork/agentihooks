@@ -17,8 +17,9 @@ CANARY_EXIT = ast.dump(ast.parse("sys.exit(main(sys.argv[2]))").body[0])
 SHELL_META = "$`<>(){}|;&\n"
 NAME_SAFE = "._-"
 LITERAL = re.compile(r"""(?:[A-Za-z0-9_@%+=:,./-]| |'[^']*'|"'")*""")
-EXEC_OBJECT = re.compile(r'exec_command\(\s*\{(?:[\s,]*"?\w+"?\s*:\s*(?:"(?:[^"\\]|\\.)*"|[\w.-]+))*[\s,]*\}\s*\)')
-CMD_KEY = re.compile(r'\bcmd"?\s*:')
+EXEC_PROGRAM = re.compile(
+    r'\s*(?:const\s+\w+\s*=\s*)?(?:await\s+)?tools\.exec_command\(\s*\{\s*"?cmd"?\s*:\s*"(?:[^"\\]|\\.)*"\s*,?\s*\}\s*\);?(?:\s*text\(\w+\);?)?\s*'
+)
 
 
 def marker_path(session: str) -> Path:
@@ -94,7 +95,7 @@ def _literal(text: str) -> bool:
 
 
 def _sole_command(command: str, text: str) -> bool:
-    return text == command or (EXEC_OBJECT.search(command) is not None and len(CMD_KEY.findall(command)) == 1)
+    return text == command or EXEC_PROGRAM.fullmatch(command) is not None
 
 
 def _canary(command: str) -> bool:

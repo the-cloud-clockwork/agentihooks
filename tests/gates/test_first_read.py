@@ -341,6 +341,10 @@ def test_mounted_literal_canary_is_exempt(command: str) -> None:
         f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)} + "$(id)"}});',
         f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, ...extra}});",
         f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, cmd: other}});",
+        f'require("child_process").execSync("id"); await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}});',
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, shell: "/home/worker/x/evil"}});',
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}, evil);",
         f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); await tools.exec_command({{cmd: "pwd"}});',
     ],
 )
