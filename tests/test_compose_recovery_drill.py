@@ -14,7 +14,6 @@ from scripts.events.envelope import Envelope
 from scripts.hive import spoke
 from scripts.swarm import capacity, offer_quota
 from scripts.swarm.store import SwarmConfig
-from tests.helpers import stand_in
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-recovery-drill.sh"
@@ -43,6 +42,12 @@ def spoke_reader(body: str) -> str | None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SpokeConfig"
     )
     return next((ast.unparse(keyword.value) for keyword in call.keywords if keyword.arg == "accounts"), None)
+
+
+def stand_in_parameters(body: str, method: str) -> list[str] | None:
+    client = next(node for node in ast.parse(body).body if isinstance(node, ast.ClassDef) and node.name == "Tasks")
+    found = next((node for node in client.body if isinstance(node, ast.FunctionDef) and node.name == method), None)
+    return [arg.arg for arg in found.args.args] if found else None
 
 
 def assert_seat_fits(source: str) -> None:
@@ -154,10 +159,11 @@ def test_the_recovery_drill_spoke_reads_a_seat_that_fits_its_offers() -> None:
     assert_seat_fits(function(body, "free_seat"))
 
 
-@pytest.mark.feature("compose-smoke-launch-report")
 def test_the_recovery_drill_stand_in_takes_the_launch_report_of_every_launch() -> None:
     script = drill()
-    assert stand_in.methods(script).get("launched") == list(inspect.signature(spoke.Tasks.launched).parameters)
+    body = heredoc(script, DRILL)
+    assert stand_in_parameters(body, "launched") == list(inspect.signature(spoke.Tasks.launched).parameters)
+    assert '"unreported": unreported()' in function(body, "state")
     final_settle = script.index('"t1": {"ledger": "done", "claim": null, "launches": 1,')
-    gate = script.index("if [[ $unreported != '[]' ]]; then")
-    assert final_settle < gate < script.index("printf 'Recovery drill passed")
+    gate = script.index("""'"unreported": []'""")
+    assert final_settle < gate < script.index("printf 'ledger against the recorded state after reconcile")

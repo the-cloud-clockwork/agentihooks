@@ -2,8 +2,8 @@
   "id": "compose-smoke-launch-report",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-stand-in-launched-method",
-  "behaviour": "The compose task smoke and the compose recovery drill fail unless the hive spoke reported every launch to their stand in task client. Each stand in implements launched with the parameters of the spoke Tasks protocol; the task smoke requires exactly one claude report for its one task, and the drill requires, after its final reconcile, a claude report for every launch of every task.",
-  "seam": "the stand in Tasks class in the embedded Python of the compose task smoke and the compose recovery drill scripts, read through tests.helpers.stand_in.methods, and each script's report gate ahead of its pass line",
+  "behaviour": "The compose task smoke and the compose recovery drill fail unless the hive spoke reported every launch to their stand in task client. Each stand in implements launched with the parameters of the spoke Tasks protocol; the task smoke requires exactly one claude report for its one task, and the drill's recorded state names every task with fewer claude reports than launches, a list its final reconcile requires empty.",
+  "seam": "the stand in Tasks class in the embedded Python of the compose task smoke and the compose recovery drill scripts, read through stand_in_parameters in the recovery drill tests, the task smoke's report assert ahead of its pass line and the unreported list in the drill's state that its final reconcile settles on",
   "tests": [
     "tests/test_compose_task_smoke.py::test_the_compose_task_smoke_stand_in_takes_the_launch_report_of_its_one_launch",
     "tests/test_compose_recovery_drill.py::test_the_recovery_drill_stand_in_takes_the_launch_report_of_every_launch"

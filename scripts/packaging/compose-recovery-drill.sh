@@ -122,8 +122,8 @@ class Tasks:
         return None
 
     def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
-        with open(REPORTS, "a") as reports:
-            reports.write(json.dumps([event.key, placed.harness]) + "\n")
+        with open(REPORTS, "a") as sink:
+            sink.write(json.dumps([event.key, placed.harness]) + "\n")
 
 
 class StandIn:
@@ -144,12 +144,12 @@ def launched():
 
 def unreported() -> list[str]:
     """The drill's tasks with fewer claude launch reports from the spoke than launches."""
-    reports = []
+    reported = []
     if os.path.exists(REPORTS):
         with open(REPORTS) as found:
-            reports = [json.loads(line) for line in found if line.strip()]
+            reported = [json.loads(line) for line in found if line.strip()]
     launches = [launch["task"] for launch in launched()]
-    return [task for task in TASKS if reports.count([task, "claude"]) < launches.count(task)]
+    return [task for task in TASKS if reported.count([task, "claude"]) < launches.count(task)]
 
 
 def take(count: int) -> dict[str, list[str]]:
@@ -217,7 +217,8 @@ def state():
         for task in TASKS
     }
     bus.close()
-    return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished")}
+    return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished"),
+            "unreported": unreported()}
 
 
 class QuickPass(runner.HubRunner):
@@ -241,7 +242,7 @@ def beat():
 
 step, args = sys.argv[1], sys.argv[2:]
 result = {"seed": lambda: seed(args), "take": lambda: take(int(args[0])), "done": lambda: done(args),
-          "die": lambda: die(args), "beat": beat, "state": state, "pass": hub, "unreported": unreported}[step]()
+          "die": lambda: die(args), "beat": beat, "state": state, "pass": hub}[step]()
 print(json.dumps(result))
 PY
 )"
@@ -310,14 +311,9 @@ settle \
   "$(task t4 2 '"exited", "exited"')" \
   "$(task t5 1 '"exited"')" \
   "$(task t6 1 '"exited"')" \
-  '"agents": []'
+  '"agents": []' \
+  '"unreported": []'
 printf 'ledger against the recorded state after reconcile: %s\n' "$found"
-unreported="$(drill unreported)"
-if [[ $unreported != '[]' ]]; then
-  printf 'the spoke never reported every launch of %s to the stand in task client\n' "$unreported" >&2
-  exit 1
-fi
-printf 'every launch reported to the stand in task client\n'
 lap 'final reconcile'
 
 cleanup
