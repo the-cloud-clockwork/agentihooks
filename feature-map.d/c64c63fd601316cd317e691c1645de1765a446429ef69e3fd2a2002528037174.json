@@ -1,0 +1,9 @@
+{
+  "id": "master-loop-seat-inbox",
+  "origin": "inventory",
+  "behaviour": "The tick step master loop runs in group wrapper events on the tick lane every 120 seconds.",
+  "seam": "scripts.tick.steps.master_loop._master_loop registered as tick step master loop",
+  "tests": [
+    "tests/tick/steps/test_master_loop.py::test_master_loop"
+  ]
+}
