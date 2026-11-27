@@ -1,13 +1,59 @@
+import ast
+import re
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
+import pytest
 import yaml
+
+from scripts.events.envelope import Envelope
+from scripts.swarm import capacity, offer_quota
+from scripts.swarm.store import SwarmConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-recovery-drill.sh"
+DRILL = "DRILL=\"$(cat <<'PY'\n"
 
 
 def drill():
     return (ROOT / SCRIPT).read_text()
+
+
+def heredoc(script: str, opener: str) -> str:
+    return script.split(opener, 1)[1].split("\nPY\n", 1)[0]
+
+
+def function(body: str, name: str) -> str:
+    found = next(node for node in ast.parse(body).body if isinstance(node, ast.FunctionDef) and node.name == name)
+    source = ast.get_source_segment(body, found)
+    assert source is not None
+    return source
+
+
+def spoke_reader(body: str) -> str | None:
+    call = next(
+        node
+        for node in ast.walk(ast.parse(body))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SpokeConfig"
+    )
+    return next((ast.unparse(keyword.value) for keyword in call.keywords if keyword.arg == "accounts"), None)
+
+
+def assert_seat_fits(source: str) -> None:
+    namespace: dict[str, object] = {"capacity": capacity}
+    exec(source, namespace)
+    seat = cast(Callable[..., list[capacity.Account]], namespace["seat"])
+    config = SwarmConfig("rig", "/data", 1, 1, engine="events")
+    offered = Envelope(
+        "ready:rig:t1:0", "task.ready", "rig", "task", "t1", 0, 9, "readiness", {"lane": "eng", "quota": {}}
+    )
+    seated = offer_quota.Fit(config, "eng", lambda event: True, seat)
+    assert seated(offered) and not seated.held
+    seatless = offer_quota.Fit(config, "eng", lambda event: True, lambda *_args, **_kwargs: [])
+    assert not seatless(offered) and seatless.held
 
 
 def test_the_swarm_image_job_runs_the_recovery_drill_on_the_built_image():
@@ -58,3 +104,48 @@ def test_the_recovery_drill_runs_each_hub_pass_inside_its_state_read_with_a_shor
     assert 'runner.main(["run", "--once"])' in script
     assert "timeout_ms=FETCH_MS" in script
     assert 'found="$(drill pass)"' in script
+
+
+@pytest.mark.feature("compose-drill-take-bound")
+def test_the_recovery_drill_take_stops_on_held_polls_and_names_them() -> None:
+    polls: list[int] = []
+
+    class Held:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def poll(self, timeout_ms: int) -> str:
+            polls.append(timeout_ms)
+            assert len(polls) <= 50, "the take loop kept polling a spoke that only holds"
+            return "held"
+
+    namespace: dict[str, object] = {
+        "sys": sys,
+        "launched": lambda: [],
+        "open_bus": lambda config: SimpleNamespace(close=lambda: None),
+        "BusConfig": SimpleNamespace(from_environ=lambda: None),
+        "Spoke": Held,
+        "SpokeConfig": lambda *args: None,
+        "store": SimpleNamespace(config=lambda slug: None),
+        "slug": "recovery-drill",
+        "HIVE": "recovery-hive",
+        "StandIn": lambda: None,
+        "Tasks": lambda: None,
+        "view": lambda: None,
+        "seat": lambda *args, **kwargs: [],
+    }
+    exec(function(heredoc(drill(), DRILL), "take"), namespace)
+    take = cast(Callable[[int], object], namespace["take"])
+    held = "['held', 'held', 'held', 'held', 'held']"
+    with pytest.raises(
+        SystemExit, match=rf"^the hive took \[\] of 3 offers before its polls went idle: {re.escape(held)}$"
+    ):
+        take(3)
+    assert polls == [1_000] * 5
+
+
+@pytest.mark.feature("compose-smoke-spoke-seat")
+def test_the_recovery_drill_spoke_reads_a_seat_that_fits_its_offers() -> None:
+    body = heredoc(drill(), DRILL)
+    assert spoke_reader(function(body, "take")) == "seat"
+    assert_seat_fits(function(body, "seat"))

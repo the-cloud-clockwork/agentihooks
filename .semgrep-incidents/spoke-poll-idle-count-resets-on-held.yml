@@ -1,0 +1,15 @@
+rules:
+  - id: spoke-poll-idle-count-resets-on-held
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      A spoke poll loop that counts only empty polls toward its idle limit resets the count on every held poll. An
+      offer the account seat hold keeps is redelivered every five seconds, so the loop never reaches its limit and
+      never ends: the compose recovery drill hung the swarm image smoke to its thirty minute cancel on every dev push
+      after pull request 13694. Count held polls as idle too, or bound the loop with a deadline.
+    paths:
+      include:
+        - '*.sh'
+        - '*.bash'
+        - '*.py'
+    pattern-regex: (?m)\b(\w+)\s*=\s*\1\s*\+\s*1\s+if\s+[^\n]*?==\s*["']empty["']\s+else\s+0\b

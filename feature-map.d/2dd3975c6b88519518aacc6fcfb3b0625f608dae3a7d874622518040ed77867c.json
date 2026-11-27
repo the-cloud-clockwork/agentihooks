@@ -1,0 +1,10 @@
+{
+  "id": "swarm-smoke-scenario-bound",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-smoke-seat-hold-hang",
+  "behaviour": "The swarm image smoke's parallel runner stops a scenario that runs past SWARM_SMOKE_SCENARIO_SECONDS, 600 seconds by default, reports it as timed out after that bound with its partial log and an error line, and still reports the verdict and log of every other scenario, so a hung scenario fails by name before the thirty minute job limit.",
+  "seam": "scripts/packaging/swarm-smoke-parallel.sh run with fake bash scenarios and a two second bound",
+  "tests": [
+    "tests/test_swarm_smoke_parallel.py::test_a_scenario_past_its_bound_is_stopped_and_named_with_its_log"
+  ]
+}
