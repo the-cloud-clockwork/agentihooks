@@ -118,6 +118,13 @@
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_notice_carrying_a_grade_ref_is_held_although_a_pull_request_entry_of_the_same_head_waits",
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_grade_on_the_same_graded_commit_is_not_replaced_by_a_second_request_resolving_it",
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_waiting_notice_of_another_head_is_untouched_when_a_pull_request_event_arrives",
-    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_live_merge_grade_in_the_promotion_class_is_neither_replaced_nor_a_reason_to_yield"
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_live_merge_grade_in_the_promotion_class_is_neither_replaced_nor_a_reason_to_yield",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_request_defaults_the_pull_number_when_the_held_entry_names_none",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_hold_leaves_a_waiting_entry_that_already_names_a_pull_request",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_hold_defers_to_a_covering_pull_request_entry_found_past_an_unrelated_one",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_siblings_keeps_looking_past_a_live_grade_of_a_different_head",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_siblings_skips_a_grade_ref_or_superseded_sibling_without_stopping_at_it",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_regrade_clears_the_waiting_entry_its_own_name_identifies",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_output_keeps_the_required_check_s_unit_count_before_the_fallback_line"
   ]
 }

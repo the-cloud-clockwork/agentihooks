@@ -1460,7 +1460,7 @@ class Scheduler:
             self._keep(state)
             return [f"holding the required-frame regrade of {state.head}: {error}"]
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str, tries: int = 0) -> str:
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str, tries: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
