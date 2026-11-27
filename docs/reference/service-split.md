@@ -68,9 +68,9 @@ creates the schema; only this service's `migrate()` does, at start.
 
 ### API
 
-- Transport: HTTP JSON under `/api/v1`, served by its own process and deployment. In the target, the only process
-  holding `AGENTIHOOKS_SWARM_DATABASE_URL`. Today the chart also gives it to the ledger, controller, hub and worker
-  containers, which reach the database in process.
+- Transport: HTTP JSON under `/api/v1`, served by its own process and deployment. In the target, the API is the only
+  process holding `AGENTIHOOKS_SWARM_DATABASE_URL`. Today the chart also gives it to the ledger, controller, hub and
+  worker containers, which reach the database in process.
 - Reads: `ledgers`, `ledgers/{slug}`, collection and item paths through `resources.read`, `hierarchy/*`, `tasks`
   pages, done-row paging, `export`, events since a cursor, media and artifact files.
 - Writes: one route, `POST ledgers/{slug}/operations`, that applies already-ruled ops. It keeps the two guards that

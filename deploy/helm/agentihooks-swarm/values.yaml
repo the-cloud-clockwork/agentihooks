@@ -66,7 +66,7 @@ ledger:
     sizeLimit: 512Mi
   env: {}
   # Secret env the ledger and API containers read. swarm.databaseEnv copies its shared database URL, and no other
-  # entry, into the controller, hub, worker and worker hive containers.
+  # entry, into the controller, hub and worker containers; a worker hive with workers.envFromSecrets gets none.
   secretEnv: []
   resources:
     requests:

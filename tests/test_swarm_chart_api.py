@@ -128,9 +128,14 @@ def _database_url_holders() -> list[str]:
     holders: set[str] = set()
     for template in (CHART / "templates").glob("*.yaml"):
         text = template.read_text()
-        if 'include "swarm.databaseEnv"' in text or 'include "swarm.secretKeyEnv" .Values.ledger.secretEnv' in text:
+        if 'include "swarm.databaseEnv"' in text or ".Values.ledger.secretEnv" in text:
             holders.add(template.stem.split("-", 1)[0])
     return sorted(holders)
+
+
+def _unnamed_holders(text: str) -> list[str]:
+    """Return the database URL holders the text never names as a word outside a path segment."""
+    return [holder for holder in _database_url_holders() if not re.search(rf"(?<![\w/]){holder}\b", text)]
 
 
 def _ledger_secret_env_note() -> str:
@@ -156,7 +161,7 @@ def test_ledger_secret_env_note_names_every_service_that_gets_the_database_url()
     note = _ledger_secret_env_note()
 
     assert "database url" in note
-    assert [holder for holder in _database_url_holders() if not re.search(rf"\b{holder}\b", note)] == []
+    assert _unnamed_holders(note) == []
 
 
 @pytest.mark.feature("chart-docs-name-every-database-url-holder")
@@ -165,13 +170,11 @@ def test_service_split_names_every_holder_wherever_it_names_an_only_holder() -> 
     blocks = [
         block.lower()
         for block in re.split(r"\n(?=- |\n)", text)
-        if "AGENTIHOOKS_SWARM_DATABASE_URL" in block and re.search(r"\bonly\b", block)
+        if "AGENTIHOOKS_SWARM_DATABASE_URL" in block and re.search(r"\b(only|sole|solely)\b", block)
     ]
 
     assert len(blocks) == 2
-    assert [
-        [holder for holder in _database_url_holders() if not re.search(rf"\b{holder}\b", block)] for block in blocks
-    ] == [[], []]
+    assert [_unnamed_holders(block) for block in blocks] == [[], []]
 
 
 def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
