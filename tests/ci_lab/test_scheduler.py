@@ -60,6 +60,7 @@ from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
 from tests.ci_lab.gate_required_cases import load, materialize
+from tests.ci_lab.scheduler_fixtures import Expander as Expander
 
 REPO = "/the-cloud-clockwork/agentihooks"
 SLUG = "the-cloud-clockwork/agentihooks"
@@ -134,25 +135,6 @@ class Inbox:
     def heads(self) -> list[scheduler.Head]:
         heads, self.pending = self.pending, []
         return heads
-
-
-@dataclass
-class Expander:
-    plans: dict[str, scheduler.Plan]
-    seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
-
-    def expand(self, req: GradeRequest) -> scheduler.Plan:
-        self.seen.append(req)
-        return replace(old := self.plans[req.head], required=scheduler._frame_required(req.tier, scheduler._scope(old)))
-
-    def merge_base(self, repo: str, head: str) -> str:
-        return self.plans[head].grader
-
-    def reachable(self, repo: str, head: str) -> bool:
-        return True
-
-    def groups(self, repo: str) -> frozenset[str]:
-        return frozenset(self.plans)
 
 
 @dataclass

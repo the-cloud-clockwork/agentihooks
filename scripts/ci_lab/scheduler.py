@@ -635,7 +635,7 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
     return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
-def _scope(state: State | Plan) -> str:
+def _scope(state: State) -> str:
     return state.outputs.get("select", {}).get("scope", "none")
 
 
