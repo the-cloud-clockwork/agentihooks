@@ -16411,11 +16411,12 @@
       "id": "ci-reuse-templates-install-pinned-tools",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-templates",
-      "behaviour": "The reuse job template installs PyYAML at the exact pin under the parser constraint file, in the one pinned form the protected grader admits, and the reuse and select jobs of the test workflow run exactly the install lines of the reuse job and duration provenance templates.",
+      "behaviour": "The reuse job and duration provenance templates install PyYAML at the exact pin under the parser constraint file, in the one pinned form the protected grader admits, and the reuse and select jobs of the test workflow run exactly the install lines of the reuse job and duration provenance templates.",
       "seam": "scripts.ci_reuse.reuse_job and scripts.ci_reuse.duration_provenance_steps install steps against the reuse and select jobs of .github/workflows/test.yml",
       "tests": [
         "tests/test_ci_reuse.py::test_the_rendered_reuse_and_provenance_installs_run_their_template_lines",
-        "tests/test_ci_reuse.py::test_the_reuse_template_installs_pyyaml_at_the_parser_pin"
+        "tests/test_ci_reuse.py::test_the_reuse_template_installs_pyyaml_at_the_parser_pin",
+        "tests/test_ci_reuse.py::test_the_provenance_template_installs_pyyaml_at_the_parser_pin"
       ]
     },
     {
