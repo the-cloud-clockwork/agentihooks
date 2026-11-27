@@ -1,16 +1,18 @@
 """Worker leases over the lab queue: long poll grants, heartbeats, completion and reaping."""
 
 import hmac
+import math
 import secrets
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 
+from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.pods import PodImages, Pods, unmanaged, unread
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "Shed", "release", "solo", "unshed", "unstored"]
+__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "release", "solo", "unstored"]
 
 REQUEUES = 1
 
@@ -76,7 +78,8 @@ class Leases:
         """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free
         slots while it waits and what its grants leave once it returns, and a poll that grants marks its pod busy. A
         worker that holds a solo unit is granted no other one, so its memory never holds two; the test reads the unit
-        when the lease is taken, whenever the job was enqueued."""
+        when the lease is taken, whenever the job was enqueued. No job of a class the shed port names is granted: a take
+        stops at the first one, since every job after it in the pending order ranks at or past it."""
         self.queue.offer(worker, free_slots, self.clock())
         grants = self._poll(worker, free_slots, capabilities, wait_ms)
         self.queue.offer(worker, free_slots - sum(grant.slots for grant in grants), self.clock())
@@ -97,9 +100,12 @@ class Leases:
         grants: list[Grant] = []
         if free_slots <= 0:
             return grants
+        shed_from = min(map(CLASSES.index, self.shed()), default=math.inf)
         held: bool | None = None
         for job_id in self.queue.ordered():
             job = self.queue.job(job_id)
+            if job is not None and job.rank >= shed_from:
+                break
             if job is None or job.requirement.slots > free_slots:
                 continue
             token = secrets.token_hex(16)

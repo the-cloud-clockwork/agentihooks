@@ -2235,6 +2235,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         manifests,
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
+        shed=lambda: spending.status().shed,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
