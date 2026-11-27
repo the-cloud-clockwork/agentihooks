@@ -243,7 +243,15 @@ def test_cli_queue_prints_the_accepted_entry_and_exits_zero_when_its_priority_fa
     accepted = merge_queue.operate
 
     def operate(action: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        return accepted(action, url, run=priority.queue.run, priority=kwargs["priority"])
+        assert set(kwargs) == {"admit", "journal", "attempts", "priority"}
+        return accepted(
+            action,
+            url,
+            run=priority.queue.run,
+            journal=kwargs["journal"],
+            attempts=kwargs["attempts"],
+            priority=kwargs["priority"],
+        )
 
     monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", "queue", URL]) == 0
