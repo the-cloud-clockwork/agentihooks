@@ -1640,7 +1640,10 @@ def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path,
     assert second["counts"] == {"killed": 2}
 
 
-def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_path, monkeypatch):
+@pytest.mark.feature("mutation-stats-trace-candidates")
+def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _gate_tree(tmp_path, monkeypatch)
     runs = tmp_path / "runs.txt"
     (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
@@ -1652,7 +1655,7 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
     assert report["not_mutated"] == []
     assert report["files"][0]["counts"] == {"killed": 2}
-    assert runs.read_text() == "run\n"
+    assert not runs.exists()
 
 
 @pytest.mark.parametrize(

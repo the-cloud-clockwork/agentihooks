@@ -16332,6 +16332,18 @@
       ]
     },
     {
+      "id": "mutation-stats-trace-candidates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-trace-narrow",
+      "behaviour": "Mutation statistics trace only tests that can reach a changed function while retaining fixture and import reach and unknown dependencies, preserving original bucket membership, test order and the exact function to test mapping.",
+      "seam": "scripts.ci_mutation.stats_candidates and scripts.ci_mutation.selection.collect_shard_stats",
+      "tests": [
+        "tests/test_ci_mutation_selection.py::test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant",
+        "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_preserve_indirect_reach_and_order",
+        "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_retain_items_without_source"
+      ]
+    },
+    {
       "id": "mutation-stats-shared-closure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
