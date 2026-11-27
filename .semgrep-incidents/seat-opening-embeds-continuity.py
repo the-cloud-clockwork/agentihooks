@@ -15,7 +15,10 @@ def priming_lines(task: dict[str, Any]) -> list[str]:
     return lines
 
 
-def priming(slug: str, transfer: dict[str, Any]) -> str:
+def priming(slug: str, transfer: dict[str, Any], *, seated: bool = True) -> str:
+    if not seated:
+        # ok: seat-opening-embeds-continuity
+        return f"Read the handoff for {slug}\n{transfer['handoff']}"
     # ruleid: seat-opening-embeds-continuity
     return f"Confirm the handoff for {slug}\n{transfer['handoff']}"
 

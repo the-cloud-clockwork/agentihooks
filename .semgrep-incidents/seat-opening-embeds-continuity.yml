@@ -9,6 +9,9 @@ rules:
         - /scripts/handoff/transfers.py
         - seat-opening-embeds-continuity.py
     patterns:
+      - pattern-not-inside: |
+          if not seated:
+              ...
       - pattern-either:
           - pattern-inside: |
               def priming_lines(...):
