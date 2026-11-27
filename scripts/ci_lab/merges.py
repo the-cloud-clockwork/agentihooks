@@ -164,14 +164,14 @@ class Resolver:
 
 class Background:
     """Merge resolutions run off the scheduler pass on at most `workers` threads at once. A call starts the
-    resolution of a pull request's head and raises MergePending while it still runs; a failed resolution then
-    raises its error once, wrapped as MergeUnanswered when it is not already one of MergeRefused's own. A
-    resolution still running past `bound_s` after it started raises MergeUnanswered instead, counting as one
-    try, and keeps running orphaned; a later call starts it again. A resolution that found a merge answers
-    every call until `fresh_s` after it started, so no merge stays in memory longer; an absent answer is read
-    once and then gone, so the next call starts a new resolution and so reads GitHub again. The bound runs
-    from the call that submitted the resolution, not from the worker thread that picks it up, so one queued
-    behind `workers` others can spend a whole try without ever having run."""
+    resolution of a pull request's head and raises MergePending while it waits for a thread or still runs; a
+    failed resolution then raises its error once, wrapped as MergeUnanswered when it is not already one of
+    MergeRefused's own. A resolution still running `bound_s` after a thread began it raises MergeUnanswered
+    instead, counting as one try, and keeps running orphaned; a later call starts it again. One still waiting
+    for a thread has read nothing, so it stays pending and spends no try however long it waits. A resolution
+    that found a merge answers every call until `fresh_s` after a thread began it, so no merge stays in memory
+    longer; an absent answer is read once and then gone, so the next call starts a new resolution and so reads
+    GitHub again."""
 
     def __init__(
         self,
@@ -186,21 +186,22 @@ class Background:
         self.clock = clock
         self.bound_s = bound_s
         self.pool = ThreadPoolExecutor(workers)
-        self.resolutions: dict[tuple[str, int, str], tuple[float, Future[tuple[str, str] | None]]] = {}
+        self.resolutions: dict[tuple[str, int, str], tuple[list[float], Future[tuple[str, str] | None]]] = {}
 
     def __call__(self, repo: str, number: int, head: str) -> tuple[str, str] | None:
-        """Return the finished resolution of a pull request's head, or raise MergePending while it runs under
-        `bound_s`, MergeUnanswered once it has run past it, and its error once it failed."""
+        """Return the finished resolution of a pull request's head, or raise MergePending while it waits for a
+        thread or runs under `bound_s`, MergeUnanswered once it has run past it, and its error once it failed."""
         now = self.clock()
         key = (repo, number, head)
         self.resolutions = {
             each: entry for each, entry in self.resolutions.items() if each == key or self._fresh(now, entry)
         }
         if key not in self.resolutions:
-            self.resolutions[key] = (now, self.pool.submit(self.resolve, repo, number, head))
-        started, future = self.resolutions[key]
+            began: list[float] = []
+            self.resolutions[key] = (began, self.pool.submit(self._run, began, repo, number, head))
+        began, future = self.resolutions[key]
         if not future.done():
-            if now - started >= self.bound_s:
+            if began and now - began[0] >= self.bound_s:
                 del self.resolutions[key]
                 raise MergeUnanswered(
                     f"the merge of {repo}#{number} for {head} did not resolve within {self.bound_s:.0f}s"
@@ -212,14 +213,20 @@ class Background:
             if isinstance(error, MergeRefused):
                 raise error
             raise MergeUnanswered(f"the merge of {repo}#{number} for {head} failed: {error}") from error
-        if future.result() is None or now - started >= self.fresh_s:
+        if future.result() is None or now - began[0] >= self.fresh_s:
             del self.resolutions[key]
         return future.result()
 
-    def _fresh(self, now: float, entry: tuple[float, Future[tuple[str, str] | None]]) -> bool:
+    def _run(self, began: list[float], repo: str, number: int, head: str) -> tuple[str, str] | None:
+        """Resolve on a pool thread, first noting in `began` when the thread took the resolution up: the list
+        stays empty while the resolution waits for a thread."""
+        began.append(self.clock())
+        return self.resolve(repo, number, head)
+
+    def _fresh(self, now: float, entry: tuple[list[float], Future[tuple[str, str] | None]]) -> bool:
         """Return whether a resolution not just read keeps answering: not yet finished, or finished with a found
         merge inside its fresh window."""
-        started, future = entry
+        began, future = entry
         if not future.done():
             return True
-        return future.exception() is None and future.result() is not None and now - started < self.fresh_s
+        return future.exception() is None and future.result() is not None and now - began[0] < self.fresh_s

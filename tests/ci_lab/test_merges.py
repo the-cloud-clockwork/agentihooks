@@ -2,6 +2,7 @@
 pass, issue 13890.
 """
 
+import contextlib
 import threading
 from collections.abc import Mapping
 from concurrent.futures import Future, wait
@@ -174,7 +175,7 @@ class Held:
         return answer
 
 
-def _finished(fetches: Mapping[tuple[str, int, str], tuple[float, Future[tuple[str, str] | None]]]) -> None:
+def _finished(fetches: Mapping[tuple[str, int, str], tuple[list[float], Future[tuple[str, str] | None]]]) -> None:
     wait([future for _, future in fetches.values()])
 
 
@@ -223,6 +224,108 @@ def test_background_raises_unanswered_once_a_resolution_runs_past_its_bound() ->
     with pytest.raises(merges.MergeUnanswered, match="did not resolve within 5s"):
         background("example/repo", 41, HEAD)
     held.release.set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_spends_no_try_on_a_resolution_still_waiting_for_a_thread() -> None:
+    first, second = ("example/repo", 41, HEAD), ("example/repo", 42, OTHER)
+    held = Held({first: (MERGE, BASE), second: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, workers=1, clock=clock, bound_s=5.0)
+    with pytest.raises(merges.MergePending):
+        background(*first)
+    assert held.started.acquire(timeout=WAIT_S)
+    with pytest.raises(merges.MergePending):
+        background(*second)
+    clock.now = 5.0
+    with pytest.raises(merges.MergePending):
+        background(*second)
+    with pytest.raises(merges.MergeUnanswered, match="did not resolve within 5s"):
+        background(*first)
+    assert held.asked == [first]
+    held.release.set()
+    assert held.started.acquire(timeout=WAIT_S)
+    _finished(background.resolutions)
+    assert background(*second) == (MERGE, BASE)
+    assert held.asked == [first, second]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_bounds_a_queued_resolution_from_when_a_thread_began_it() -> None:
+    first, second = ("example/repo", 41, HEAD), ("example/repo", 42, OTHER)
+    gates = {first: threading.Event(), second: threading.Event()}
+    begun = threading.Semaphore(0)
+
+    def resolve(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        begun.release()
+        gates[(repo, number, head)].wait(WAIT_S)
+        return MERGE, BASE
+
+    clock = Clock()
+    background = merges.Background(resolve, workers=1, clock=clock, bound_s=5.0)
+    with pytest.raises(merges.MergePending):
+        background(*first)
+    assert begun.acquire(timeout=WAIT_S)
+    with pytest.raises(merges.MergePending):
+        background(*second)
+    clock.now = 4.0
+    gates[first].set()
+    assert begun.acquire(timeout=WAIT_S)
+    clock.now = 8.0
+    with pytest.raises(merges.MergePending):
+        background(*second)
+    clock.now = 9.0
+    with pytest.raises(merges.MergeUnanswered, match="did not resolve within 5s"):
+        background(*second)
+    gates[second].set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_answers_a_found_merge_until_its_fresh_window_ends_then_reads_github_again() -> None:
+    key = ("example/repo", 41, HEAD)
+    held = Held({key: (MERGE, BASE)})
+    clock = Clock(now=10.0)
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    with pytest.raises(merges.MergePending):
+        background(*key)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    held.release.clear()
+    clock.now = 39.0
+    assert background(*key) == (MERGE, BASE)
+    assert background(*key) == (MERGE, BASE)
+    assert held.asked == [key]
+    clock.now = 40.0
+    assert background(*key) == (MERGE, BASE)
+    with pytest.raises(merges.MergePending):
+        background(*key)
+    assert held.started.acquire(timeout=WAIT_S)
+    assert held.asked == [key, key]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_keeps_only_a_found_merge_inside_its_fresh_window_while_another_head_is_asked() -> None:
+    found, failed, absent = (("example/repo", number, HEAD) for number in (41, 42, 43))
+    other = ("example/repo", 44, OTHER)
+    held = Held({found: (MERGE, BASE), failed: RuntimeError("boom"), absent: None, other: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    for key in (found, failed, absent):
+        with pytest.raises(merges.MergePending):
+            background(*key)
+        assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = 29.0
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert set(background.resolutions) == {found, other}
+    clock.now = 30.0
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert set(background.resolutions) == {other}
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

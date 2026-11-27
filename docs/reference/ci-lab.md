@@ -2762,9 +2762,11 @@ repository's store under its root already holds it.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
-each held under `merges.Background` and reused until `FRESH_S` (30) seconds after its resolution started, so
+each held under `merges.Background` and reused until `FRESH_S` (30) seconds after a thread began its resolution, so
 a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
-answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again. A head whose merge GitHub has not
+answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again.
+A resolution still waiting for one of the `merges.WORKERS` (4) threads has read nothing, so its head stays held
+as while it runs and spends no try, and the bound of a resolution runs from when a thread began it. A head whose merge GitHub has not
 built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose
 resolution ran past `merges.BOUND_S` (45) seconds, waits out its quiet window again with the try counted in its
 waiting entry, under the `UNMERGED_TRIES` (4) one; at that one the lab gives up on asking for a merge of the
@@ -2772,11 +2774,11 @@ head instead, keeps its waiting entry's window from that try unrestarted, and st
 once with no further read of GitHub, grading the bare head against its event base instead, as it did before
 this merge resolution existed, and the grade's required check names that the lab got no test merge within that
 many tries, true of every one of those causes. A live grade whose `required` frame goes stale (a release
-requirement changed after it started) regrades through the same bound, restarting its waiting window on every
-try including the one that reaches it, unlike a fresh head's hold: the regrade keeps its own count of tries on
-the grade document across passes and restarts, so a pull request or hotfix regrade whose merge has not resolved
-again yet holds rather than failing the check, and reaches the same bare-head fallback at the same bound after
-one more waited-out window.
+requirement changed after it started) regrades through the same bound. It has no waiting entry and so no
+window: each pass that advances the grade spends one try, unlike a fresh head's hold, and the regrade keeps its
+count of tries on the grade document across passes and restarts, so a pull request or hotfix regrade whose merge
+has not resolved again yet holds rather than failing the check, and grades the bare head with the same fallback
+on the pass after its `UNMERGED_TRIES`th try.
 
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
