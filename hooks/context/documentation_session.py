@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 from hooks._async import fork_and_call
 from hooks.common import inject_context, log
@@ -154,7 +155,7 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
 
 def _finish(path: Path, row: dict) -> None:
     ledger = LedgerClient(service=True) if row["swarm"] else None
-    source = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
+    source: dict[str, Any] = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
     if ledger and row["task"] and not source:
         row.update(status="complete", verdict=dict(UNKNOWN_TASK))
         _write(path, row)
