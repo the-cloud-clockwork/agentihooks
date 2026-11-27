@@ -108,6 +108,7 @@ MOVED = {
     ("test.yml", "lab-verdict"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): QUEUED,
+    ("test.yml", "sonar-after-unit"): QUEUED,
     ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
     ("test.yml", "launch-hotfix"): LIGHT,
