@@ -247,7 +247,7 @@ class Pulls:
         moved: list[str] = []
         swarms: list[str] = []
 
-        def change(snapshot):
+        def change(snapshot: Any) -> Any:
             if snapshot is None:
                 return None
             after = json.loads(json.dumps(snapshot))
