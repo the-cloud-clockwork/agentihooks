@@ -59,7 +59,7 @@ def plant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Callable[
     yield write
     for name in planted:
         sys.modules.pop(name, None)
-        vars(scripts.ci_lab).pop(name.rpartition(".")[2], None)
+        scripts.ci_lab.__dict__.pop(name.rpartition(".")[2], None)
 
 
 @pytest.fixture
