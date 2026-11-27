@@ -101,6 +101,15 @@ def test_swarm_for_builds_its_panes_with_the_real_directory_and_environ(
     assert captured == {"directory": tmp_path, "environ": environ}
 
 
+def test_swarm_for_refuses_a_layout_with_fewer_panes_than_engineers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli.layout, "HerdrPanes", FakePanes)
+    monkeypatch.setattr(cli.layout, "build", lambda caller, count, panes: [caller, "w1:p2"])
+    with pytest.raises(ValueError, match="zip"):
+        cli._swarm_for(_namespace(agents=3), {}, "w1:p1", "quick-test", tmp_path)
+
+
 def test_up_passes_its_real_arguments_to_every_collaborator_and_prints_exact_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

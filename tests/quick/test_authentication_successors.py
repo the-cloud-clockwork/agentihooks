@@ -220,3 +220,36 @@ def test_initial_launch_preserves_an_already_launching_native_engineer(
     monkeypatch.setattr(launch.subprocess, "Popen", refuse)
     assert launch.start_all(tmp_path, swarm, {}) == {}
     assert registry.load(tmp_path) == swarm
+
+
+def test_initial_launch_skips_seats_it_cannot_take_and_still_launches_later_engineers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    swarm = registry.Swarm(
+        "quick-proof",
+        str(tmp_path),
+        (
+            registry.Seat(1, "master", "w1:p1", "claude", "quick-proof-master", session_id="master-session"),
+            registry.Seat(2, "eng-1", "w1:p2", "claude", "quick-proof-eng-1", state=registry.LAUNCHING),
+            registry.Seat(3, "eng-2", "w1:p3", "codex", "quick-proof-eng-2", auth="default"),
+            registry.Seat(4, "eng-3", "w1:p4", "claude", "quick-proof-eng-3", auth="named", account="alpha"),
+        ),
+    )
+    paths.create(tmp_path, [seat.seat for seat in swarm.seats])
+    registry.save(tmp_path, swarm)
+    registry.set_state(tmp_path, "eng-2", registry.LAUNCHING)
+    launched: list[list[str]] = []
+
+    class Process:
+        def __init__(self, command: list[str], env: dict[str, str]) -> None:
+            launched.append(command)
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr(launch.subprocess, "Popen", Process)
+    assert launch.start_all(tmp_path, swarm, {}) == {"eng-3": 0}
+    assert [command[-2:] for command in launched] == [["--auth", "named:alpha"]]
+    saved = registry.load(tmp_path)
+    assert saved is not None
+    assert [seat.state for seat in saved.seats[1:]] == [registry.LAUNCHING, registry.LAUNCHING, registry.PENDING]

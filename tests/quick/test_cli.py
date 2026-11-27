@@ -173,7 +173,7 @@ def test_up_refuses_a_registry_removed_during_native_startup(
         monkeypatch.setattr(cli.registry, "set_state", remove)
     assert cli.main(["up", "--agents", "2", "--auth", "default", "--dir", str(tmp_path)], quick_env) == 2
     captured = capsys.readouterr()
-    assert "quick swarm registry disappeared during startup" in captured.err
+    assert "agentihooks quick: quick swarm registry disappeared during startup" in captured.err.splitlines()
     assert '"state": "ready"' not in captured.out
 
 
