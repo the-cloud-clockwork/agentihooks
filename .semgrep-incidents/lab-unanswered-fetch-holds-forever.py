@@ -54,8 +54,13 @@ class Unmerged(ValueError):
     pass
 
 
+class MergeRefused(ValueError):
+    pass
+
+
 class merges:
     MergeUnanswered = MergeUnanswered
+    MergeRefused = MergeRefused
 
 
 class HoldsBoundedByTheResolver:
@@ -65,6 +70,18 @@ class HoldsBoundedByTheResolver:
         try:
             return [self._start(held["request"], unmerged)]
         except (Unmerged, merges.MergeUnanswered) as error:
+            # ok: lab-unanswered-fetch-holds-forever
+            self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
+            return [f"holding {held['request']}: {error}"]
+
+
+class HoldsBoundedByTheResolverFamily:
+    def _release(self, name: str, held: dict[str, Any], now_ms: int) -> list[str]:
+        self: Any
+        unmerged = held.get("unmerged", 0)
+        try:
+            return [self._start(held["request"], unmerged)]
+        except (Unmerged, merges.MergeRefused) as error:
             # ok: lab-unanswered-fetch-holds-forever
             self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
             return [f"holding {held['request']}: {error}"]
