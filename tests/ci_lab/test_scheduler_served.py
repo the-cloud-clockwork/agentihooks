@@ -117,6 +117,11 @@ def test_the_slug_of_a_repository_is_its_owner_and_name_whatever_form_names_it(r
 
 
 @pytest.mark.feature("lab-serves-listed-repositories")
+def test_the_slug_of_a_repository_loses_only_the_slashes_at_its_ends() -> None:
+    assert intake.slug("https://github.com/Xenon/WidgetsX/") == "xenon/widgetsx"
+
+
+@pytest.mark.feature("lab-serves-listed-repositories")
 @pytest.mark.parametrize(
     ("listed", "expected"),
     [
@@ -174,6 +179,17 @@ def test_a_head_of_a_repository_that_is_not_served_is_ignored_before_its_actor_i
     run = lab(frozenset({SLUG}))
     _head(run, OTHER, actor="stranger")
     assert run.tick(1000) == [IGNORED]
+
+
+@pytest.mark.feature("lab-serves-listed-repositories")
+def test_a_head_of_a_served_repository_is_held_in_the_pass_that_ignores_a_head_before_it(
+    lab: Callable[[frozenset[str] | None], Run],
+) -> None:
+    run = lab(frozenset({SLUG}))
+    _head(run, OTHER)
+    _head(run, REPO)
+    assert run.tick(1000)[:2] == [IGNORED, RECEIVED]
+    assert [(grade.repo, grade.head) for grade in run.grades()] == [(REPO, HEAD_A)]
 
 
 @pytest.mark.feature("lab-serves-listed-repositories")
