@@ -20,7 +20,6 @@
     "tests/gates/test_first_read.py::test_only_own_opening_prompt_is_exempt",
     "tests/gates/test_first_read.py::test_marker_is_isolated_to_its_session",
     "tests/gates/test_first_read.py::test_registry_default_and_swarm_key",
-    "tests/gates/test_first_read_default.py::test_catalogue_enforces_first_read_by_default",
     "tests/gates/test_first_read.py::test_evaluation_fails_open_on_marker_error",
     "tests/gates/test_first_read.py::test_existing_mode_and_standalone_contracts_are_preserved",
     "tests/gates/test_first_read_executor.py::test_enforce_blocks_native_shell_calls",

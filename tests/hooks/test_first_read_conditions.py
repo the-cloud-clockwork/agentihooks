@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from scripts import seat_brief
 from scripts.gates import first_read
 
 
@@ -125,7 +126,7 @@ def test_codex_code_mode_success_marks(response: Any) -> None:
         "Warning: truncated output (original token count: 51981)\nTotal output lines: 740\n\n"
         "Seat ci-1@rig-grade-swarm.\nHandoff:\n# Handoff v2\n",
         "Seat eng-1@rig-grade-swarm.\nHandoff:\nnone\nCulture:\nnone\n",
-        "seat brief: this session holds no swarm or quick swarm seat, so there are no seat notes to read.\n",
+        f"{seat_brief.NO_SEAT}\n",
     ],
 )
 def test_codex_plain_brief_output_marks(response: str) -> None:
@@ -149,6 +150,10 @@ def test_codex_plain_brief_output_marks(response: str) -> None:
         "On branch dev\nnothing to commit\n",
         "notes\nSeat eng-1@rig-grade-swarm.\n",
         "Seat eng-1@rig-grade-swarm\n",
+        "Seat .\n",
+        "Warning: truncated output (original token count: )\nTotal output lines: 1\n\nSeat eng-1@rig-grade-swarm.\n",
+        "Warning: truncated output (original token count: 9)\nTotal output lines: \n\nSeat eng-1@rig-grade-swarm.\n",
+        "Warning: truncated output (original token count: 9)\nTotal output lines: 1\n\n\nSeat eng-1@rig-grade-swarm.\n",
         "",
     ],
 )

@@ -360,7 +360,8 @@ SessionStart also caches resolved seat membership under
 registry follows the same fast path as one supplied by environment variables.
 
 Use the existing gate controls to select `first-read-gate=observe` or
-`first-read-gate=off` on a swarm; the change applies at once, with no release.
+`first-read-gate=off` on a swarm; hooks pick it up within five seconds, with no
+release.
 `AGENTIHOOKS_GATE_FIRST_READ` selects the mode only outside a swarm or when the
 swarm configuration cannot be read.
 
