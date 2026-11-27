@@ -1,0 +1,50 @@
+from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import Mock
+
+import pytest
+
+from scripts.swarm_v2 import worker_image
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+def test_worker_image_locks_the_planner_sandbox_runtime() -> None:
+    root = Path(__file__).resolve().parents[2]
+    tools = worker_image.load_lock(root / "docker/swarm-node/versions.lock", "amd64")["tools"]
+    sandbox = tools["bwrap"]
+    assert sandbox["companion"] == "codex"
+    assert sandbox["version"] == tools["codex"]["version"]
+    assert sandbox["url"] == tools["codex"]["url"].replace("/codex-", "/bwrap-")
+    assert sandbox["member"] == tools["codex"]["member"].replace("codex-", "bwrap-")
+    assert sandbox["sha256"] != tools["codex"]["sha256"]
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+@pytest.mark.parametrize("name", ["bwrap", "codex-code-mode-host"])
+def test_companion_identity_accepts_its_native_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    binary = tmp_path / name
+    binary.write_bytes(b"locked companion")
+    usage = f"usage: {binary} [OPTIONS...] [--] COMMAND [ARGS...]" if name == "bwrap" else f"Usage: {name} [OPTIONS]"
+    run = Mock(return_value=CompletedProcess([], 0, usage + "\n", ""))
+    monkeypatch.setattr(worker_image.subprocess, "run", run)
+    tools = {"tools": {name: {"companion": "codex", "version": "0.162.0"}}}
+    assert worker_image.tool_versions(tools, tmp_path)[name] == (
+        f"{name} 0.162.0 sha256:{worker_image.checksum(binary)}"
+    )
+    run.assert_called_once_with([str(binary), "--help"], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+@pytest.mark.parametrize("name", ["bwrap", "codex-code-mode-host"])
+def test_companion_identity_refuses_another_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    binary = tmp_path / name
+    binary.write_bytes(b"wrong companion")
+    run = Mock(return_value=CompletedProcess([], 0, "usage: other [OPTIONS]\n", ""))
+    monkeypatch.setattr(worker_image.subprocess, "run", run)
+    tools = {"tools": {name: {"companion": "codex", "version": "0.162.0"}}}
+    with pytest.raises(ValueError, match=f"binary usage mismatch: {name}"):
+        worker_image.tool_versions(tools, tmp_path)
