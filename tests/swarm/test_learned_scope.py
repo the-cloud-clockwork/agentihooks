@@ -261,7 +261,7 @@ def test_a_failed_scan_leaves_the_index_unlisted_and_a_held_claim_reads_the_inde
 ) -> None:
     import json
 
-    from scripts.inbox.seats import SeatMemory
+    from scripts.inbox.seats import LEARNED_CLAIM_S, SeatMemory
 
     store, _, _ = env
     memory = SeatMemory(store.redis)
@@ -280,6 +280,7 @@ def test_a_failed_scan_leaves_the_index_unlisted_and_a_held_claim_reads_the_inde
     held = memory.scoped("sw", "eng-1@sw")
     assert not store.redis.exists(f"{index}:listed")
     assert store.redis.get(f"{index}:claim") == "1"
+    assert 0 < store.redis.ttl(f"{index}:claim") <= LEARNED_CLAIM_S
     assert [row["text"] for row in held] == ["own note"]
     store.redis.delete(f"{index}:claim")
     monkeypatch.setattr(store.redis, "scan_iter", scan)
