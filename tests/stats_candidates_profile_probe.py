@@ -85,7 +85,8 @@ print(json.dumps({'split': split, 'key': split_key(split), 'workers': workers, '
     split_data = json.loads(subprocess.check_output([sys.executable, "-c", split_program], cwd=root, text=True))
     (reports / "split.json").write_text(json.dumps(split_data))
     assert [len(part) for part in split_data["split"]] == [262, 259, 263, 262]
-    assert split_data["key"].startswith("62ef409f0334")
+    assert split_data["key"] == "62ef409f03342b8c2592338b7dfdf6bcb1bb1723ec1363fdec885ecfbc48cf93"
+    assert split_data["workers"] == len(split_data["buckets"]) == 5
     loader = reports / "loader"
     loader.mkdir()
     (loader / "sitecustomize.py").write_text(BOOTSTRAP)
@@ -153,7 +154,7 @@ print(json.dumps({'split': split, 'key': split_key(split), 'workers': workers, '
     print(json.dumps(summary, indent=2), flush=True)
     assert result.returncode == 0, (reports / "run.log").read_text()[-12000:]
     assert len(metadata) >= 3 + len(split_data["buckets"])
-    part = json.loads((reports / "stats/part-0.json").read_text())
+    part = json.loads((reports / "stats/group-0/part-0.json").read_text())
     assert part["split"] == split_data["key"]
     assert len(part["results"]) == len(split_data["buckets"])
     selected = set(split_data["split"][0])
