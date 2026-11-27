@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_read_jobs:d70a3750539c0d07a44b8d74eb0b53f88c82773cd22faf5b999cd17e1e1f6f3e": {
+    "reader": "Standards",
+    "reason": "pending starts with distinct job-taking nodes and gains only absent holder nodes from the same tree. The finite tree already bounds traversal at len(nodes)."
+  }
+}

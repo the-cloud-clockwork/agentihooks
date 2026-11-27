@@ -2469,6 +2469,31 @@
       ]
     },
     {
+      "id": "ci-select-workflow-job-readers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2734",
+      "behaviour": "A pull request that changes only the jobs of the Tests workflow selects, in each test file that names the workflow or that the dev record shows opening it, the top level test definitions that index a changed job by name and those that read every job, as single definitions where their file runs its definitions apart, instead of every such file whole. A definition reads every job when it takes a jobs mapping any other way, indexes no job, sits inside another top level statement, or uses other than by a constant key a document that a YAML load returns or that a jobs mapping is taken from, unless the test module builds that mapping itself. An edited anchor changes every job that uses it, an edit that changes the parsed workflow outside its jobs or a workflow that does not parse on either side still selects every workflow test, and an edit that changes no parsed job selects only the tests that read every job, or the full suite when none does.",
+      "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
+      "tests": [
+        "tests/test_ci_select.py::test_changed_jobs_names_the_jobs_whose_parsed_definition_changed",
+        "tests/test_ci_select.py::test_changed_jobs_is_none_outside_the_jobs_or_without_two_parsed_workflows",
+        "tests/test_ci_select.py::test_changed_jobs_compares_the_head_against_its_merge_base",
+        "tests/test_ci_select.py::test_definition_jobs_reads_the_jobs_a_test_indexes_by_name",
+        "tests/test_ci_select.py::test_definition_jobs_covers_only_test_functions_and_classes",
+        "tests/test_ci_select.py::test_workflow_tests_offers_the_job_readers_of_each_named_or_recorded_file",
+        "tests/test_ci_select.py::test_workflow_tests_without_a_record_offers_each_definition_of_a_file_naming_the_workflow",
+        "tests/test_ci_select.py::test_a_one_job_edit_selects_that_jobs_readers_and_the_every_job_readers",
+        "tests/test_ci_select.py::test_an_edit_outside_the_jobs_selects_every_workflow_test",
+        "tests/test_ci_select.py::test_a_recorded_workflow_reader_file_offers_each_definition_that_reads_a_changed_job",
+        "tests/test_ci_select.py::test_a_document_handed_on_beside_a_job_index_selects_its_reader_for_any_job_edit",
+        "tests/test_ci_select.py::test_a_job_edit_beside_another_change_keeps_the_tests_naming_that_change",
+        "tests/test_ci_select.py::test_a_selected_definition_in_a_fakeredis_module_selects_the_suite_speed_check",
+        "tests/test_ci_select.py::test_selected_definitions_of_a_splittable_file_run_apart_and_count_their_seconds",
+        "tests/test_ci_select.py::test_a_definition_runs_alone_only_when_its_file_runs_its_definitions_apart",
+        "tests/test_ci_select.py::test_main_selects_the_readers_of_the_jobs_a_pull_request_changed"
+      ]
+    },
+    {
       "id": "ci-select-tick-catalogue-page-edit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2716",

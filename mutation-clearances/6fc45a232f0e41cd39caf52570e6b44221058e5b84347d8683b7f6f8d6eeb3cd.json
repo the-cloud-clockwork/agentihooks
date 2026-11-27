@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_taken_from:72360970e460fc907310e5cb919dfdc8e7e189b3b7717ae569eb9881239030d9": {
+    "reader": "Standards",
+    "reason": "The inner cast preserves node, its func, and the resulting base."
+  }
+}
