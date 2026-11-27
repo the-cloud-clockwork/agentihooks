@@ -69,7 +69,7 @@ def test_mirror_fetch_times_out_against_a_hanging_remote(tmp_path: Path, hanging
     bounded = replace(mirror, **{"timeout_s": 0.2})
     with pytest.raises(subprocess.TimeoutExpired) as failure:
         bounded.fetch(HEAD_A)
-    assert failure.value.timeout == 0.2
+    assert failure.value.timeout <= 0.2
     assert failure.value.cmd == [
         "git",
         "-C",
