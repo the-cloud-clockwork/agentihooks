@@ -37,7 +37,11 @@ def selections(value: str, harnesses: list[str], environ: Mapping[str, str]) -> 
         if choice in ("routed", "default"):
             result.append((choice, ""))
         elif choice.startswith("named:") and choice != "named:":
-            result.append(("named", _named(choice.removeprefix("named:"), harness, active)))
+            result.append(
+                ("default", "")
+                if harness == "program"
+                else ("named", _named(choice.removeprefix("named:"), harness, active))
+            )
         else:
             raise QuickError("authentication must be routed, default or named:reference")
     return result
