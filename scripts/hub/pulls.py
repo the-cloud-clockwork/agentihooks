@@ -77,10 +77,11 @@ def _joined(swarm: str, value: Any) -> dict[str, list[str]] | None:
 
 
 def _merged(swarms: list[str], value: Any) -> dict[str, list[str]] | None:
-    """Return the repository record ``value`` with ``swarms`` awaiting a release, or None when they already are."""
+    """Return the repository record ``value`` with ``swarms`` listed and awaiting a release, or None when they already
+    are."""
     record = _record(value)
-    unreleased = sorted({*record["unreleased"], *swarms})
-    return None if unreleased == record["unreleased"] else {**record, "unreleased": unreleased}
+    merged = {"swarms": sorted({*record["swarms"], *swarms}), "unreleased": sorted({*record["unreleased"], *swarms})}
+    return None if merged == record else merged
 
 
 def _closed(swarms: list[str], busy: set[str], value: Any) -> dict[str, list[str]] | None:
@@ -238,7 +239,6 @@ class Pulls:
             self._index(stored["url"], True)
             _update(self._state, name, partial(_joined, swarm))
         elif added is not None and stored["state"] == "merged":
-            _update(self._state, name, partial(_joined, swarm))
             _update(self._state, name, partial(_merged, [swarm]))
 
     def observe(self, seen: Observation) -> None:

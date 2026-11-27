@@ -901,12 +901,13 @@ def test_a_track_that_races_a_drop_leaves_its_swarm_listed() -> None:
         if key == pulls.repository_key(REPO) and not raced:
             raced.append(revision)
             hub.track("crew", OTHER)
+            hub.track("other", OTHER)
         return update(key, value, revision)
 
     setattr(state, "update", racing)
     hub.observe(Observation(URL, "closed", "a1"))
     assert raced
-    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
+    assert record(bus) == {"swarms": ["crew", "other"], "unreleased": []}
 
 
 SWEPT = [f"https://github.com/acme/widgets/pull/{number}" for number in range(100, 106)]
