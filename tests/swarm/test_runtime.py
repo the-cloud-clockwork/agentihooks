@@ -789,6 +789,83 @@ def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
     assert "--route" not in _passed(seen["runs"][0])
 
 
+SHELL = {"name": "bash", "argv": ["bash"]}
+CLAUDE = {"name": "claude", "argv": ["claude", "--resume", "c0ffee"]}
+
+
+def _restored_pane(runtime, session, processes, fails=False):
+    from scripts.herdr_host import HerdrError
+
+    listed = runtime.herdr
+    asked = []
+
+    def herdr(args):
+        if args[0] == "pane":
+            asked.append(args)
+            if fails:
+                raise HerdrError("herdr pane get: no such pane")
+            if args[1] == "get":
+                return {"pane": {"pane_id": args[2], "agent_session": session}}
+            return {"process_info": {"foreground_processes": processes}}
+        return listed(args)
+
+    runtime.herdr = herdr
+    return asked
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_resume_reopens_the_agent_in_the_pane_herdr_restored_for_it(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    asked = _restored_pane(runtime, {"kind": "id", "value": "c0ffee"}, [SHELL])
+    placed = runtime.resume(config, replace(agent, pane_id="w2:p9"), "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--pane") + 1] == "w2:p9"
+    assert argv.index("--pane") < argv.index("--")
+    assert asked == [["pane", "get", "w2:p9"], ["pane", "process-info", "--pane", "w2:p9"]]
+    assert placed.pane_id == "w2:p9"
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+@pytest.mark.parametrize(
+    ("session", "processes", "fails"),
+    [
+        ({"kind": "id", "value": "someone-else"}, [SHELL], False),
+        ({"kind": "id", "value": "c0ffee"}, [CLAUDE], False),
+        ({"kind": "id", "value": "c0ffee"}, [SHELL, CLAUDE], False),
+        ({"kind": "id", "value": "c0ffee"}, [], False),
+        (None, [SHELL], False),
+        ({"kind": "id", "value": "c0ffee"}, [SHELL], True),
+    ],
+)
+def test_resume_opens_a_new_pane_unless_its_own_waits_as_a_bare_shell(tmp_path, session, processes, fails):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    _restored_pane(runtime, session, processes, fails)
+    runtime.resume(config, replace(agent, pane_id="w2:p9"), "you were restored")
+    assert "--pane" not in seen["runs"][0]
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_an_agent_without_a_recorded_pane_never_asks_herdr_about_one(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    asked = _restored_pane(runtime, {"kind": "id", "value": "c0ffee"}, [SHELL])
+    runtime.resume(config, agent, "you were restored")
+    assert asked == [] and "--pane" not in seen["runs"][0]
+
+
+@pytest.mark.feature("swarm-reopens-in-restored-pane")
+def test_an_agent_without_a_conversation_never_takes_a_pane_without_one(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "")
+    asked = _restored_pane(runtime, None, [SHELL])
+    runtime.resume(config, replace(agent, pane_id="w2:p9", conversation_id=""), "you were restored")
+    assert asked == [] and "--pane" not in seen["runs"][0]
+
+
 def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path, scratch):
     from scripts.swarm.tick import SpawnError
 

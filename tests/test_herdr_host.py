@@ -8,6 +8,41 @@ import pytest
 
 from scripts import herdr_host, herdr_panes, init_agent
 
+INSTALLED = herdr_host.binary
+
+
+def _which(monkeypatch, found):
+    asked = []
+
+    def which(command, path=None):
+        asked.append((command, path))
+        return found.get(path)
+
+    monkeypatch.setattr(herdr_host.shutil, "which", which)
+    return asked
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_herdr_is_found_in_the_local_bin_its_installer_uses(monkeypatch):
+    local = str(Path.home() / ".local" / "bin")
+    asked = _which(monkeypatch, {local: f"{local}/herdr"})
+    assert INSTALLED() == f"{local}/herdr"
+    assert asked == [("herdr", None), ("herdr", local)]
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_herdr_on_path_comes_before_the_local_bin(monkeypatch):
+    local = str(Path.home() / ".local" / "bin")
+    asked = _which(monkeypatch, {None: "/usr/bin/herdr", local: f"{local}/herdr"})
+    assert INSTALLED() == "/usr/bin/herdr"
+    assert asked == [("herdr", None)]
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_no_herdr_anywhere_is_none(monkeypatch):
+    _which(monkeypatch, {})
+    assert INSTALLED() is None
+
 
 class FakeHerdr:
     def __init__(self, workspaces=()):
@@ -122,13 +157,15 @@ def test_the_spawn_rename_uses_the_name_the_swarm_looks_agents_up_by(herdr):
     assert herdr.made("agent rename")[2:] == ["w1:p5", herdr_target(name)]
 
 
+@pytest.mark.feature("herdr-enabled-when-installed")
 @pytest.mark.parametrize(
     ("flag", "env", "binary", "state", "expected"),
     [
         ("native", {}, "/bin/herdr", None, ("native", True)),
         ("", {"AGENTIHOOKS_TERMINAL_HOST": "native"}, "/bin/herdr", None, ("native", True)),
         ("", {}, "/bin/herdr", None, ("herdr", False)),
-        ("", {}, "/bin/herdr", {"herdr": {"enabled": False}}, ("native", False)),
+        ("", {}, "/bin/herdr", {"herdr": {"enabled": False}}, ("herdr", False)),
+        ("", {}, None, {"herdr": {"enabled": True}}, ("native", False)),
         ("", {}, None, None, ("native", False)),
     ],
 )
