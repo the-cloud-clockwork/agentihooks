@@ -181,11 +181,12 @@ def test_outside_a_swarm_the_call_goes_through_and_nothing_is_written(
 
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_the_alert_waits_a_full_hour_per_gate_whatever_the_error(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+    module = "scripts.gates.absent_gate_module"
+    monkeypatch.setitem(entry.GATES, "absent", (lambda: import_module(module),))
     monkeypatch.setitem(entry.GATES, "other", missing("scripts.gates.other_absent_module"))
     assert world.main("absent") == 0
     world.now = START + HOUR - 1
-    entry.GATES["absent"] = missing("scripts.gates.renamed_absent_module")
+    module = "scripts.gates.renamed_absent_module"
     assert world.main("absent") == 0
     assert world.main("other") == 0
     world.now = START + HOUR
