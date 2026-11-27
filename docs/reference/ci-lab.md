@@ -2165,6 +2165,31 @@ the PushSecret `Synced`, a 48 byte key in the receiver Secret, two push deliveri
 and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 `github-merge-queue[bot]`.
 
+#### Relay proof
+
+A head pushed only to the lab remote reaches its open pull request through the relay. Push it on top
+of the pull request's GitHub head with that branch as the `branch=` option, then read the relay's
+lines in the scheduler log and three GitHub answers for the pushed sha:
+
+```bash
+git push -o branch=<branch> lab HEAD:refs/grade/<task>
+kubectl -n ci-lab logs deploy/ci-lab-scheduler --since=30m | grep -E '<sha>|<branch>'
+gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha
+gh api "repos/<owner>/<repo>/activity?ref=refs/heads/<branch>" --jq '.[0]|{actor:.actor.login,activity_type,after}'
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs" --jq '.check_runs[]|{name,conclusion,external_id,app:.app.slug}'
+```
+
+A relayed head logs `pending <sha> for <branch>`, `pushed <sha> to <branch>`, one
+`posted lab/<gate> <conclusion> on <sha>` per check run with `lab/required` among them, then
+`updated <pull request url>`, or `opened <pull request url>` when the branch had no open pull
+request and the relay opened a draft into dev. The pull request's head is the sha, and the newest
+activity is a `push` by the App's bot whose `after` is the sha. Each posted line is a `lab-check`
+repository dispatch that the `Lab check` workflow turns into a check run, so the check runs list each
+`lab/<gate>` and `lab/required` with the external id `lab:<sha>`; a check run the scheduler posts
+itself carries its grade run instead. The activity names the same bot for an agent's own push made
+with the App, so the `pushed` line and those check runs on the sha are what show the relay wrote the
+head.
+
 ### Troubleshooting
 
 | Symptom | Cause | Check |
