@@ -1,0 +1,18 @@
+{
+  "id": "hub-admission-hive-account-seat",
+  "origin": "regression",
+  "rules": ["hub-admission-skips-account-seats"],
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-account-seat",
+  "behaviour": "Hub admission holds before claiming when the asking hive has no free permitted account seat, preserves the offer for another hive, and accepts hives without slot records.",
+  "seam": "Admission.admit and admission_seats.available over hive registry slots and account slot occupancy",
+  "tests": [
+    "tests/hub/test_admission.py::test_full_hive_accounts_hold_without_spending_a_claim_or_writing",
+    "tests/hub/test_admission.py::test_a_later_free_account_on_the_hive_allows_admission",
+    "tests/hub/test_admission.py::test_a_codex_lane_ignores_free_claude_seats",
+    "tests/hub/test_admission.py::test_a_hive_without_account_slots_keeps_admitting",
+    "tests/hub/test_admission.py::test_a_closed_hive_account_holds_without_reading_occupancy",
+    "tests/hub/test_admission.py::test_hive_account_occupancy_counts_only_live_local_workers",
+    "tests/hub/test_admission.py::test_an_unreported_account_has_a_free_hive_seat",
+    "tests/hub/test_admission.py::test_a_seatless_hive_leaves_the_queued_offer_for_a_second_hive"
+  ]
+}

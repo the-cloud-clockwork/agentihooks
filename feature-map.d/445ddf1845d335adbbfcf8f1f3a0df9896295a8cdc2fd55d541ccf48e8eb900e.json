@@ -1,0 +1,10 @@
+{
+  "id": "compose-drill-take-bound",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-smoke-seat-hold-hang",
+  "behaviour": "The compose recovery drill's take step counts held polls with empty ones toward its limit of five idle polls in a row and, when it took fewer launches than asked, exits naming the tasks it took and every poll outcome, which stops the drill at that step instead of polling forever on offers the account seat hold keeps.",
+  "seam": "take in the embedded Python of scripts/packaging/compose-recovery-drill.sh, run against a stand in spoke that only answers held",
+  "tests": [
+    "tests/test_compose_recovery_drill.py::test_the_recovery_drill_take_stops_on_held_polls_and_names_them"
+  ]
+}

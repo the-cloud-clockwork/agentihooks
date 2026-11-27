@@ -2154,6 +2154,44 @@
       ]
     },
     {
+      "id": "event-offer-account-seats",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-event-offer-seat-hold",
+      "behaviour": "Event offers wait before hub or spoke claim while no permitted harness has a free account seat, including required Claude with free Codex and both harnesses full. Repeated holds retain owner, generation, delivery attempts, claim lives and harness and profile requirements; a returning seat admits the same offer. Mixed offers select the free permitted harness, fresh admitted runtimes read quota before choosing, and queued legacy requirements are refreshed under the same offer identity. An offer whose lane agent, required harness and profile permit no harness passes the spoke seat check and is refused at hub admission with a reason naming that empty set, before any account read or claim.",
+      "seam": "Admission.admit, Spoke.poll, readiness.offer and publish, and the first admitted HerdrRuntime.spawn",
+      "tests": [
+        "tests/hub/test_offer_quota.py::test_a_claude_offer_is_held_before_claim_until_its_account_has_a_seat",
+        "tests/hub/test_offer_quota.py::test_a_mixed_offer_waits_for_either_harness_without_spending_a_claim_life",
+        "tests/hub/test_offer_quota.py::test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_claim",
+        "tests/hub/test_offer_quota.py::test_a_claim_cap_refusal_stops_before_reading_account_seats",
+        "tests/hive/test_offer_quota.py::test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_seat_returns",
+        "tests/swarm/test_offer_quota.py::test_a_fresh_admitted_runtime_reads_accounts_before_launching_required_claude",
+        "tests/swarm/test_offer_quota.py::test_a_mixed_admitted_offer_uses_codex_when_only_codex_has_an_account_seat",
+        "tests/swarm/test_offer_quota.py::test_an_admitted_spawn_keeps_quota_rows_owned_by_the_tick_pass",
+        "tests/swarm/test_offer_quota.py::test_an_admitted_relaunch_with_its_saved_launch_reads_no_quota_rows",
+        "tests/swarm/test_offer_quota.py::test_restrictions_preserve_only_admission_fields",
+        "tests/swarm/test_offer_quota.py::test_accounts_reads_capacity_rows_without_a_probe",
+        "tests/swarm/test_offer_quota.py::test_permitted_automatic_lanes",
+        "tests/swarm/test_offer_quota.py::test_permitted_preserves_constraints",
+        "tests/swarm/test_offer_quota.py::test_permitted_uses_lane_profile",
+        "tests/swarm/test_offer_quota.py::test_available_selects_free_permitted_harnesses",
+        "tests/swarm/test_offer_quota.py::test_available_reuses_quota_thresholds",
+        "tests/swarm/test_offer_quota.py::test_available_excludes_quota_predecessor",
+        "tests/swarm/test_offer_quota.py::test_fit_passes_master_offers_without_reading_accounts",
+        "tests/swarm/test_offer_quota.py::test_fit_preserves_placement_before_quota",
+        "tests/swarm/test_offer_quota.py::test_fit_judges_the_lane_harness_of_its_own_swarm",
+        "tests/swarm/test_offer_quota.py::test_fit_passes_an_offer_no_harness_may_take_on_to_the_hub_refusal",
+        "tests/swarm/test_offer_quota.py::test_permitted_reads_no_lanes_from_a_swarm_without_them",
+        "tests/swarm/test_offer_quota.py::test_fit_holds_legacy_offers_without_reading_accounts",
+        "tests/swarm/test_offer_quota.py::test_fit_reads_once_and_preserves_hold_until_poll_ends",
+        "tests/swarm/test_offer_quota.py::test_fit_empty_read_is_cached_until_next_poll",
+        "tests/swarm/test_offer_quota.py::test_fit_default_reader_is_lazy",
+        "tests/swarm/test_readiness.py::test_an_offer_carries_only_the_quota_restrictions_needed_before_claim",
+        "tests/swarm/test_readiness.py::test_publish_refreshes_quota_metadata_without_a_new_claim_generation"
+      ],
+      "rules": ["event-claim-before-account-eligibility"]
+    },
+    {
       "id": "hub-admission-expert-room-reserve",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-room-reserve",
@@ -5456,6 +5494,11 @@
         "tests/swarm/test_learned_scope.py::test_scoped_memory_without_matching_notes_is_empty",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_reads_learned_lists_without_listing_agent_pointers",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_asks_redis_only_for_the_swarm_learned_keys",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_reads_the_index_after_its_first_scan",
+        "tests/swarm/test_learned_scope.py::test_notes_written_before_the_index_load_through_one_scan",
+        "tests/swarm/test_learned_scope.py::test_an_expired_scan_marker_loads_notes_written_without_the_index",
+        "tests/swarm/test_learned_scope.py::test_a_failed_scan_leaves_the_index_unlisted_and_a_held_claim_reads_the_index",
+        "tests/swarm/test_snapshot.py::test_a_restore_over_a_listed_swarm_loads_learned_notes_a_snapshot_left_out_of_the_index",
         "tests/swarm/test_learned_scope.py::test_learned_help_explains_the_explicit_full_listing"
       ]
     },
@@ -6090,6 +6133,28 @@
       "seam": "scripts.swarm.freeze.marks through unfocused and admitted",
       "tests": [
         "tests/swarm/test_freeze.py::test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count"
+      ]
+    },
+    {
+      "id": "swarm-phase-status-linear",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The page view's phase status builds the done phase set, the phase map and each phase's own plan task once per call, so publishing a watched ledger costs work linear in its phases and tasks instead of phases times phases and tasks, with each phase's state and label unchanged.",
+      "seam": "scripts.swarm.phase_state.status over lifecycle and label",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_status_scans_phases_and_tasks_a_fixed_number_of_times_whatever_the_phase_count",
+        "tests/swarm/test_phase_state.py::test_status_reports_each_phase_s_lifecycle_and_label_exactly"
+      ]
+    },
+    {
+      "id": "swarm-published-status-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The published swarm status keeps only the newest hundred transfers, as status already does for history, and the swarm view reads and decodes the published key once, so the ledger server's two second watch of each ledger stops fetching every handoff body ever written.",
+      "seam": "scripts.swarm.commands.publish and scripts.swarm.commands.view over lifecycle.view",
+      "tests": [
+        "tests/swarm/test_commands.py::test_publish_keeps_the_newest_hundred_transfers_and_every_other_status_key",
+        "tests/swarm/test_commands.py::test_view_reads_the_published_status_once"
       ]
     },
     {
@@ -12987,7 +13052,7 @@
     {
       "id": "quick-swarm",
       "origin": "inventory",
-      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; without an explicit authentication selection a seat starts on a routed account and never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
       "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, init-agent --pane and its quick seat route check, and the token block read of scripts.claude_quota_balancer.select_launch_credential",
       "tests": [
         "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
@@ -13044,7 +13109,9 @@
         "tests/quick/test_room_tick_launch.py::test_force_never_ends_a_seat_being_launched_or_a_missing_seat",
         "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
         "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
-        "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced"
+        "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced",
+        "tests/quick/test_cli.py::test_an_invalid_harness_count_never_creates_panes",
+        "tests/quick/test_launch_tick_mutants.py::test_start_all_launches_every_engineer_with_its_own_prompt_file_and_command"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },
@@ -13134,6 +13201,17 @@
         "tests/swarm/test_snapshot.py::test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest",
         "tests/swarm/test_snapshot.py::test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget"
       ]
+    },
+    {
+      "id": "hosted-controller-no-automatic-snapshot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+      "behaviour": "The chart's controller sets AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES to 0, so a running swarm without its own snapshot interval takes no automatic snapshot on the hosted controller, whose home dies with its pod; before, the controller wrote a snapshot of about 680 MB into its container layer on the node's system disk every 30 minutes that no restore could read. A swarm's own snapshot-minutes setting still turns them on.",
+      "seam": "deploy/helm/agentihooks-swarm values controller.env read by scripts.swarm.snapshot.interval_minutes through scripts.swarm.snapshot.auto",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_the_chart_controller_takes_no_automatic_snapshot_for_a_swarm_without_its_own_interval"
+      ],
+      "rules": []
     },
     {
       "id": "one-push-failed-or-conflicting-head",
@@ -17167,8 +17245,8 @@
       "id": "quick-native-authentication",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2900",
-      "behaviour": "Native Claude and Codex launchers retain explicit local or named authentication independently of automatic selection and persist safe Seat policy fields.",
-      "seam": "init-agent native authentication, saved Seat policy and isolated execution homes",
+      "behaviour": "Native quick engineers persist routed, default or named authentication independently of the master and retain explicit choices outside automatic quota tiers through initial and successor launches.",
+      "seam": "quick CLI selection, atomic native launch and binding, verified quota membership, safe status and master context",
       "tests": [
         "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes",
         "tests/quick/test_authentication.py::test_common_and_per_engineer_native_authentication_resolve_safe_references",
@@ -17195,12 +17273,33 @@
         "tests/test_named_native_authentication.py::test_named_native_selection_keeps_an_explicit_alias_of_the_same_login",
         "tests/test_named_native_authentication.py::test_claude_named_execution_keeps_the_exact_reference_without_automatic_deduplication",
         "tests/test_named_native_authentication.py::test_codex_named_execution_never_enumerates_or_reads_automatic_tiers",
-        "tests/test_named_native_authentication.py::test_missing_named_default_reference_never_falls_back_to_codex_local_login"
+        "tests/test_named_native_authentication.py::test_missing_named_default_reference_never_falls_back_to_codex_local_login",
+        "tests/quick/test_authentication_successors.py::test_initial_routed_launch_records_its_actual_native_session",
+        "tests/quick/test_room_tick_launch.py::test_saved_native_authentication_reaches_the_launcher",
+        "tests/quick/test_cli.py::test_up_persists_default_for_mixed_engineers_without_changing_master",
+        "tests/quick/test_cli.py::test_invalid_authentication_never_creates_panes",
+        "tests/quick/test_cli.py::test_up_resolves_named_native_references_per_engineer",
+        "tests/quick/test_cli.py::test_status_exposes_saved_authentication_and_tier_metadata",
+        "tests/quick/test_cli.py::test_master_context_exposes_each_safe_authentication_selection",
+        "tests/quick/test_authentication_quota.py::test_bound_explicit_quick_engineers_bypass_automatic_quota_switching",
+        "tests/quick/test_authentication_quota.py::test_routed_or_unverified_quick_members_retain_quota_policy",
+        "tests/quick/test_authentication_successors.py::test_initial_native_launch_binds_the_selected_engineer_before_ready",
+        "tests/quick/test_authentication_successors.py::test_native_successors_retain_saved_authentication_when_caller_routing_changes",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_keeps_failed_or_unbound_native_engineers_pending",
+        "tests/quick/test_authentication_successors.py::test_competing_initial_launchers_take_the_native_engineer_once",
+        "tests/quick/test_authentication_successors.py::test_initial_native_spawn_failure_releases_the_seat_for_retry",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_preserves_an_already_launching_native_engineer",
+        "tests/quick/test_authentication_successors.py::test_initial_launch_skips_seats_it_cannot_take_and_still_launches_later_engineers",
+        "tests/quick/test_cli.py::test_up_reports_an_unbound_native_engineer_as_pending",
+        "tests/quick/test_authentication_quota.py::test_bound_default_claude_without_a_target_marker_keeps_explicit_authentication",
+        "tests/quick/test_cli.py::test_up_refuses_a_registry_removed_during_native_startup"
       ],
       "rules": [
         "native-default-shared-login",
         "native-named-route-stripped",
-        "native-named-route-empty"
+        "native-named-route-empty",
+        "quick-authentication-unconditional-route",
+        "quick-initial-native-launch-without-take"
       ]
     }
   ],

@@ -12,6 +12,8 @@ from scripts.swarm import bottleneck_status, execution_card, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.herdr import visibility
 
+TRANSFERS_PUBLISHED = 100
+
 
 def hive_id() -> str:
     from scripts.hive import scope
@@ -116,8 +118,9 @@ def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], 
     return actions
 
 
-def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
-    store.redis.set(store.key(slug, "published"), json.dumps({"status": status, "workspaces": tails}))
+def publish(store: RedisStore, slug: str, status: dict[str, Any], tails: dict[str, Any]) -> None:
+    shown = {**status, "transfers": status["transfers"][-TRANSFERS_PUBLISHED:]} if "transfers" in status else status
+    store.redis.set(store.key(slug, "published"), json.dumps({"status": shown, "workspaces": tails}))
 
 
 def published_findings(store: RedisStore, slug: str) -> list[dict[str, Any]] | None:
@@ -147,7 +150,7 @@ def view(store: RedisStore, slug: str) -> dict:
         "terminals": terminals,
         "executions": executions,
         "ledger_state_projection_errors": errors,
-        "lifecycle": lifecycle.view(store, slug),
+        "lifecycle": lifecycle.view(store, slug, task_revisions=status.get("task_revisions") or {}),
         "recovery": recovery_view.view(store, slug, now),
         "context": context_view.view(store, slug, now) if context_view.enabled(os.environ) else None,
     }

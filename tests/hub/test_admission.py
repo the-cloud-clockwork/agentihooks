@@ -7,10 +7,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.bus import StateStore
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from scripts.hive import account_slots
-from scripts.hub import admission, slots
+from scripts.hub import admission, admission_seats, slots
 from scripts.swarm import admission_view, model_catalog
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.helpers import store_seed
@@ -2433,3 +2434,255 @@ def test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against
     assert read[0]["overview"] == rig.found["overview"]
     assert [phase["id"] for phase in read[0]["phases"]] == ["p1"]
     assert "t1" in {row["id"] for row in read[0]["tasks"]}
+
+
+@pytest.fixture
+def seat_bus(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    from scripts.events import factory
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    bus: Any = open_bus(BusConfig(), clock=lambda: 7_000)
+    opened = Mock(return_value=SimpleNamespace(state=bus.state, close=Mock()))
+    monkeypatch.setattr(factory, "open_bus", opened)
+    yield SimpleNamespace(bus=bus, opened=opened, bucket=bus.state("account-slots"))
+    bus.close()
+
+
+def _advertise_seats(rig: SimpleNamespace, slots: list[dict[str, Any]], hive: str = "hive-a") -> None:
+    from scripts.hive import registry
+
+    registry.beat(rig.store.redis, hive, {"heartbeat_at": 6_000, "slots": slots})
+
+
+def _account_value(state: StateStore, key: str, value: dict[str, Any]) -> None:
+    state.create(key, json.dumps(value).encode())
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+def test_full_hive_accounts_hold_without_spending_a_claim_or_writing(rig: SimpleNamespace, seat_bus: Any) -> None:
+    advertised = [
+        {"harness": "claude", "account": "a", "cap": 1},
+        {"harness": "codex", "account": "b", "cap": 2},
+    ]
+    _advertise_seats(rig, advertised)
+    values = [
+        {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
+        {"holders": {}, "hives": {"hive-a": {"sessions": 2, "observed": [], "expires_ms": 7_001}}},
+    ]
+    for slot, value in zip(advertised, values, strict=True):
+        _account_value(seat_bus.bucket, account_slots.key(slot["harness"], slot["account"]), value)
+    before = dict(rig.rows["t1"])
+
+    answered = rig.admitter.admit(SLUG, ask())
+
+    assert answered == {"held": "no free account seat on the asking hive"}
+    assert rig.rows["t1"] == before
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.claim_generation(SLUG, "t1") == 0
+    assert rig.store.claims(SLUG, "t1") == 0
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+    assert rig.admitter._held(rig.admitter._key(SLUG, ask())) is None
+    for slot, value in zip(advertised, values, strict=True):
+        assert json.loads(seat_bus.bucket.get(account_slots.key(slot["harness"], slot["account"])).value) == value
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+def test_a_later_free_account_on_the_hive_allows_admission(rig: SimpleNamespace, seat_bus: Any) -> None:
+    advertised = [
+        {"harness": "claude", "account": "a", "cap": 1},
+        {"harness": "claude", "account": "b", "cap": 2},
+    ]
+    _advertise_seats(rig, advertised)
+    for account in ("a", "b"):
+        _account_value(
+            seat_bus.bucket,
+            account_slots.key("claude", account),
+            {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
+        )
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None and "held" not in admitted
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+def test_a_codex_lane_ignores_free_claude_seats(rig: SimpleNamespace, seat_bus: Any) -> None:
+    rig.store.update(SLUG, lanes={"eng": {"agent": "codex"}})
+    _advertise_seats(
+        rig,
+        [{"harness": "claude", "account": "a", "cap": 1}, {"harness": "codex", "account": "b", "cap": 1}],
+    )
+    _account_value(
+        seat_bus.bucket,
+        account_slots.key("codex", "b"),
+        {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
+    )
+
+    answered = rig.admitter.admit(SLUG, ask())
+
+    assert answered == {"held": "no free account seat on the asking hive"}
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.ledger.writes == []
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+@pytest.mark.parametrize("fields", [{}, {"slots": []}], ids=["missing", "empty"])
+def test_a_hive_without_account_slots_keeps_admitting(
+    rig: SimpleNamespace, seat_bus: Any, fields: dict[str, Any]
+) -> None:
+    from scripts.hive import registry
+
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000, **fields})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None and "held" not in admitted
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    seat_bus.opened.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+@pytest.mark.parametrize("cap", [0, None, -1], ids=["zero", "unknown", "negative"])
+def test_a_closed_hive_account_holds_without_reading_occupancy(
+    rig: SimpleNamespace, seat_bus: Any, cap: int | None
+) -> None:
+    _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": cap}])
+
+    answered = rig.admitter.admit(SLUG, ask())
+
+    assert answered == {"held": "no free account seat on the asking hive"}
+    assert rig.ledger.writes == []
+    seat_bus.opened.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+@pytest.mark.parametrize(
+    "holders, hives, cap, free",
+    [
+        ({"busy": {"hive": "hive-a", "expires_ms": 7_001}}, {}, 1, False),
+        ({"busy": {"hive": "hive-b", "expires_ms": 7_001}}, {}, 1, True),
+        ({"busy": {"hive": "hive-a", "expires_ms": 7_000}}, {}, 1, True),
+        ({"busy": {"hive": "hive-a", "expires_ms": 7_001, "master": True}}, {}, 1, True),
+        ({"busy": {"hive": "hive-a", "expires_ms": 7_001}}, {}, 2, True),
+        ({}, {"hive-a": {"sessions": 2, "observed": [], "expires_ms": 7_001}}, 2, False),
+        ({}, {"hive-a": {"sessions": 2, "observed": [], "expires_ms": 7_000}}, 1, True),
+        ({}, {"hive-b": {"sessions": 2, "observed": [], "expires_ms": 7_001}}, 1, True),
+        (
+            {"busy": {"hive": "hive-a", "expires_ms": 7_001}},
+            {"hive-a": {"sessions": 1, "observed": ["busy"], "expires_ms": 7_001}},
+            2,
+            True,
+        ),
+        (
+            {"busy": {"hive": "hive-a", "expires_ms": 7_001}},
+            {"hive-a": {"sessions": 1, "observed": [], "expires_ms": 7_001}},
+            2,
+            False,
+        ),
+        (
+            {"busy": {"hive": "hive-a", "expires_ms": 7_001}},
+            {"hive-a": {"sessions": 0, "observed": ["busy"], "expires_ms": 7_001}},
+            1,
+            False,
+        ),
+    ],
+    ids=[
+        "local-holder",
+        "foreign-holder",
+        "expired-holder",
+        "master-holder",
+        "holder-below-cap",
+        "manual-sessions",
+        "expired-heartbeat",
+        "foreign-heartbeat",
+        "observed-holder",
+        "unobserved-session",
+        "nonnegative-manual-count",
+    ],
+)
+def test_hive_account_occupancy_counts_only_live_local_workers(
+    seat_bus: Any, holders: dict[str, Any], hives: dict[str, Any], cap: int, free: bool
+) -> None:
+    key = account_slots.key("claude", "a")
+    value = {"holders": holders, "hives": hives}
+    _account_value(seat_bus.bucket, key, value)
+
+    assert (
+        admission_seats.available("hive-a", [{"harness": "claude", "account": "a", "cap": cap}], ("claude",), 7_000)
+        is free
+    )
+
+    assert json.loads(seat_bus.bucket.get(key).value) == value
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+def test_an_unreported_account_has_a_free_hive_seat(seat_bus: Any) -> None:
+    assert admission_seats.available("hive-a", [{"harness": "claude", "account": "new", "cap": 1}], ("claude",), 7_000)
+    seat_bus.opened.assert_called_once_with(BusConfig.from_environ())
+
+
+@pytest.mark.feature("hub-admission-hive-account-seat")
+def test_a_seatless_hive_leaves_the_queued_offer_for_a_second_hive(
+    rig: SimpleNamespace, seat_bus: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.hive import lanes
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    advertised = [{"harness": "claude", "account": "a", "cap": 1}]
+    _advertise_seats(rig, advertised)
+    _advertise_seats(rig, advertised, "hive-b")
+    _account_value(
+        seat_bus.bucket,
+        account_slots.key("claude", "a"),
+        {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
+    )
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    clock = SimpleNamespace(now=1_000)
+    bus: Any = open_bus(BusConfig(), clock=lambda: clock.now)
+    slots.serve(bus, admitter=rig.admitter)
+    runtime, other_runtime = Mock(), Mock()
+    other_runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-b", harness="claude", account="a", launched_at=1_500),
+    )
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(
+        config,
+        bus,
+        runtime,
+        lanes.LaneTasks(bus, "hive-a", rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    other = Spoke(
+        SpokeConfig(config.swarm, "eng", "hive-b"),
+        bus,
+        other_runtime,
+        lanes.LaneTasks(bus, "hive-b", rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "held"
+        runtime.spawn.assert_not_called()
+        assert rig.store.claimant(SLUG, "t1") is None
+        assert rig.store.claim_generation(SLUG, "t1") == 0
+        assert rig.ledger.writes == []
+        clock.now += config.policy.ack_wait_ms
+        assert other.poll() == "started"
+        other_runtime.spawn.assert_called_once()
+        launched = other_runtime.spawn.call_args.args[0]
+        assert launched.task["id"] == "t1"
+        assert rig.store.claimant(SLUG, "t1") == launched.name
+    finally:
+        bus.close()
