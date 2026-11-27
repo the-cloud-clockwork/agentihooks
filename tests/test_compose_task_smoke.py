@@ -50,5 +50,5 @@ def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats
 @pytest.mark.feature("compose-smoke-spoke-seat")
 def test_the_compose_task_smoke_spoke_reads_a_seat_that_fits_its_offer() -> None:
     body = heredoc(smoke(), STARTED)
-    assert spoke_reader(body) == "seat"
-    assert_seat_fits(function(body, "seat"))
+    assert spoke_reader(body) == "free_seat"
+    assert_seat_fits(function(body, "free_seat"))

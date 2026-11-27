@@ -99,12 +99,12 @@ class StandIn:
         return Outcome("spawn", Status.OK, "compose-task", SimpleNamespace(pane_id="stand-in", harness="claude", account="", launched_at=0))
 
 
-def seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
+def free_seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
     return [capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6)]
 
 
 stand_in = {"cpus": 1, "load5": 0.0}
-spoke = Spoke(SpokeConfig(config, "eng", hive, accounts=seat), bus, StandIn(), Tasks(), measure=lambda: stand_in)
+spoke = Spoke(SpokeConfig(config, "eng", hive, accounts=free_seat), bus, StandIn(), Tasks(), measure=lambda: stand_in)
 outcomes = []
 for _ in range(30):
     outcomes.append(spoke.poll(1_000))

@@ -125,7 +125,7 @@ class StandIn:
         return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account="", launched_at=0))
 
 
-def seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
+def free_seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
     return [capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6)]
 
 
@@ -139,7 +139,7 @@ def launched():
 def take(count: int) -> dict[str, list[str]]:
     before = len(launched())
     bus = open_bus(BusConfig.from_environ())
-    spoke = Spoke(SpokeConfig(store.config(slug), "eng", HIVE, accounts=seat), bus, StandIn(), Tasks(),
+    spoke = Spoke(SpokeConfig(store.config(slug), "eng", HIVE, accounts=free_seat), bus, StandIn(), Tasks(),
                   measure=lambda: {"cpus": 8, "load5": 0.0}, view=view)
     outcomes, idle = [], 0
     while len(launched()) - before < count and idle < 5:

@@ -45,7 +45,7 @@ def spoke_reader(body: str) -> str | None:
 def assert_seat_fits(source: str) -> None:
     namespace: dict[str, object] = {"capacity": capacity}
     exec(source, namespace)
-    seat = cast(Callable[..., list[capacity.Account]], namespace["seat"])
+    seat = cast(Callable[..., list[capacity.Account]], namespace["free_seat"])
     config = SwarmConfig("rig", "/data", 1, 1, engine="events")
     offered = Envelope(
         "ready:rig:t1:0", "task.ready", "rig", "task", "t1", 0, 9, "readiness", {"lane": "eng", "quota": {}}
@@ -132,7 +132,7 @@ def test_the_recovery_drill_take_stops_on_held_polls_and_names_them() -> None:
         "StandIn": lambda: None,
         "Tasks": lambda: None,
         "view": lambda: None,
-        "seat": lambda *args, **kwargs: [],
+        "free_seat": lambda *args, **kwargs: [],
     }
     exec(function(heredoc(drill(), DRILL), "take"), namespace)
     take = cast(Callable[[int], object], namespace["take"])
@@ -147,5 +147,5 @@ def test_the_recovery_drill_take_stops_on_held_polls_and_names_them() -> None:
 @pytest.mark.feature("compose-smoke-spoke-seat")
 def test_the_recovery_drill_spoke_reads_a_seat_that_fits_its_offers() -> None:
     body = heredoc(drill(), DRILL)
-    assert spoke_reader(function(body, "take")) == "seat"
-    assert_seat_fits(function(body, "seat"))
+    assert spoke_reader(function(body, "take")) == "free_seat"
+    assert_seat_fits(function(body, "free_seat"))

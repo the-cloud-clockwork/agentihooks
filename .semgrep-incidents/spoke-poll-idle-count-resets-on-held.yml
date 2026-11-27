@@ -12,4 +12,6 @@ rules:
         - '*.sh'
         - '*.bash'
         - '*.py'
-    pattern-regex: (?m)\b(\w+)\s*=\s*\1\s*\+\s*1\s+if\s+[^\n]*?==\s*["']empty["']\s+else\s+0\b
+    pattern-either:
+      - pattern-regex: (?m)\b(\w+)\s*=\s*\1\s*\+\s*1\s+if\s+[^\n]*?==\s*["']empty["']\s+else\s+0\b
+      - pattern-regex: (?m)^([ \t]*)if\s+[^\n]*?==\s*["']empty["']\s*:[ \t]*\n[ \t]+(\w+)\s*(?:\+=\s*1|=\s*\2\s*\+\s*1)[ \t]*\n\1else\s*:[ \t]*\n[ \t]+\2\s*=\s*0\b

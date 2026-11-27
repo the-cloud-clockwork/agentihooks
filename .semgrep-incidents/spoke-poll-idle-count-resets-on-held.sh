@@ -29,6 +29,30 @@ def bounded(count):
     return outcomes
 
 
+def counted(count):
+    outcomes, empty = [], 0
+    while len(outcomes) < count and empty < 5:
+        outcomes.append(spoke.poll(1_000))
+        # ruleid: spoke-poll-idle-count-resets-on-held
+        if outcomes[-1] == "empty":
+            empty += 1
+        else:
+            empty = 0
+    return outcomes
+
+
+def counted_with_held(count):
+    outcomes, idle = [], 0
+    while len(outcomes) < count and idle < 5:
+        outcomes.append(spoke.poll(1_000))
+        # ok: spoke-poll-idle-count-resets-on-held
+        if outcomes[-1] in ("empty", "held"):
+            idle += 1
+        else:
+            idle = 0
+    return outcomes
+
+
 def started(count):
     outcomes, launches = [], 0
     while launches < count:
