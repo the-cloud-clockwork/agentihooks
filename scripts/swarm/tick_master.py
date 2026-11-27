@@ -4,14 +4,15 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 import json
 import os
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
 from scripts.swarm import master_alarm, master_refusals, master_start
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports import Inbox, Ledger
 
 KEY = "master-outage"
 SENDER = "swarm"
@@ -49,6 +50,25 @@ NOBODY_NOTICE = (
 )
 
 
+@dataclass(frozen=True)
+class Ports:
+    """The ports the outage pass writes through: its store calls over the coordination port, the inbox port and the
+    ledger port, each bound to one deadline."""
+
+    store: Any
+    inbox: Inbox
+    ledger: Ledger
+    deadline: Deadline
+
+    def send(self, address: str, text: str, fyi: bool = False) -> None:
+        """Send ``text`` to ``address`` as the swarm, with the fyi mark when ``fyi``."""
+        self.inbox.send(address, text, sender=SENDER, fyi=fyi, deadline=self.deadline)
+
+    def notify(self, text: str) -> None:
+        """Post ``text`` as a swarm notice on the ledger."""
+        self.ledger.notify(text, deadline=self.deadline)
+
+
 def down_minutes(environ) -> float:
     return float(environ.get("AGENTIHOOKS_MASTER_DOWN_MINUTES", "5"))
 
@@ -76,15 +96,15 @@ def status_line(state) -> str:
 
 def run(
     slug: str,
-    store: RedisStore,
-    ledger: Any,
+    ports: Ports,
     runtime: Any,
     now_ms: int,
     launch: Callable[[], list[str]],
-    doc: dict,
+    doc: dict[str, Any],
 ) -> list[str]:
     """launch runs the tick's own master launch and returns its actions; doc is the ledger, whose writes seat a
-    live master still recorded as starting."""
+    live master still recorded as starting. Every store, inbox and ledger write goes through ``ports``."""
+    store = ports.store
     config = store.config(slug)
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
@@ -98,10 +118,10 @@ def run(
     actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
-        return actions + _stop(slug, store, ledger, state, now_ms)
+        return actions + _stop(slug, ports, state, now_ms)
     if master := _bound(store, slug, runtime, doc):
-        back = master_alarm.clear(store, slug)
-        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms) + back
+        back = master_alarm.clear(store, slug, ports.send)
+        return actions + _hand_back(slug, ports, state, master.name, now_ms) + back
     if not state:
         _save(store, slug, {"since": now_ms})
         return actions
@@ -110,7 +130,7 @@ def run(
     elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
-        state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
+        state, promoted_actions = _promote(slug, ports, runtime, state, minutes, now_ms)
         actions += promoted_actions
     _save(store, slug, state)
     return actions
@@ -194,7 +214,10 @@ def _engineer(store, slug, name):
     return next((a for a in store.agents(slug) if a.name == name), None)
 
 
-def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
+def _promote(
+    slug: str, ports: Ports, runtime: Any, state: dict[str, Any], minutes: float, now_ms: int
+) -> tuple[dict[str, Any], list[str]]:
+    store = ports.store
     live, actions = runtime.live_names(), []
     holder = state.get("promoted")
     if holder in live and _engineer(store, slug, holder):
@@ -217,17 +240,17 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
         if not state.get("nobody_told"):
             state = {**state, "nobody_told": True}
             _save(store, slug, state)
-            ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
+            ports.notify(NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
     error = master_alarm.error(store, slug, state["forced_at"]) or reason
-    InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes, error))
+    ports.send(agent.name, prompt(slug, agent, reason, minutes, error))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
     store.seats.note(seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
     state = {**state, "promoted": agent.name}
     _save(store, slug, state)
-    ledger.notify(slug, PROMOTED_NOTICE.format(minutes=_shown(minutes)))
+    ports.notify(PROMOTED_NOTICE.format(minutes=_shown(minutes)))
     return state, actions + [
         f"promoted {agent.name} to restore the master: {reason}",
         f"sent {agent.name} the promoted prompt",
@@ -239,25 +262,26 @@ def _ending(slug, store, state):
     return _engineer(store, slug, state.get("promoted"))
 
 
-def _hand_back(slug, store, ledger, state, master, now_ms):
-    agent = _ending(slug, store, state)
+def _hand_back(slug: str, ports: Ports, state: dict[str, Any], master: str, now_ms: int) -> list[str]:
+    agent = _ending(slug, ports.store, state)
     if not agent:
         return []
-    ledger.notify(slug, HANDED_BACK_NOTICE)
+    ports.notify(HANDED_BACK_NOTICE)
     text = HAND_BACK.format(master=master, task=agent.task)
-    return _close(store, slug, agent, text, master, f"master {master} bound", now_ms)
+    return _close(ports, slug, agent, text, master, f"master {master} bound", now_ms)
 
 
-def _stop(slug, store, ledger, state, now_ms):
-    agent = _ending(slug, store, state)
+def _stop(slug: str, ports: Ports, state: dict[str, Any], now_ms: int) -> list[str]:
+    agent = _ending(slug, ports.store, state)
     if not agent:
         return []
-    ledger.notify(slug, STOPPED_NOTICE)
-    return _close(store, slug, agent, STOPPED.format(task=agent.task), STOPPING, STOPPING, now_ms)
+    ports.notify(STOPPED_NOTICE)
+    return _close(ports, slug, agent, STOPPED.format(task=agent.task), STOPPING, STOPPING, now_ms)
 
 
-def _close(store, slug, agent, text, why, ended, now_ms):
-    InboxStore(store.redis).send(SENDER, agent.name, text)
+def _close(ports: Ports, slug: str, agent: AgentRecord, text: str, why: str, ended: str, now_ms: int) -> list[str]:
+    store = ports.store
+    ports.send(agent.name, text)
     store.seats.note(agent.seat, "handed back", why, now_ms)
     store.seats.note(agent.seat, "message", "the hand back", now_ms)
     store.seats.note(seat_address(slug, MASTER), "handed back", f"{agent.name}: {why}", now_ms)

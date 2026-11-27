@@ -44,6 +44,8 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Coordination.lock.__name__,
                 Coordination.tick_lock.__name__,
                 Coordination.release_tick_lock.__name__,
+                Coordination.take_master_lock.__name__,
+                Coordination.release_master_lock.__name__,
                 Coordination.configure.__name__,
                 Coordination.mark.__name__,
                 Coordination.store_write.__name__,

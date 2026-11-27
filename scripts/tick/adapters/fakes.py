@@ -121,6 +121,14 @@ class FakeCoordination:
     def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
         _record(self, "release_tick_lock", (token, caller), deadline)
 
+    def take_master_lock(self, starter: str, *, deadline: Deadline) -> tuple[str, str]:
+        """Record the take and answer the ``take_master_lock`` answer, by default the starter as its token."""
+        answer = _record(self, "take_master_lock", (starter,), deadline)
+        return answer if answer is not None else (starter, "")
+
+    def release_master_lock(self, token: str, *, deadline: Deadline) -> None:
+        _record(self, "release_master_lock", (token,), deadline)
+
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
 
@@ -298,16 +306,10 @@ class FakeInbox:
     def read(self, address: str, *, deadline: Deadline) -> object:
         return _record(self, "read", (address,), deadline)
 
-    def send(self, address: str, body: str, *, deadline: Deadline) -> object:
-        return _record(
-            self,
-            "send",
-            (
-                address,
-                body,
-            ),
-            deadline,
-        )
+    def send(self, address: str, body: str, *, sender: str = "", fyi: bool = False, deadline: Deadline) -> object:
+        """Record the address and body, with the sender and fyi mark when either is named."""
+        named = (sender, fyi) if sender or fyi else ()
+        return _record(self, "send", (address, body, *named), deadline)
 
     def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
         """Refuse an unknown outcome, a missing detail or a bare done on a work item, as the inbox store does."""
