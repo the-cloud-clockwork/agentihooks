@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm import cli, publish, stack
 from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_workspace
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env
 
@@ -69,9 +70,26 @@ def _refused(worktree, capsys):
     assert "branch" not in ledger.rows["t1"]
 
 
+@pytest.mark.feature("block-refuses-unpushed-commits")
 def test_block_refuses_a_task_branch_never_pushed_that_holds_commits(worktree, capsys):
     _git(worktree[3], "commit", "--allow-empty", "-m", "Task work")
     _refused(worktree, capsys)
+
+
+def _task_commit(top: Path) -> None:
+    (top / "fix.txt").write_text("the ready fix\n")
+    _git(top, "add", "fix.txt")
+    _git(top, "commit", "-m", "Ready fix")
+
+
+@pytest.mark.feature("block-refuses-unpushed-commits")
+def test_block_without_panic_still_refuses_unpushed_commits(env, worktree, monkeypatch, capsys):
+    from tests.conftest import patch_swarm_store_connect
+
+    patch_swarm_store_connect(monkeypatch, env[0])
+    _task_commit(worktree[3])
+    _refused(worktree, capsys)
+    assert not list(ledger_workspace.folder("sw", "t1").glob("*.patch"))
 
 
 def test_block_refuses_commits_made_after_the_last_push(worktree, capsys):
