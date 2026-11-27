@@ -1,0 +1,16 @@
+{
+  "id": "runtime-retire-refuses-live-named-process",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2848",
+  "behaviour": "A local runtime retire whose reaper ended no process refuses and names the process while a live process outside the caller's own chain still carries the agent name, so the tick keeps the lost agent's record and seat and retries next tick. It still succeeds when nothing carries the name, when the caller is the agent itself, when the carrier ended after the pass snapshot and when the reaper ended the scratch home carrier.",
+  "seam": "scripts.swarm.runtime.HerdrRuntime.retire_process with scripts.swarm.reaper.holder, and scripts.tick.steps.agents._lost through _reap",
+  "tests": [
+    "tests/swarm/test_retire_live_name.py::test_a_retire_that_ends_nothing_refuses_while_a_process_carries_the_name_in_its_environment",
+    "tests/swarm/test_retire_live_name.py::test_a_retire_that_ends_nothing_refuses_while_a_process_carries_the_name_argument",
+    "tests/swarm/test_retire_live_name.py::test_the_tick_keeps_a_lost_agent_and_its_seat_while_a_process_carries_its_name",
+    "tests/swarm/test_retire_live_name.py::test_a_retire_that_ends_nothing_succeeds_when_no_process_carries_the_name",
+    "tests/swarm/test_retire_live_name.py::test_a_carrier_that_ended_after_the_pass_snapshot_no_longer_holds_the_name",
+    "tests/swarm/test_retire_live_name.py::test_an_agent_retiring_its_own_name_is_not_held_by_its_own_processes",
+    "tests/swarm/test_retire_live_name.py::test_a_retire_that_ended_the_scratch_home_carrier_succeeds"
+  ]
+}
