@@ -13181,6 +13181,17 @@
       ]
     },
     {
+      "id": "hosted-controller-no-automatic-snapshot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+      "behaviour": "The chart's controller sets AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES to 0, so a running swarm without its own snapshot interval takes no automatic snapshot on the hosted controller, whose home dies with its pod; before, the controller wrote a snapshot of about 680 MB into its container layer on the node's system disk every 30 minutes that no restore could read. A swarm's own snapshot-minutes setting still turns them on.",
+      "seam": "deploy/helm/agentihooks-swarm values controller.env read by scripts.swarm.snapshot.interval_minutes through scripts.swarm.snapshot.auto",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_the_chart_controller_takes_no_automatic_snapshot_for_a_swarm_without_its_own_interval"
+      ],
+      "rules": []
+    },
+    {
       "id": "one-push-failed-or-conflicting-head",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2499",

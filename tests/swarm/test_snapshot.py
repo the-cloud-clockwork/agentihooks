@@ -8,6 +8,7 @@ from typing import Any, TextIO, cast
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from scripts.hub import admission
 from scripts.inbox.dispatch import Dispatcher
@@ -703,6 +704,20 @@ def test_no_automatic_snapshot_while_paused_or_with_the_interval_at_zero(store):
     store.update("sw", state="running", snapshot_minutes=0)
     assert snapshot.auto(store, "sw", 0, {}, run=_no_git) is None
     assert snapshot.automatic("sw") == []
+
+
+@pytest.mark.feature("hosted-controller-no-automatic-snapshot")
+def test_the_chart_controller_takes_no_automatic_snapshot_for_a_swarm_without_its_own_interval(
+    store: RedisStore,
+) -> None:
+    chart = Path(__file__).resolve().parents[2] / "deploy" / "helm" / "agentihooks-swarm" / "values.yaml"
+    values = cast("dict[str, dict[str, dict[str, object]]]", yaml.safe_load(chart.read_text()))
+    env = {name: str(value) for name, value in values["controller"]["env"].items()}
+    store.create(SwarmConfig("sw", "/repo", 2, 1))
+    store.update("sw", state="running")
+
+    assert env.get("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES") == "0"
+    assert snapshot.auto(store, "sw", 0, env) is None
 
 
 def test_only_the_ten_newest_automatic_snapshots_are_kept(store):
