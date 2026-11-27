@@ -21,7 +21,6 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.objects import LocalObjects
-from scripts.ci_lab.outcomes import DROPPED
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
@@ -102,7 +101,7 @@ def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callabl
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
     held = run.tick(1000)
-    assert held[-1].startswith(f"holding {HEAD_A}: still resolving")
+    assert any(action.startswith(f"holding {HEAD_A}: still resolving") for action in held)
     assert run.grades() == []
     assert any(action.startswith("grading ") for action in run.tick(1000))
     assert run.grade(HEAD_A).graded_commit == MERGE
@@ -169,9 +168,9 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
     for i in range(scheduler.UNMERGED_TRIES):
         actions = run.tick(1000)
         if i < scheduler.UNMERGED_TRIES - 1:
-            assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+            assert any(action.startswith(f"holding {HEAD_A}: GitHub has resolved no merge") for action in actions)
         else:
-            assert actions[-1].startswith(f"the lab gives up on a merge of {HEAD_A}")
+            assert any(action.startswith(f"the lab gives up on a merge of {HEAD_A}") for action in actions)
         assert run.grades() == []
     actions = run.tick(1000)
     assert any(action.startswith("grading ") for action in actions)
@@ -415,18 +414,20 @@ def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_un
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Callable[..., Run]) -> None:
-    leased_unit, held_unit = unit(1), unit(2)
-    gates = {"lint": (leased_unit, held_unit)}
+    leased_unit, pending_unit = unit(1), unit(2)
+    gates = {"lint": (leased_unit, pending_unit)}
     other_merge, other_parent = "7" * 40, "6" * 40
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
     port = Mock(side_effect=[(MERGE, PARENT), (other_merge, other_parent)])
     run.engine.ports = replace(run.engine.ports, merges=port)
-    _push(run, HEAD_A, 41)
+    _push(run, HEAD_A, 41, lane="feature")
     run.tick(1000)
     old = run.grade(HEAD_A)
     assert old.graded_commit == MERGE
     [grant] = run.lease(slots=1)
     assert grant.unit == leased_unit
+    job_pending = scheduler.job_id(HEAD_A, pending_unit)
+    assert run.engine.queue.pending() == [job_pending]
     event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested", pull_number=41)
     run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
     run.tick(1100)
@@ -434,16 +435,19 @@ def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Calla
     assert [grade.head for grade in live] == [HEAD_A]
     assert live[0].graded_commit == other_merge
     assert live[0].run != old.run
+    stale = run.engine.grade(old.run)
+    assert stale is not None and stale.superseded is True
     carried = live[0].units[ref(leased_unit)]
     assert carried.job == grant.job
     assert carried.started is True
     assert carried.held is False
     assert carried.outcome == ""
-    stale = run.engine.grade(old.run)
-    assert stale is not None and stale.units[ref(held_unit)].outcome == DROPPED
+    pending_slot = live[0].units[ref(pending_unit)]
+    assert pending_slot.job == job_pending
+    assert run.engine.queue.pending() == [job_pending]
     assert any(post[0] == HEAD_A for post in run.lab.poster.posts)
     assert port.call_count == 2
-    assert [again.unit for again in run.lease(slots=2)] == [held_unit]
+    assert [again.unit for again in run.lease(slots=2)] == [pending_unit]
     run.finish(grant, "passed", {})
     run.tick(1200)
     finished = run.engine.grade(live[0].run)
@@ -726,3 +730,223 @@ def test_a_grade_with_no_pull_request_number_names_no_fallback_on_its_required_c
     run.tick(1000)
     output = _required_output(run, HEAD_A)
     assert "The lab got no test merge" not in output.summary
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_notice_then_the_pull_request_event_in_one_quiet_window_grades_only_the_merge(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)}, quiet_ms=1000)
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    received = run.tick(1000)
+    assert any(action.startswith(f"received {HEAD_A}") for action in received)
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    notice_key = f"{REPO}|{HEAD_A}|{int(Priority.PULL_REQUEST)}"
+    assert run.lab.client.hget(scheduler.WAITING, notice_key) is None
+    actions = run.tick(2000)
+    assert any(action.startswith("grading ") for action in actions)
+    grades = run.grades()
+    assert len(grades) == 1
+    assert grades[0].graded_commit == MERGE
+    assert not grades[0].superseded
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_pull_request_event_then_a_notice_in_one_quiet_window_leaves_the_notice_unheld(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)}, quiet_ms=1000)
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    actions = run.tick(1000)
+    assert any(action.startswith(f"left {HEAD_A} to") for action in actions)
+    assert len(run.lab.client.hgetall(scheduler.WAITING)) == 1
+    started = run.tick(2000)
+    assert any(action.startswith("grading ") for action in started)
+    grades = run.grades()
+    assert len(grades) == 1
+    assert grades[0].graded_commit == MERGE
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_bare_notice_grade_is_superseded_once_the_pull_request_event_resolves_the_merge(
+    lab: Callable[..., Run],
+) -> None:
+    leased_unit, pending_unit = unit(1), unit(2)
+    gates = {"lint": (leased_unit, pending_unit)}
+    run = lab(
+        {
+            HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE),
+            HEAD_B: scheduler.Plan(TREE, BASE, {"lint": (unit(3),)}),
+        }
+    )
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    run.tick(1000)
+    bare = run.grade(HEAD_A)
+    assert bare.graded_commit == ""
+    [grant] = run.lease(slots=1)
+    assert grant.unit == leased_unit
+    _push(run, HEAD_B, 0, lane="other")
+    run.tick(1050)
+    job_pending, job_other = scheduler.job_id(HEAD_A, pending_unit), scheduler.job_id(HEAD_B, unit(3))
+    before = run.engine.queue.pending()
+    assert before.index(job_pending) < before.index(job_other)
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1100)
+    live = [grade for grade in run.grades() if not grade.superseded]
+    assert [grade.head for grade in live] == [HEAD_A]
+    assert live[0].graded_commit == MERGE
+    stale = run.engine.grade(bare.run)
+    assert stale is not None and stale.superseded is True
+    leased_ref, pending_ref = ref(leased_unit), ref(pending_unit)
+    assert live[0].units[leased_ref].job == grant.job
+    assert live[0].units[leased_ref].started is True
+    assert live[0].units[leased_ref].held is False
+    assert live[0].units[pending_ref].job == job_pending
+    after = run.engine.queue.pending()
+    assert after.index(job_pending) < after.index(job_other)
+    [again] = run.lease(slots=1)
+    assert again.unit == pending_unit
+    run.finish(grant, "passed", {})
+    run.tick(1200)
+    finished = run.engine.grade(live[0].run)
+    assert finished is not None and finished.units[leased_ref].outcome == "passed"
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_notice_of_a_head_already_graded_on_a_resolved_merge_is_not_held(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    assert run.grade(HEAD_A).graded_commit == MERGE
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    actions = run.tick(1100)
+    assert any(action.startswith(f"left {HEAD_A} to") for action in actions)
+    grades = run.grades()
+    assert len(grades) == 1
+    assert not grades[0].superseded
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_notice_with_no_pull_request_waiting_is_held_and_graded_bare(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    actions = run.tick(1000)
+    assert any(action.startswith("grading ") for action in actions)
+    grade = run.grade(HEAD_A)
+    assert grade.graded_commit == ""
+    assert not grade.superseded
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_plant_head_is_held_although_a_pull_request_entry_of_the_same_head_waits(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    _push(run, HEAD_A, 0, lane=HEAD_A, event="plant")
+    actions = run.tick(1000)
+    assert any(action.startswith(f"received {HEAD_A}") for action in actions)
+    assert not any(action.startswith("left") for action in actions)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_rerequest_naming_no_pull_request_is_held_although_a_pull_request_entry_of_the_same_head_waits(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested")
+    run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
+    actions = run.tick(1000)
+    assert any(action.startswith(f"received {HEAD_A}") for action in actions)
+    assert not any(action.startswith("left") for action in actions)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_notice_carrying_a_grade_ref_is_held_although_a_pull_request_entry_of_the_same_head_waits(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A, f"{scheduler.GRADE_REFS}something"))
+    actions = run.tick(1000)
+    assert any(action.startswith(f"received {HEAD_A}") for action in actions)
+    assert not any(action.startswith("left") for action in actions)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_grade_on_the_same_graded_commit_is_not_replaced_by_a_second_request_resolving_it(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    original = run.grade(HEAD_A)
+    event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested", pull_number=41)
+    run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
+    run.tick(1100)
+    live = [grade for grade in run.grades() if not grade.superseded]
+    assert len(live) == 2
+    assert original.run in {grade.run for grade in live}
+    assert all(grade.graded_commit == MERGE for grade in live)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_waiting_notice_of_another_head_is_untouched_when_a_pull_request_event_arrives(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates), HEAD_B: scheduler.Plan(TREE, BASE, gates)}, quiet_ms=1000)
+    notice = HeadEvent("notice", REPO, HEAD_B, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_B))
+    run.tick(1000)
+    other_key = f"{REPO}|{HEAD_B}|{int(Priority.PULL_REQUEST)}"
+    assert run.lab.client.hget(scheduler.WAITING, other_key) is not None
+    _push(run, HEAD_A, 41, lane="feature")
+    run.tick(1000)
+    assert run.lab.client.hget(scheduler.WAITING, other_key) is not None
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_live_merge_grade_in_the_promotion_class_is_neither_replaced_nor_a_reason_to_yield(
+    lab: Callable[..., Run],
+) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, {"lint": (item,)}, merge_base=PARENT, graded_commit=MERGE)})
+    run.push(HEAD_A)
+    run.tick(1000)
+    push_grade = run.grade(HEAD_A)
+    assert push_grade.tier == int(Priority.PROMOTION)
+    assert not push_grade.superseded
+    notice = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, HEAD_A))
+    actions = run.tick(1100)
+    assert any(action.startswith("grading ") for action in actions)
+    grades = run.grades()
+    assert len(grades) == 2
+    assert {grade.tier for grade in grades} == {int(Priority.PROMOTION), int(Priority.PULL_REQUEST)}
+    stale = run.engine.grade(push_grade.run)
+    assert stale is not None and not stale.superseded

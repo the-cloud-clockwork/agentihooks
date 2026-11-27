@@ -811,14 +811,10 @@ def test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none(schedu
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: Sink, jobs: queue.Queue) -> None:
-    def broken_bundler(sha: str) -> bytes | None:
-        raise RuntimeError("boom")
-
     def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
-        try:
-            return lease_api.answer(lab, Signer(sink.url), method, target, raw, authorization, broken_bundler)
-        except RuntimeError as error:
-            return 500, {"error": str(error)}
+        if (method, target) == lease_api.BUNDLE_ROUTE:
+            return 500, {"error": "boom"}
+        return lease_api.answer(lab, Signer(sink.url), method, target, raw, authorization)
 
     server = lease_api.bind("127.0.0.1", 0, reply)
     _serving(server)
