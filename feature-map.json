@@ -15486,7 +15486,6 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-newest-seat-transfer",
       "behaviour": "An expert successor receives the newest transfer of its own lineage seat. Older pending history and foreign seats cannot suppress recovery or replace that transfer. Failed launch retries, room refusal, history and current occupant confirmation keep their existing behavior.",
       "seam": "swarm.expert_seat.run; handoff.transfers.attach and confirm",
-      "semgrep_rule": "incident-expert-stale-pending-transfer",
       "tests": [
         "tests/swarm/test_expert_seat_transfer.py::test_first_expert_needs_no_transfer",
         "tests/swarm/test_expert_seat_transfer.py::test_newest_pending_transfer_uses_timestamp_then_identifier",
@@ -15494,7 +15493,10 @@
         "tests/swarm/test_expert_seat_transfer.py::test_lost_successor_ignores_obsolete_pending_history",
         "tests/swarm/test_expert_seat_transfer.py::test_foreign_history_alone_does_not_suppress_recovery",
         "tests/swarm/test_expert_seat_transfer.py::test_retry_keeps_the_current_transfer_and_obsolete_history",
-        "tests/swarm/test_expert_seat_transfer.py::test_generic_attachment_preserves_existing_pending_selection"
+        "tests/swarm/test_expert_seat_transfer.py::test_generic_attachment_preserves_existing_pending_selection",
+        "tests/swarm/test_expert_seat_transfer.py::test_scoped_attachment_never_revives_superseded_pending_history",
+        "tests/swarm/test_expert_seat_transfer.py::test_scoped_attachment_has_no_foreign_fallback",
+        "tests/swarm/test_expert_seat_transfer.py::test_scoped_attachment_keeps_newer_foreign_history"
       ]
     },
     {

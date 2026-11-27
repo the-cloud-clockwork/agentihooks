@@ -211,7 +211,7 @@ def _launch(
             "mission": lineage.mission,
             "generation": number,
             "handoff": store.handoff(slug, lineage.id),
-            "transfer": SEAT.transfers.attach(store, slug, record),
+            "transfer": SEAT.transfers.attach(store, slug, record, seat=record.seat),
             "requires_harness": expert_launch.HARNESS,
             expert_launch.EFFORT_KEY: lineage.effort,
         }
@@ -257,8 +257,8 @@ def _left(slug: str, store: Any, lineage: expert_lineage.Lineage, number: int, n
     """Leave the next expert the handoff its seat lacks when the last expert was lost: the stored one it never
     confirmed, offered again, or a recovery handoff that names what is unknown. Nothing is left for the first expert
     of a lineage or while a transfer still waits for its successor."""
-    rows: list[dict[str, Any]] = SEAT.transfers.list_transfers(store, slug)
-    if number == 1 or any(row["task"] == lineage.id and not row["successor"] for row in rows):
+    current = SEAT.transfers.latest_for_seat(store, slug, lineage.id, lineage.seat)
+    if number == 1 or (current and not current["successor"]):
         return []
     name: str = store.seats.occupant(lineage.seat).occupant
     lost = AgentRecord(name, LANE, lineage.id, seat=lineage.seat)

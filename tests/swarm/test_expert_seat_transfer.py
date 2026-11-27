@@ -191,3 +191,48 @@ def test_generic_attachment_preserves_existing_pending_selection(store: RedisSto
     assert selected is not None and selected["id"] == obsolete["id"]
     assert selected["seat"] == worker.seat
     assert transfers.get(store, "sw", current["id"]) == attached
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("tied", [False, True])
+def test_scoped_attachment_never_revives_superseded_pending_history(
+    store: RedisStore, confirmed: bool, tied: bool
+) -> None:
+    started(store)
+    first = launched(store, FakeRuntime())
+    pending(store, first, "a-obsolete", NOW if tied else NOW - 1)
+    current = pending(store, first, "z-current", NOW)
+    selected = transfers.attach(store, "sw", first, seat=first.seat)
+    assert selected is not None and selected["id"] == current["id"]
+    if confirmed:
+        transfers.confirm(store, "sw", current["id"], first, NEXT, NOW + MINUTE)
+    before = rows(store)
+    successor = replace(first, name="waiting-expert")
+    assert transfers.attach(store, "sw", successor, seat=first.seat) is None
+    assert rows(store) == before
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize("different", ["seat", "task"])
+def test_scoped_attachment_has_no_foreign_fallback(store: RedisStore, different: str) -> None:
+    started(store)
+    first = launched(store, FakeRuntime())
+    foreign = replace(first, **{different: "foreign"})
+    original = pending(store, foreign, "foreign", NOW)
+    assert transfers.attach(store, "sw", first, seat=first.seat) is None
+    assert rows(store) == [original]
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize("different", ["seat", "task"])
+def test_scoped_attachment_keeps_newer_foreign_history(store: RedisStore, different: str) -> None:
+    started(store)
+    first = launched(store, FakeRuntime())
+    current = pending(store, first, "current", NOW)
+    foreign = pending(store, replace(first, **{different: "foreign"}), "foreign", NOW + 1)
+    selected = transfers.attach(store, "sw", first, seat=first.seat)
+    assert selected is not None and selected["id"] == current["id"]
+    assert selected["successor"] == first.name
+    assert selected["seat"] == first.seat
+    assert transfers.get(store, "sw", foreign["id"]) == foreign
