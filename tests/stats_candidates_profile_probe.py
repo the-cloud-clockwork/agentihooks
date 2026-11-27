@@ -84,7 +84,7 @@ def explain_retained_roots(root: Path, reports: Path) -> None:
             if current in seen:
                 continue
             seen.add(current)
-            if current in reach.unknown or current in reach.wanted and current[0] in changes:
+            if current in reach.unknown or reach.changed(current):
                 reason = route
                 break
             pending.extend((child, [*route, child]) for child in reach.edges.get(current, ()) if child not in seen)
