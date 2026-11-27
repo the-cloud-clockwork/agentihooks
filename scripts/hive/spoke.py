@@ -12,7 +12,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_events, headroom, presence
-from scripts.swarm import launch_check, offer_quota, readiness
+from scripts.swarm import capacity, launch_check, offer_quota, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 ASKED = "asked"
@@ -42,6 +42,7 @@ class SpokeConfig:
     hive: str
     policy: QueuePolicy = QueuePolicy()
     fit: Callable[[Envelope], bool] = readiness.anywhere
+    accounts: Callable[..., list[capacity.Account]] | None = None
 
 
 def claim_key(event: Envelope) -> str:
@@ -96,7 +97,7 @@ class Spoke:
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
-        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit)
+        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit, self.config.accounts)
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
             delivery = readiness.take(queue, self.view, timeout_ms, fit)

@@ -359,8 +359,10 @@ def operations(store: RedisStore, slug: str, limit: int = SHOWN) -> list[dict]:
     return shown
 
 
-def view(store: RedisStore, slug: str, environ: Mapping[str, str] = os.environ) -> dict:
-    task_revisions, now = published(store, slug), lease.now_ms(store)
+def view(
+    store: RedisStore, slug: str, environ: Mapping[str, str] = os.environ, task_revisions: dict[str, int] | None = None
+) -> dict:
+    task_revisions, now = published(store, slug) if task_revisions is None else task_revisions, lease.now_ms(store)
     destructive = destructive_on(environ)
     counts = conflicts(store, slug)
     return {

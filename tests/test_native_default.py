@@ -343,3 +343,221 @@ def test_claude_native_default_checks_and_launches_the_isolated_login(
         "placement": "forced",
     }
     assert stream.getvalue() == "[agenti] account=default route=default\n"
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize("layout", ["table", "inline", "dotted"])
+def test_codex_native_default_rebases_hook_trust_without_other_byte_changes(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    key = f"{hook}:SessionStart:0:0"
+    header = f"# keep formatting\r\nmodel = 'native'\r\npath = '{key}'\r\n"
+    layouts = {
+        "table": f"[ hooks.state.'{key}' ]\r\ntrusted_hash  = 'hash-one' # retained\r\nenabled = false\r\n",
+        "inline": f"[hooks.state]\r\n'{key}'  = {{ trusted_hash = 'hash-one', enabled = false }} # retained\r\n",
+        "dotted": f"hooks.state.'{key}'.trusted_hash  = 'hash-one' # retained\r\nhooks.state.'{key}'.enabled = false\r\n",
+    }
+    foreign = "[hooks.state.'foreign:SessionStart:0:0']\r\ntrusted_hash = 'foreign-hash'\r\n"
+    original = (header + layouts[layout] + foreign).encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    copied = (home / "config.toml").read_bytes()
+    expected_layout = layouts[layout].replace(f"'{key}'", f"'{home / 'hooks.json'}:SessionStart:0:0'")
+    expected = (header + expected_layout + foreign).encode()
+    assert copied == expected
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert state[f"{home / 'hooks.json'}:SessionStart:0:0"] == {"trusted_hash": "hash-one", "enabled": False}
+    assert state["foreign:SessionStart:0:0"] == {"trusted_hash": "foreign-hash"}
+    assert (source / "config.toml").read_bytes() == original
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+def test_codex_native_default_rebases_both_symlink_hook_spellings(tmp_path: Path) -> None:
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    hooks = tmp_path / "shared-hooks.json"
+    hooks.write_text("{}")
+    (source / "hooks.json").symlink_to(hooks)
+    original = (
+        f'[hooks.state."{source / "hooks.json"}:SessionStart:0:0"]\ntrusted_hash = "source"\n'
+        f'[hooks.state."{hooks}:Stop:0:0"]\ntrusted_hash = "resolved"\n'
+        f'[hooks.state."{source / "hooks.json"}.other:Stop:0:0"]\ntrusted_hash = "similar"\n'
+    ).encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    expected = original.replace(f'"{source / "hooks.json"}:'.encode(), f'"{home / "hooks.json"}:'.encode())
+    expected = expected.replace(f'"{hooks}:'.encode(), f'"{home / "hooks.json"}:'.encode())
+    assert (home / "config.toml").read_bytes() == expected
+    assert (home / "hooks.json").read_bytes() == hooks.read_bytes()
+    assert not (home / "hooks.json").is_symlink()
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+def test_claude_native_default_preserves_codex_looking_configuration_bytes(tmp_path: Path) -> None:
+    source = tmp_path / ".claude"
+    source.mkdir()
+    (source / ".credentials.json").write_bytes(b"native-login-fixture")
+    original = f'# untouched\r\n[ hooks.state."{source / "hooks.json"}:Stop:0:0" ]\r\ntrusted_hash="same"\r\n'.encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("claude", {"HOME": str(tmp_path)})
+    assert (Path(child["CLAUDE_CONFIG_DIR"]) / "config.toml").read_bytes() == original
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        b"# no hooks\r\nmodel='native'\r\n",
+        b"[hooks]\r\nenabled=true\r\n",
+        b'[hooks.state."foreign:Stop:0:0"]\r\ntrusted_hash="same"\r\n',
+    ],
+    ids=["absent-config", "absent-hooks", "absent-state", "foreign-state"],
+)
+def test_codex_native_default_preserves_configuration_without_matching_trust(
+    tmp_path: Path, config: bytes | None
+) -> None:
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    if config is not None:
+        (source / "config.toml").write_bytes(config)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    target = Path(child["CODEX_HOME"]) / "config.toml"
+    if config is None:
+        assert not target.exists()
+    else:
+        assert target.read_bytes() == config
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "layout",
+    ["escaped-suffix", "escaped-prefix", "interleaved", "whole-inline", "apostrophe", "newline", "delete-control"],
+)
+def test_codex_native_default_preserves_lexical_hook_trust(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    state_name = {"apostrophe": "state's", "newline": "state\nfolder", "delete-control": "state\x7ffolder"}.get(
+        layout, "state"
+    )
+    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / state_name)}
+    spellings = {
+        "escaped-suffix": f'[hooks.state."{hook}:\\u0053essionStart:0:0"]\ntrusted_hash="same"\n',
+        "escaped-prefix": f'[hooks.state."{str(hook).replace("/", r"\u002f", 1)}:Stop:0:0"]\ntrusted_hash="same"\n',
+        "interleaved": (
+            f'[hooks.state."{hook}:SessionStart:0:0"]\ntrusted_hash="first"\n'
+            '[unrelated]\nvalue="untouched"\n'
+            f'[hooks.state."{hook}:Stop:0:0"]\ntrusted_hash="same"\n'
+        ),
+        "whole-inline": f'hooks = {{ state = {{ "{hook}:Stop:0:0" = {{ trusted_hash = "same" }} }} }}\n',
+        "apostrophe": f"[hooks.state.'{hook}:Stop:0:0']\ntrusted_hash='same'\n",
+        "newline": f"[hooks.state.'{hook}:Stop:0:0']\ntrusted_hash='same'\n",
+        "delete-control": f"[hooks.state.'{hook}:Stop:0:0']\ntrusted_hash='same'\n",
+    }
+    original = spellings[layout]
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", environ)
+    home = Path(child["CODEX_HOME"])
+    if layout in ("apostrophe", "newline", "delete-control"):
+        expected = original.replace(f"'{hook}:Stop:0:0'", json.dumps(f"{home / 'hooks.json'}:Stop:0:0"))
+    elif layout == "escaped-prefix":
+        expected = original.replace(str(hook).replace("/", r"\u002f", 1), str(home / "hooks.json"))
+    else:
+        expected = original.replace(str(hook), str(home / "hooks.json"))
+    copied = (home / "config.toml").read_bytes()
+    assert copied == expected.encode()
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert all(name.startswith(f"{home / 'hooks.json'}:") for name in state)
+    assert all(value["trusted_hash"] in ("first", "same") for value in state.values())
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "layout", ["space", "literal-X", "unicode-wide", "prefix-only", "repeated-prefix", "quoted-parent"]
+)
+def test_codex_native_default_preserves_trust_key_boundaries(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    state_name = {"space": "state space", "literal-X": "stateX"}.get(layout, "state")
+    suffix = {"prefix-only": "", "repeated-prefix": f"Stop:{hook}:0"}.get(layout, "Stop:0:0")
+    original_key = f"{hook}:{suffix}"
+    literal = layout in ("space", "literal-X")
+    token = f"'{original_key}'" if literal else json.dumps(original_key)
+    if layout == "unicode-wide":
+        token = token.replace("/", r"\U0000002F", 1)
+    parent = "'hooks'.'state'" if layout == "quoted-parent" else "hooks.state"
+    foreign = "[hooks.state.foreign]\ntrusted_hash='foreign'\n" if layout == "quoted-parent" else ""
+    original = f"{foreign}[{parent}.{token}]\ntrusted_hash='same'\n"
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / state_name)})
+    home = Path(child["CODEX_HOME"])
+    target_key = f"{home / 'hooks.json'}:{suffix}"
+    target_token = f"'{target_key}'" if literal else json.dumps(target_key)
+    expected = original.replace(token, target_token, 1).encode()
+    copied = (home / "config.toml").read_bytes()
+    assert copied == expected
+    assert tomllib.loads(copied.decode())["hooks"]["state"][target_key] == {"trusted_hash": "same"}
+    assert (source / "config.toml").read_bytes() == original.encode()
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize("resolved_first", [False, True])
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_codex_native_default_coalesces_colliding_hook_aliases(
+    tmp_path: Path, resolved_first: bool, conflicting: bool
+) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    hooks = tmp_path / "shared-hooks.json"
+    hooks.write_text("{}")
+    source_hooks = source / "hooks.json"
+    source_hooks.symlink_to(hooks)
+    canonical = {"trusted_hash": "canonical-hash", "enabled": False}
+    fallback = {"trusted_hash": "stale-hash", "enabled": True} if conflicting else canonical
+    resolved_only = {"trusted_hash": "resolved-only", "enabled": True}
+    entries = [
+        (source_hooks, canonical, "Stop:0:0"),
+        (hooks, fallback, "Stop:0:0"),
+        (hooks, resolved_only, "SessionStart:1:0"),
+    ]
+    if resolved_first:
+        entries.reverse()
+    prefix = "# retain unrelated bytes\r\nmodel = 'native'\r\n"
+    original = prefix + "".join(
+        f"[hooks.state.{json.dumps(f'{path}:{suffix}')}]\r\n"
+        + "".join(f"{name} = {json.dumps(value)}\r\n" for name, value in fields.items())
+        for path, fields, suffix in entries
+    )
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    copied = (home / "config.toml").read_bytes()
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert state == {
+        f"{home / 'hooks.json'}:Stop:0:0": canonical,
+        f"{home / 'hooks.json'}:SessionStart:1:0": resolved_only,
+    }
+    assert copied.startswith(prefix.encode())
+    assert (source / "config.toml").read_bytes() == original.encode()

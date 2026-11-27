@@ -6,9 +6,11 @@ import yaml
 
 from scripts.hive import spoke
 from tests.helpers import stand_in
+from tests.test_compose_recovery_drill import assert_seat_fits, function, heredoc, spoke_reader
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-task-smoke.sh"
+STARTED = "swarm python - <<'PY'\n"
 
 
 def smoke():
@@ -46,6 +48,13 @@ def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats
     )
     assert gate in script
     assert script.index(gate) < script.index("printf 'Compose task smoke passed")
+
+
+@pytest.mark.feature("compose-smoke-spoke-seat")
+def test_the_compose_task_smoke_spoke_reads_a_seat_that_fits_its_offer() -> None:
+    body = heredoc(smoke(), STARTED)
+    assert spoke_reader(body) == "free_seat"
+    assert_seat_fits(function(body, "free_seat"))
 
 
 @pytest.mark.feature("compose-smoke-launch-report")

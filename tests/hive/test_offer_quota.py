@@ -9,7 +9,7 @@ import pytest
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.memory import open_bus
 from scripts.hive import lanes
-from scripts.hive.spoke import Spoke, claim_key
+from scripts.hive.spoke import Spoke, SpokeConfig, claim_key
 from scripts.hub import slots
 from scripts.swarm import capacity, offer_quota, readiness, runtime
 from scripts.swarm.offer_quota import accounts as real_accounts
@@ -106,5 +106,56 @@ def test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_se
         assert spawned.task["requires_harness"] == requires_harness
         assert spawned.task["execution_generation"] == 7
         assert spawned.task["claim_generation"] == event.version
+    finally:
+        bus.close()
+
+
+@pytest.mark.feature("compose-smoke-spoke-seat")
+def test_a_spoke_reads_seats_through_its_own_account_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+    production = Mock(return_value=[])
+    monkeypatch.setattr(capacity, "accounts", production)
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _profile: False)
+    monkeypatch.setattr(Spoke, "_measure", lambda _self: {"cpus": 32, "load5": 0, "available_mb": 60_000})
+    clock = SimpleNamespace(now=1_000)
+    bus = open_bus(BusConfig(scoped=True), clock=lambda: clock.now)
+    event = offer()
+    admitted = {
+        "hive": "hive-a",
+        "name": "eng@rig-0001",
+        "task": {
+            "id": event.key,
+            "seat": "eng-1@rig",
+            "execution_id": "event-execution",
+            "execution_generation": 7,
+            "claim_generation": event.version,
+            "profile": "engineer",
+            "requires_harness": "",
+        },
+    }
+    slots.serve(cast(Any, bus), admitter=cast(Any, Hub(admitted)))
+    config = SwarmConfig("rig", "/repo", 1, 1, scaling="manual")
+    local = Mock()
+    local.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-a", harness="claude", account="claude-a", profile="engineer", launched_at=1_500),
+    )
+    seats: list[capacity.Account] = []
+    spoke = Spoke(
+        SpokeConfig(config, "eng", "hive-a", accounts=lambda *_args, **_kwargs: list(seats)),
+        cast(Any, bus),
+        local,
+        lanes.LaneTasks(bus, "hive-a", lambda _slug: config),
+        view=cast(Any, lambda: None),
+    )
+    bus.for_swarm("rig").queue(readiness.queue_name("rig", "eng"), QueuePolicy()).offer(event)
+    try:
+        assert spoke.poll() == "held"
+        clock.now += spoke.config.policy.ack_wait_ms + readiness.UNFIT_NAK_MS
+        seats.append(capacity.Account("claude", "claude-a", "OPEN", 0, None, 90, 6))
+        assert spoke.poll() == "started"
+        local.spawn.assert_called_once()
+        production.assert_not_called()
     finally:
         bus.close()

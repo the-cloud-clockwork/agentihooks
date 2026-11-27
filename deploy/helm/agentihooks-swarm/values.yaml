@@ -207,6 +207,8 @@ controller:
   terminationGracePeriodSeconds: 300
   env:
     LANGFUSE_MCP_URL: ""
+    # The controller home dies with its pod, so an automatic swarm snapshot there restores nothing; a swarm's snapshot-minutes setting still takes them.
+    AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES: "0"
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
   secretEnv: []
   # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
