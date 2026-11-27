@@ -60,6 +60,7 @@ from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
 from tests.ci_lab.gate_required_cases import load, materialize
+from tests.ci_lab.scheduler_fixtures import Expander as Expander
 
 REPO = "/the-cloud-clockwork/agentihooks"
 SLUG = "the-cloud-clockwork/agentihooks"
@@ -134,25 +135,6 @@ class Inbox:
     def heads(self) -> list[scheduler.Head]:
         heads, self.pending = self.pending, []
         return heads
-
-
-@dataclass
-class Expander:
-    plans: dict[str, scheduler.Plan]
-    seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
-
-    def expand(self, request: GradeRequest) -> scheduler.Plan:
-        self.seen.append(request)
-        return self.plans[request.head]
-
-    def merge_base(self, repo: str, head: str) -> str:
-        return self.plans[head].grader
-
-    def reachable(self, repo: str, head: str) -> bool:
-        return True
-
-    def groups(self, repo: str) -> frozenset[str]:
-        return frozenset(self.plans)
 
 
 @dataclass
@@ -916,7 +898,7 @@ def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., R
 
 def test_the_same_head_is_graded_once_unless_a_rerun_bypasses_negative_verdicts(lab: Callable[..., Run]) -> None:
     item = unit(1)
-    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run = lab({HEAD_A: pull_plan({"lint": (item,)})})
     run.cache(item, passed=False)
     run.push(HEAD_A, event="pull_request", action="synchronize")
     run.tick(1000)
