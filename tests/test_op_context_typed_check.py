@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts.ci_mutation.identity import ShortNameAlias
 from scripts.feature_checks import op_context_typed as check
 
 check.importable()
@@ -204,6 +205,20 @@ def test_op_modules_discovers_the_registry_and_every_handed_family() -> None:
 
 
 @pytest.mark.feature("ledger-op-context-typed")
+def test_op_modules_discovers_every_handed_family_behind_the_short_name_alias_of_a_mutation_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in HANDED_FAMILIES:
+        monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.delitem(sys.modules, name)
+    aliases = [ShortNameAlias(ROOT, f"scripts/swarm_ledger/{name}.py") for name in HANDED_FAMILIES]
+    monkeypatch.setattr(sys, "meta_path", [*aliases, *sys.meta_path])
+    discovered = {found.__name__.rpartition(".")[2] for found in check.op_modules()}
+    registered = {found.__name__.rpartition(".")[2] for found in core.EXTENSION_OPS.values()}
+    assert discovered == registered | {"ledger_core", *HANDED_FAMILIES}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
 def test_the_member_set_equals_what_the_functions_use() -> None:
     assert set(MEMBERS) == {*OpContext.__annotations__, "author", "stamp"}
 
@@ -293,6 +308,33 @@ def test_handed_skips_a_call_bound_to_a_module_that_cannot_be_resolved(tmp_path:
 
 
 @pytest.mark.feature("ledger-op-context-typed")
+def test_handed_skips_a_name_imported_from_a_package_that_does_not_exist(tmp_path: Path) -> None:
+    tree = ast.parse(
+        "from plant_missing_package_123 import plant_mod\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    return plant_mod.apply(doc, op, ctx)\n"
+    )
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_skips_a_name_imported_from_a_plain_module_even_when_a_module_of_that_name_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "plant_plain_owner.py").write_text(
+        "class plant_plain_tail:\n    @staticmethod\n    def apply(doc, op, ctx):\n        return True\n"
+    )
+    (tmp_path / "plant_plain_tail.py").write_text("raise RuntimeError('must not be imported')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "from plant_plain_owner import plant_plain_tail\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    return plant_plain_tail.apply(doc, op, ctx)\n"
+    )
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
 def test_handed_ignores_a_module_whose_spec_is_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "plant_no_spec", module("plant_no_spec"))
     tree = ast.parse(
@@ -317,6 +359,24 @@ def test_handed_discovers_a_module_in_a_subfolder_of_the_package(
     )
     discovered = check.handed(tree, tmp_path)
     assert {found.__name__ for found in discovered} == {"plant_sub_folder.plant_deep"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_discovers_a_module_two_packages_deep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    outer = tmp_path / "plant_outer"
+    inner = outer / "plant_inner"
+    inner.mkdir(parents=True)
+    (outer / "__init__.py").write_text("")
+    (inner / "__init__.py").write_text("")
+    (inner / "plant_deepest.py").write_text("def apply(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "from plant_outer.plant_inner import plant_deepest\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    return plant_deepest.apply(doc, op, ctx)\n"
+    )
+    discovered = check.handed(tree, tmp_path)
+    assert {found.__name__ for found in discovered} == {"plant_outer.plant_inner.plant_deepest"}
 
 
 @pytest.mark.feature("ledger-op-context-typed")
