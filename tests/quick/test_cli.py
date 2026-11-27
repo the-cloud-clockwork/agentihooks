@@ -152,6 +152,32 @@ def test_up_reports_an_unbound_native_engineer_as_pending(
 
 
 @pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize("stage", ["before-state-read", "after-state-write"])
+def test_up_refuses_a_registry_removed_during_native_startup(
+    stage: str,
+    quick_env: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def interrupted(folder: Path, swarm: registry.Swarm, environ: dict[str, str]) -> dict[str, int]:
+        if stage == "before-state-read":
+            registry.path(folder).unlink()
+        return {"eng-1": 3}
+
+    def remove(folder: Path, name: str, state: str) -> None:
+        registry.path(folder).unlink()
+
+    monkeypatch.setattr(cli.launch, "start_all", interrupted)
+    if stage == "after-state-write":
+        monkeypatch.setattr(cli.registry, "set_state", remove)
+    assert cli.main(["up", "--agents", "2", "--auth", "default", "--dir", str(tmp_path)], quick_env) == 2
+    captured = capsys.readouterr()
+    assert "quick swarm registry disappeared during startup" in captured.err
+    assert '"state": "ready"' not in captured.out
+
+
+@pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize(
     "choice", ["named:missing", "default,named:missing", "default,routed,default", "named:", "interactive"]
 )

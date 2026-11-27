@@ -84,6 +84,13 @@ def _swarm_for(
     return registry.Swarm(quick_id, str(directory), (master, *engineers))
 
 
+def _launch_registry(folder: Path) -> registry.Swarm:
+    saved = registry.load(folder)
+    if saved is None:
+        raise QuickError("quick swarm registry disappeared during startup")
+    return saved
+
+
 def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     caller = guard.require(environ)
     directory = Path(args.dir or os.getcwd()).resolve()
@@ -102,12 +109,12 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
         paths.register(environ, quick_id, folder)
     started = launch.start_all(folder, swarm, environ)
     exited = launch.exited(swarm.seats[1:], tick.LiveHerdr(environ).bare)
-    pending = {seat.seat for seat in _member(environ).swarm.seats[1:] if seat.state == registry.PENDING}
+    pending = {seat.seat for seat in _launch_registry(folder).seats[1:] if seat.state == registry.PENDING}
     failed = sorted({name for name, code in started.items() if code != 0} | set(exited) | pending)
     for name in failed:
         registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
-    for seat in _member(environ).swarm.seats:
+    for seat in _launch_registry(folder).seats:
         print(json.dumps(dataclasses.asdict(seat)))
     if failed:
         print(f"agentihooks quick: {', '.join(failed)} did not start; the next round retries it", file=sys.stderr)
