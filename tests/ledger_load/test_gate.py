@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -302,6 +303,7 @@ def test_the_harness_loads_on_a_base_revision_that_has_no_api_service(monkeypatc
     assert harness.api_service is None
 
 
+@pytest.mark.feature("ledger-load-server-resources")
 @pytest.mark.parametrize("has_api_service", [True, False])
 def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledger_server(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_api_service: bool
@@ -349,21 +351,35 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
     assert [server.pid for server in stopped] == list(range(len(started), 0, -1))
 
 
+@pytest.mark.feature("ledger-load-server-resources")
+@pytest.mark.parametrize(
+    ("pids", "cpu", "resources", "cores"),
+    [
+        ([1], [2.0, 3.0, 4.0], (4, 80_000), 0.1),
+        ([1, 2], [5.5, 16.5, 37.5], (10, 170_000), 2.1),
+    ],
+)
 def test_the_sampler_sums_the_cpu_threads_and_rss_of_every_ledger_server_process(
     monkeypatch: pytest.MonkeyPatch,
+    pids: list[int],
+    cpu: list[float],
+    resources: tuple[int, int],
+    cores: float,
 ) -> None:
-    clock = iter([0.0, 1.0, 2.0])
+    clock = iter([0.0, 10.0, 20.0])
+    counters = {1: iter([2.0, 3.0, 4.0]), 2: iter([3.5, 13.5, 33.5])}
     slept: list[float] = []
     monkeypatch.setattr(ledger_load, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=slept.append))
-    monkeypatch.setattr(ledger_load, "cpu_seconds", {1: 2.0, 2: 3.5}.__getitem__)
+    monkeypatch.setattr(ledger_load, "cpu_seconds", lambda pid: next(counters[pid]))
     monkeypatch.setattr(ledger_load, "server_resources", {1: (4, 80_000), 2: (6, 90_000)}.__getitem__)
-    results: dict[str, list[object]] = {"cpu": [], "resources": [], "errors": []}
-    ledger_load.sample_cpu([1, 2], 2.0, results)
+    results: dict[str, list[Any]] = {"cpu": [], "resources": [], "errors": []}
+    ledger_load.sample_cpu(pids, 20.0, results)
     assert results == {
-        "cpu": [(0.0, 5.5), (1.0, 5.5), (2.0, 5.5)],
-        "resources": [(0.0, 10, 170_000), (1.0, 10, 170_000), (2.0, 10, 170_000)],
+        "cpu": list(zip([0.0, 10.0, 20.0], cpu)),
+        "resources": [(at, *resources) for at in (0.0, 10.0, 20.0)],
         "errors": [],
     }
+    assert ledger_load.busiest_window(results["cpu"]) == pytest.approx(cores)
     assert slept == [1, 1]
 
 

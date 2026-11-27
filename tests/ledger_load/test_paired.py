@@ -233,15 +233,27 @@ def test_compare_runs_both_windows_together_and_fails_when_either_side_fails(tmp
     assert upload["if"] == "always()"
 
 
+@pytest.mark.feature("ledger-load-server-resources")
 @pytest.mark.parametrize(("workflow", "job"), [("hierarchy-cpu.yml", "load"), ("ledger-load.yml", "compare")])
-def test_each_pair_upload_keeps_the_logs_of_both_ledger_servers_of_each_side(workflow: str, job: str) -> None:
+def test_each_pair_upload_keeps_the_logs_of_both_ledger_servers_of_each_side(
+    tmp_path: Path, workflow: str, job: str
+) -> None:
     steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
     [upload] = [step for step in steps if step.get("uses", "").endswith(".github/actions/retry-upload")]
-    paths = upload["with"]["path"].split()
-    kept = {
-        (side, log)
+    expected = {
+        Path("load-evidence") / side / attempt / log
         for side in paired.SIDES
+        for attempt in ("", "repeat")
         for log in ("server.log", "server-read.log")
-        if any(Path(f"load-evidence/{side}/{log}").match(path) for path in paths)
+    } | {Path(f"load-evidence/{side}.log") for side in paired.SIDES}
+    for relative in expected:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("measurement\n")
+    kept = {
+        path.relative_to(tmp_path)
+        for pattern in upload["with"]["path"].split()
+        for path in tmp_path.glob(pattern)
+        if path.is_file()
     }
-    assert kept == {(side, log) for side in paired.SIDES for log in ("server.log", "server-read.log")}
+    assert kept == expected
