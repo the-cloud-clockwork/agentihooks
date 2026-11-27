@@ -61,6 +61,38 @@ if os.environ.get("MUTATION_PROFILE_DIR"):
 """
 
 
+def explain_retained_roots(root: Path, reports: Path) -> None:
+    import ast
+
+    from scripts.ci_mutation.stats_candidates import Reach
+
+    changes = {"scripts/hive/cli.py": [678, 694], "scripts/swarm/controller.py": [688, 696]}
+    results = {}
+    for name in ("pytest_fixture_setup", "_isolate_real_user_paths", "patch_swarm_store_connect"):
+        reach = Reach(root, changes)
+        reach.read("tests/conftest.py")
+        keys = {
+            key
+            for key, node in reach.nodes.items()
+            if key[0] == "tests/conftest.py" and isinstance(node, ast.FunctionDef) and node.name == name
+        }
+        reach.fill(keys)
+        pending = [(key, [key]) for key in keys]
+        seen: set[tuple[str, int]] = set()
+        reason: list[tuple[str, int]] = []
+        for current, route in pending:
+            if current in seen:
+                continue
+            seen.add(current)
+            if current in reach.unknown or current in reach.wanted and current[0] in changes:
+                reason = route
+                break
+            pending.extend((child, [*route, child]) for child in reach.edges.get(current, ()) if child not in seen)
+        results[name] = {"retained": bool(keys & reach.wanted), "route": reason, "nodes": len(reach.edges)}
+    (reports / "retained-roots.json").write_text(json.dumps(results, indent=2))
+    print(json.dumps(results, indent=2), flush=True)
+
+
 def test_profile_one_recorded_stats_part(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     reports = Path(os.environ["PROOF_REPORT_DIR"]) / "stats-candidates-profile"
@@ -179,5 +211,7 @@ print(json.dumps({'split': split, 'key': split_key(split), 'workers': workers, '
     }
     (reports / "comparison.json").write_text(json.dumps(comparison, indent=2))
     print(json.dumps(comparison), flush=True)
+    if traced_tests >= inputs["baseline_traced_tests"]:
+        explain_retained_roots(root, reports)
     assert traced_tests < inputs["baseline_traced_tests"]
     assert traced_seconds < inputs["baseline_traced_seconds"]
