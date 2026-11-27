@@ -483,3 +483,37 @@ def test_codex_native_default_preserves_lexical_hook_trust(tmp_path: Path, layou
     state = tomllib.loads(copied.decode())["hooks"]["state"]
     assert all(name.startswith(f"{home / 'hooks.json'}:") for name in state)
     assert all(value["trusted_hash"] in ("first", "same") for value in state.values())
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "layout", ["space", "literal-X", "unicode-wide", "prefix-only", "repeated-prefix", "quoted-parent"]
+)
+def test_codex_native_default_preserves_trust_key_boundaries(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    state_name = {"space": "state space", "literal-X": "stateX"}.get(layout, "state")
+    suffix = {"prefix-only": "", "repeated-prefix": f"Stop:{hook}:0"}.get(layout, "Stop:0:0")
+    original_key = f"{hook}:{suffix}"
+    literal = layout in ("space", "literal-X")
+    token = f"'{original_key}'" if literal else json.dumps(original_key)
+    if layout == "unicode-wide":
+        token = token.replace("/", r"\U0000002F", 1)
+    parent = "'hooks'.'state'" if layout == "quoted-parent" else "hooks.state"
+    foreign = "[hooks.state.foreign]\ntrusted_hash='foreign'\n" if layout == "quoted-parent" else ""
+    original = f"{foreign}[{parent}.{token}]\ntrusted_hash='same'\n"
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / state_name)})
+    home = Path(child["CODEX_HOME"])
+    target_key = f"{home / 'hooks.json'}:{suffix}"
+    target_token = f"'{target_key}'" if literal else json.dumps(target_key)
+    expected = original.replace(token, target_token, 1).encode()
+    copied = (home / "config.toml").read_bytes()
+    assert copied == expected
+    assert tomllib.loads(copied.decode())["hooks"]["state"][target_key] == {"trusted_hash": "same"}
+    assert (source / "config.toml").read_bytes() == original.encode()
