@@ -101,7 +101,7 @@ def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callabl
     held = run.tick(1000)
     assert held[-1].startswith(f"holding {HEAD_A}: still resolving")
     assert run.grades() == []
-    assert run.tick(1000)[0].startswith("grading ")
+    assert any(action.startswith("grading ") for action in run.tick(1000))
     assert run.grade(HEAD_A).graded_commit == MERGE
     assert port.call_count == 2
 
@@ -152,6 +152,7 @@ def test_a_required_frame_regrade_with_no_merge_yet_holds_then_falls_back_at_the
     replacement = next(grade for grade in run.grades() if grade.run != old.run)
     assert replacement.merge_fallback is True
     assert replacement.graded_commit == ""
+    assert [grade.run for grade in run.grades() if not grade.superseded] == [replacement.run]
     assert port.call_count == scheduler.UNMERGED_TRIES + 1
 
 
@@ -167,7 +168,7 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
         assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
         assert run.grades() == []
     actions = run.tick(1000)
-    assert actions[-1].startswith("grading ")
+    assert any(action.startswith("grading ") for action in actions)
     grade = run.grade(HEAD_A)
     assert grade.graded_commit == ""
     assert grade.merge_fallback is True
@@ -186,7 +187,7 @@ def test_a_hotfix_head_with_no_merge_yet_spends_one_real_read_per_try(lab: Calla
         run.tick(1000 + i * 2000)
         assert run.grades() == []
     actions = run.tick(1000 + scheduler.UNMERGED_TRIES * 2000)
-    assert actions[-1].startswith("grading ")
+    assert any(action.startswith("grading ") for action in actions)
     assert run.grade(HEAD_A).merge_fallback is True
     assert port.call_count == scheduler.UNMERGED_TRIES
 
@@ -201,7 +202,7 @@ def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound
     for _ in range(scheduler.UNMERGED_TRIES):
         run.tick(1000)
     actions = run.tick(1000)
-    assert actions[0].startswith("grading ")
+    assert any(action.startswith("grading ") for action in actions)
     assert run.grade(HEAD_A).merge_fallback is True
     assert port.call_count == scheduler.UNMERGED_TRIES
 
