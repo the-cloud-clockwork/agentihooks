@@ -287,9 +287,13 @@ of the render stamp, so a fetch that adds one re-renders the home.
 **Planner sandbox.** A swarm planner on Codex launches with
 `-c permissions.planner={extends=":read-only", network={enabled=true}, filesystem={…}}`
 and `-c default_permissions="planner"`. The filesystem grants write the ledger
-folder, `~/.agentihooks/swarm` and `~/scratchpad` only, so the repository stays read
-only while `agentihooks ledger` (which locks a file in the ledger folder) and
-Redis calls succeed. This overrides the role's `sandbox_mode = "danger-full-access"`
+folder, `~/.agentihooks/swarm`, `~/scratchpad`, the ledger exports folder, the
+launch checkout's git common dir, the worktree root (`WORKTREE_ROOT`, default
+`~/dev/worktrees`) and the launch temp folder only. The checkout working tree stays
+read only while `agentihooks ledger` (which locks a file in the ledger folder),
+Redis calls, `wt.sh new` and temp files succeed. The managed agentibrain server
+carries `default_tools_approval_mode = "approve"`, so its tools answer under
+approval `never`. This overrides the role's `sandbox_mode = "danger-full-access"`
 for that launch only; every other role keeps it.
 
 **Degrades.** Codex has no command-backed statusline (upstream openai/codex

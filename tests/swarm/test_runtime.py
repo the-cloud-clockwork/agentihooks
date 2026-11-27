@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -492,15 +493,21 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
 def test_a_codex_planner_starts_with_a_read_only_repo_and_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts.hive import daemon
+
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setenv("LEDGER_DIR", "/l")
     monkeypatch.setenv("AGENTIHOOKS_HOME", "/state")
+    monkeypatch.delenv("WORKTREE_ROOT", raising=False)
+    monkeypatch.setattr(daemon, "local_checkout", lambda repo: "/hive/dev/repo")
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
     passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
     assert passed[-4:] == [
         "-c",
         'permissions.planner={extends=":read-only", network={enabled=true}, '
         'filesystem={"/l"="write", "/h/.agentihooks/swarm"="write", "/h/scratchpad"="write", '
-        '"/state/ledger-exports"="write"}}',
+        '"/state/ledger-exports"="write", "/hive/dev/repo/.git"="write", "/h/dev/worktrees"="write", '
+        '"/t"="write"}}',
         "-c",
         'default_permissions="planner"',
     ]
@@ -510,7 +517,7 @@ def _grants(ledger: str, home: str, exports: str) -> str:
     return (
         'permissions.planner={extends=":read-only", network={enabled=true}, '
         f'filesystem={{"{ledger}"="write", "{home}/.agentihooks/swarm"="write", "{home}/scratchpad"="write", '
-        f'"{exports}"="write"}}}}'
+        f'"{exports}"="write", "/repo/.git"="write", "{home}/dev/worktrees"="write", "/t"="write"}}}}'
     )
 
 
@@ -528,7 +535,8 @@ def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(
 ) -> None:
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setattr(Path, "home", lambda: Path("/p"))
-    assert codex_plan_mode(environ) == [
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
+    assert codex_plan_mode(environ, "/repo") == [
         "-c",
         _grants(ledger, home, "/p/.agentihooks/ledger-exports"),
         "-c",
@@ -538,7 +546,8 @@ def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(
 
 def test_a_codex_planner_quotes_each_granted_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: Path("/p"))
-    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants(
+    monkeypatch.setattr(tempfile, "tempdir", "/t")
+    assert codex_plan_mode({"HOME": '/q"x'}, "/repo")[1] == _grants(
         r"/q\"x/development-ledger", r"/q\"x", "/p/.agentihooks/ledger-exports"
     )
 
