@@ -42,6 +42,10 @@ class Delivery(Protocol):
 
 @runtime_checkable
 class Consumer(Protocol):
+    @property
+    def created(self) -> int | None:
+        """Wall clock epoch milliseconds at which the durable consumer was created, or None when unknown."""
+
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]: ...
 
 

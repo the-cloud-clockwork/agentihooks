@@ -1729,6 +1729,7 @@ class Delivery:
 class Consumer:
     deliveries: list[bus.Delivery]
     asked: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+    created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[bus.Delivery]:
         self.asked.append((batch, timeout_ms))

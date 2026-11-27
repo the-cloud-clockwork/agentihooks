@@ -76,6 +76,12 @@ class MergedConsumer:
         self._consumers: dict[int, Consumer] = {}
         self._cursor = 0
 
+    @property
+    def created(self) -> int | None:
+        """None: each child durable is created when its log is first visited, so one time across them would let a
+        newly created child replay history older than the window."""
+        return None
+
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]:
         logs = self._logs()
         deliveries = []
