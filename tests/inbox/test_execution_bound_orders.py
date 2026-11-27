@@ -114,6 +114,16 @@ def test_a_bound_order_keeps_its_execution_when_routed_and_loaded(store: RedisSt
 
 
 @pytest.mark.feature("inbox-execution-bound-orders")
+def test_an_unbound_order_keeps_string_routing_between_worlds(store: RedisStore) -> None:
+    agent = life(store, "eng")
+    sender = InboxStore(store.redis, world="another-world")
+    sent = sender.send("operator", agent.seat, "Continue the seat work")
+    inbox = InboxStore(store.redis)
+    assert inbox.get(sent.id).execution == ""
+    assert [item.id for item in inbox.pending_mail(agent.name)] == [sent.id]
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
 def test_a_legacy_item_with_no_execution_still_loads_unbound(store: RedisStore) -> None:
     agent = life(store, "eng")
     inbox = InboxStore(store.redis)

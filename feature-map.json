@@ -6585,6 +6585,7 @@
         "tests/inbox/test_execution_bound_orders.py::test_the_exit_settlement_closes_a_masters_bound_order",
         "tests/inbox/test_execution_bound_orders.py::test_an_ended_execution_does_not_receive_its_order_before_the_sweep",
         "tests/inbox/test_execution_bound_orders.py::test_a_bound_order_keeps_its_execution_when_routed_and_loaded",
+        "tests/inbox/test_execution_bound_orders.py::test_an_unbound_order_keeps_string_routing_between_worlds",
         "tests/inbox/test_execution_bound_orders.py::test_a_legacy_item_with_no_execution_still_loads_unbound",
         "tests/inbox/test_execution_bound_orders.py::test_an_order_does_not_cross_executions_with_the_same_agent_name",
         "tests/inbox/test_execution_bound_orders.py::test_a_bound_order_with_no_current_recipient_is_closed",

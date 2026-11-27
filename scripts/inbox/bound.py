@@ -47,6 +47,10 @@ def recipient(value: str | Recipient) -> tuple[str, str]:
     return value.name, value.execution
 
 
+def routed_recipient(name: str, execution: str) -> str | Recipient:
+    return Recipient(name, execution) if execution else name
+
+
 def recipient_for(store: "RedisStore", name: str) -> Recipient:
     name, slug = _address(store.names, name)
     row = fencing.records(store, slug).record(slug, fencing.BY_NAME, name)

@@ -236,7 +236,7 @@ class InboxStore:
         home = self.home(address)
         if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
-            return routed.send(sender, Recipient(requested, execution), text, ref, fyi, task, item_id)
+            return routed.send(sender, bound.routed_recipient(requested, execution), text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
