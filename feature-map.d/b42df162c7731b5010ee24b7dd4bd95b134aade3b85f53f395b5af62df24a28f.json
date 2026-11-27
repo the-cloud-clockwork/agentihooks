@@ -1,0 +1,24 @@
+{
+  "id": "lab-scheduler-cache-policy",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+  "behaviour": "The scheduler preserves its original environment when cache policy is absent. A required policy validates its owned root, byte threshold and Pod UID before startup, isolates Pod cache generations under exclusive ownership, retains healthy same-Pod data and invalidates excess allocated usage for safe restart. The chart can require the interface so older images refuse before cache writes.",
+  "seam": "scripts.ci_lab.cache.run and scripts.ci_lab.scheduler.main",
+  "tests": [
+    "tests/ci_lab/test_scheduler_cache.py::test_disabled_policy_preserves_mapping_identity_and_callback_result",
+    "tests/ci_lab/test_scheduler_cache.py::test_disabled_policy_propagates_the_callback_exception",
+    "tests/ci_lab/test_scheduler_cache.py::test_required_policy_refuses_an_absent_root_before_start_or_mutation",
+    "tests/ci_lab/test_scheduler_cache.py::test_partial_policy_refuses_before_start_or_mutation",
+    "tests/ci_lab/test_scheduler_cache.py::test_invalid_policy_values_refuse_before_mutation",
+    "tests/ci_lab/test_scheduler_cache.py::test_unsafe_roots_refuse_without_removing_foreign_data",
+    "tests/ci_lab/test_scheduler_cache.py::test_enabled_policy_requires_pid_one_before_mutation",
+    "tests/ci_lab/test_scheduler_cache.py::test_enabled_policy_requires_the_roots_owner_before_mutation",
+    "tests/ci_lab/test_scheduler_cache.py::test_same_pod_reuses_its_cache_and_retains_healthy_exit",
+    "tests/ci_lab/test_scheduler_cache.py::test_replacement_pod_gets_a_fresh_cache_and_reclaims_the_old_owned_generation",
+    "tests/ci_lab/test_scheduler_cache.py::test_a_second_owner_refuses_while_the_first_consumer_is_running",
+    "tests/ci_lab/test_scheduler_cache.py::test_allocated_bytes_count_hardlinks_once_and_do_not_follow_symlinks",
+    "tests/ci_lab/test_scheduler_cache.py::test_over_budget_cache_is_invalidated_and_reset_on_same_pod_restart",
+    "tests/ci_lab/test_scheduler_cache.py::test_main_keeps_missing_app_refusal_before_the_cache_policy",
+    "tests/ci_lab/test_scheduler_cache.py::test_main_required_policy_refuses_before_runtime_construction"
+  ]
+}
