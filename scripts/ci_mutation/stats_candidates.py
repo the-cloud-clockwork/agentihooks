@@ -230,8 +230,7 @@ class Reach:
             return self.binding(self.parents[scope], name)
         if name in vars(__import__("builtins")) or name in ("__name__", "__file__", "__package__"):
             return {EXTERNAL}
-        hook = self.bindings[scope].get("__getattr__", ())
-        return {(scope[0], cast(Any, value).lineno) for value in hook} or {UNKNOWN}
+        return self.bindings_to_keys(scope, "__getattr__") or {UNKNOWN}
 
     def annotation(self, scope: Key, node: ast.AST) -> set[Key]:
         if isinstance(node, ast.Subscript):
@@ -336,8 +335,7 @@ class Reach:
         if isinstance(node, ast.ClassDef):
             bases = set[Key]().union(*(self.value(self.parents[owner], base) for base in node.bases))
             return self.attribute(bases, name) if bases else {UNKNOWN}
-        exports = self.bindings[owner].get("__getattr__", ())
-        return {(owner[0], cast(Any, value).lineno) for value in exports} or {UNKNOWN}
+        return self.bindings_to_keys(owner, "__getattr__") or {UNKNOWN}
 
     def call_value(self, scope: Key, node: ast.Call) -> set[Key]:
         kind = self.lookup_kind(scope, node.func)
@@ -437,7 +435,13 @@ class Reach:
         return result
 
     def bindings_to_keys(self, key: Key, name: str) -> set[Key]:
-        return {(key[0], cast(Any, node).lineno) for node in self.bindings[key].get(name, ())}
+        token = key, f"<binding-values:{name}>"
+        if token in self.active:
+            return {UNKNOWN}
+        self.active.add(token)
+        result = set[Key]().union(*(self.value(key, node) for node in self.bindings[key].get(name, ())))
+        self.active.remove(token)
+        return result
 
     def references(self, key: Key) -> set[Key]:
         result: set[Key] = set()
