@@ -64,11 +64,12 @@ def test_a_file_at_or_below_its_entry_is_green_with_no_drift_or_rewrite(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     head = _tree(tmp_path, {"hooks/planted.py": ILL_TYPED}, {"hooks/planted.py": 2, "hooks/other.py": 5})
+    baseline = (head / type_gate.BASELINE).read_bytes()
     _fake_checker(monkeypatch, [{"file": str(head / "hooks/planted.py"), "severity": "error"}])
     code = type_gate.main(["--tree", "--head", str(head)])
     out = capsys.readouterr().out
     assert (code, out) == (0, "1 type errors in 1 files, 7 allowed, 0 errors\n")
-    assert "write" not in out
+    assert (head / type_gate.BASELINE).read_bytes() == baseline
 
 
 def test_every_graded_source_is_measured_with_no_base_needed(
@@ -88,5 +89,5 @@ def test_every_graded_source_is_measured_with_no_base_needed(
     monkeypatch.setattr(type_gate.subprocess, "run", run)
     code = type_gate.main(["--tree", "--head", str(head)])
     assert code == 0
-    assert checked == [type_gate.sources(head)]
+    assert checked == [["hooks/__init__.py", "hooks/a.py", "scripts/b.py", "tests/c.py"]]
     assert capsys.readouterr().out == "0 type errors in 0 files, 0 allowed, 0 errors\n"

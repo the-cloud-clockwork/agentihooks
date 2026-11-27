@@ -42,8 +42,9 @@ def test_the_whole_tree_type_check_runs_from_the_checked_out_tree_on_a_push_to_d
     assert any(step.get("run") == "python -m scripts.type_gate --tree" for step in tree["steps"])
     assert enabled(tree["if"], "push", {})
     assert not enabled(tree["if"], "push", {}, ref="refs/heads/other")
+    skipped = {"admission": SimpleNamespace(result="skipped")}
     for event in ("pull_request", "merge_group"):
-        assert not enabled(tree["if"], event, {})
+        assert not enabled(tree["if"], event, skipped)
     admitted = {"admission": SimpleNamespace(result="success")}
     refused = {"admission": SimpleNamespace(result="failure")}
     assert enabled(tree["if"], "workflow_dispatch", admitted)

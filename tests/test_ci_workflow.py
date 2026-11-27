@@ -600,7 +600,16 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> Non
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    expected = {"collect", "count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"}
+    expected = {
+        "collect",
+        "count-record",
+        "split",
+        "test-count",
+        "type-gate-tree",
+        "unit",
+        "unit-rerun",
+        "unit-selected",
+    }
     assert set(callers) == expected | ({"type-gate"} if "type-gate" in jobs else set())
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")

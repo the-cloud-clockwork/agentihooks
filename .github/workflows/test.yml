@@ -3542,7 +3542,7 @@ jobs:
           retention-days: 7
 
   type-gate-tree:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.event_name != 'merge_group' && !(github.event_name == 'push' && github.ref != 'refs/heads/dev') && !(github.event_name == 'workflow_dispatch' && needs.admission.result != 'success') }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && !(github.event_name != 'push' && needs.admission.result != 'success') && !(github.event_name == 'push' && github.ref != 'refs/heads/dev') }}
     needs: [admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 15
@@ -3563,6 +3563,7 @@ jobs:
       - *venv
       - *uv
       - *install
+      - *save-venv
       - *use-venv
       - name: Hold the strict type checker's whole tree errors to its own baseline
         run: python -m scripts.type_gate --tree
