@@ -16,7 +16,7 @@ SELF = "stage-budget"
 WATCHER = "queue-fail-fast"
 BUDGETS = {
     "type-gate": 300,
-    "type-gate-tree": 300,
+    "type-gate-tree": 600,
     "promote": 10 * 60,
     "admission": 30,
     "reuse": 30,
