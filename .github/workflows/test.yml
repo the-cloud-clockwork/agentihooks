@@ -38,16 +38,16 @@ jobs:
 
   promotion-ready:
     name: Promotion ready
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, launch-hotfix]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, type-gate-tree, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.type-gate-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
       - run: echo 'All promotion dependencies graded this development revision.'
 
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, promotion-ready, launch-hotfix]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && !(!(needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '') && needs.launch-hotfix.outputs.promote != 'true') }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, type-gate-tree, promotion-ready, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && !(!(needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.type-gate-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '') && needs.launch-hotfix.outputs.promote != 'true') }}
     uses: ./.github/workflows/promote.yml
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -3546,6 +3546,8 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
       - name: Hold the strict type checker's errors per file to the base baseline
+        env:
+          TYPE_GATE_DIRECT_IMPORTERS: "1"
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
             cd "$RUNNER_TEMP/grader"
@@ -3562,6 +3564,33 @@ jobs:
           name: type-baseline
           path: ${{ runner.temp }}/type-baseline/TYPE_BASELINE.json
           retention-days: 7
+
+  type-gate-tree:
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && !(github.event_name != 'push' && needs.admission.result != 'success') && !(github.event_name == 'push' && github.ref != 'refs/heads/dev') }}
+    needs: [admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *save-venv
+      - *use-venv
+      - name: Hold the strict type checker's whole tree errors to its own baseline
+        run: python -m scripts.type_gate --tree
 
   coverage-ratchet:
     needs: [select, unit, reuse]

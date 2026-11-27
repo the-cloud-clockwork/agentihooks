@@ -104,6 +104,7 @@ MOVED = {
     ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "type-gate"): QUEUED,
+    ("test.yml", "type-gate-tree"): QUEUED,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "lab-verdict"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
