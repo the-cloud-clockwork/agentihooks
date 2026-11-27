@@ -508,10 +508,16 @@ def test_resolve_passes_its_own_timeout_to_the_mirror_fetch(tmp_path: Path, monk
     merge = _merge_commit(repo, base, head)
     reader = FakePullRequests({41: {"merge_commit_sha": merge}})
     mirror = _mirror(tmp_path, repo)
-    fetch = Mock(wraps=mirror.fetch)
-    monkeypatch.setattr(mirror, "fetch", fetch)
+    original = Mirror.fetch
+    calls: list[tuple[str, float | None]] = []
+
+    def fetch(self: Mirror, sha: str, timeout: float | None = None) -> bool:
+        calls.append((sha, timeout))
+        return original(self, sha, timeout=timeout)
+
+    monkeypatch.setattr(Mirror, "fetch", fetch)
     assert merges.resolve(reader, mirror, 41, head, timeout=17.5) == (merge, base)
-    fetch.assert_called_once_with(merge, timeout=17.5)
+    assert calls == [(merge, 17.5)]
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
