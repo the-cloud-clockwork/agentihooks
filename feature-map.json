@@ -505,6 +505,7 @@
         "tests/swarm_ledger/test_api_v1.py::test_sdk_collections_and_tick_readers_cross_page_boundaries",
         "tests/swarm_ledger/test_api_v1.py::test_cli_collection_consumers_read_all_pages",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_a_summary_past_the_reply_limit_answers_resource_too_large_with_the_export_message",
         "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
         "tests/swarm_ledger/test_summary_read.py::test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives",
@@ -8470,7 +8471,7 @@
     {
       "id": "ledger-item-reads",
       "origin": "inventory",
-      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API, or every task or freeze as JSON, and refuses other items; ledger tasks lists open tasks one line each.",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up, priority or focus target read through the ledger API, the tasks of a focus target read in pages to their end, or every task, freeze, focus or order as JSON, and refuses other items, naming the forms it takes; ledger tasks lists open tasks one line each.",
       "seam": "agentihooks ledger get and ledger tasks",
       "tests": [
         "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
@@ -15913,7 +15914,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A read that carries no slices, as the tick holds one, cannot climb from a task filed under a slice: there a task counts under an ordered phase when its row names that phase or when it is merged into a lead whose row names it, which lists the tasks the whole ledger lists, because the ledger refuses a task whose row names another phase than its slice. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A read that carries no slices, as the tick holds one, cannot climb from a task filed under a slice: there a task counts under an ordered phase when its row names that phase or when it is merged into a lead whose row names it, which lists the tasks the whole ledger lists, because the ledger refuses a task whose row names another phase than its slice. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the command line read that lists one order's tasks in pages, agentihooks api get focus/<item>/tasks.",
       "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
       "tests": [
         "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
@@ -15944,6 +15945,55 @@
       "tests": [
         "tests/swarm_ledger/test_read_replies_recorded.py::test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_reply",
         "tests/swarm_ledger/test_read_replies_recorded.py::test_the_rule_excuses_only_the_modules_that_measure_a_reply_before_it_is_bounded"
+      ]
+    },
+    {
+      "id": "ledger-focus-task-pages",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "One ledger API list read, GET focus/<target>/tasks or agentihooks api get focus/<target>/tasks, serves the tasks under one focus target that are not done, each with its lane, state and claim gate verdict, through the cursor paging every collection uses, so a target one reply cannot hold is read whole in pages; a target that does not exist reads 404 resource_missing. A name that is itself a plan node, such as a task whose id is tasks, keeps its one reply read. A list that changes between two pages answers 409 and the client reads it again from its first page, giving up with the conflict after its retries, because the export holds no verdicts. The command line takes focus/<target> and reads focus/<target>/tasks to its end. Past the reply limit the orders read, the focus list and the read of one target each name the command line read that fits. A live check reads, in every swarm that is not stopped, the three focus targets with the most tasks, or the first three the freezes read lists when the focus list itself passes the reply limit, and holds the pages of each to the task rows of its one reply read, reading both again while the ledger moves; a target one reply cannot hold is held to the list the ledger hashes, through a cursor made from the hash of its pages.",
+      "seam": "scripts.swarm_ledger.api.routes.ledger_read at focus/<target>/tasks, focus, focus/<target> and orders through the ledger swarm port focus_check.task_rows, ResourceClient.collection, agentihooks api get, and scripts.feature_checks.focus_task_pages",
+      "semgrep_rule": "feature-api-read-names-the-read-that-fits",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.focus_task_pages"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_target_one_reply_cannot_hold_is_read_whole_through_its_task_pages",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_page_of_the_task_list_carries_the_cursor_to_the_next_page",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_cursor_of_a_task_list_that_changed_is_refused_as_a_conflict",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_holds_the_unfinished_tasks_of_its_target_and_no_done_one",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_under_no_target_answers_404",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_node_whose_id_is_tasks_keeps_its_one_reply_read_and_lists_its_tasks_one_name_down",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_that_changes_between_two_pages_is_read_again_from_its_first_page",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_that_keeps_changing_gives_up_with_the_conflict",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_takes_a_focus_target_and_its_task_list",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_refuses_a_focus_item_that_names_no_target",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_reads_a_focus_target_in_one_reply_and_its_task_list_to_the_end",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_focus_read_past_the_reply_limit_names_the_command_line_read_that_fits",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_the_live_check_holds_a_target_one_reply_cannot_hold_to_the_list_the_route_hashes",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_the_live_check_fails_a_target_whose_pages_miss_a_row_of_the_list_the_route_hashes",
+        "tests/swarm_ledger/test_hierarchy_pages.py::test_a_collection_whose_name_only_begins_with_a_restart_name_takes_the_export_path",
+        "tests/swarm/test_focus_check.py::test_task_rows_passes_the_fix_phase_through_a_focus_elsewhere",
+        "tests/swarm/test_focus_check.py::test_task_rows_is_none_under_no_target_or_with_no_tasks_suffix_and_lists_a_node_named_tasks_one_down",
+        "tests/swarm/test_focus_check.py::test_the_focus_tasks_route_hands_the_fix_phase_of_the_slug_to_task_rows",
+        "tests/test_focus_task_pages_check.py::test_a_target_whose_pages_hold_the_rows_of_its_one_reply_read_passes",
+        "tests/test_focus_task_pages_check.py::test_a_ledger_that_moves_while_the_pages_are_read_passes_on_the_first_reading",
+        "tests/test_focus_task_pages_check.py::test_pages_that_keep_differing_from_the_one_reply_read_fail_after_three_reads",
+        "tests/test_focus_task_pages_check.py::test_a_ledger_that_moved_between_the_two_reads_is_read_again_and_passes",
+        "tests/test_focus_task_pages_check.py::test_the_three_focus_records_with_the_most_tasks_are_checked_largest_first",
+        "tests/test_focus_task_pages_check.py::test_a_ledger_with_no_focus_record_says_so",
+        "tests/test_focus_task_pages_check.py::test_a_target_one_reply_cannot_hold_passes_on_its_pages",
+        "tests/test_focus_task_pages_check.py::test_a_target_one_reply_cannot_hold_whose_pages_miss_a_row_fails_after_three_reads",
+        "tests/test_focus_task_pages_check.py::test_a_target_one_reply_cannot_hold_whose_pages_repeat_a_row_fails_after_three_reads",
+        "tests/test_focus_task_pages_check.py::test_a_target_one_reply_cannot_hold_whose_ledger_moved_once_then_holds_passes_on_the_second_reading",
+        "tests/test_focus_task_pages_check.py::test_a_refusal_other_than_the_conflict_on_the_cursor_question_is_raised",
+        "tests/test_focus_task_pages_check.py::test_a_focus_list_one_reply_cannot_hold_is_listed_through_the_freezes_read",
+        "tests/test_focus_task_pages_check.py::test_a_read_refused_for_another_reason_is_raised",
+        "tests/test_focus_task_pages_check.py::test_the_check_reads_every_swarm_that_is_not_stopped_in_name_order_and_passes",
+        "tests/test_focus_task_pages_check.py::test_the_check_fails_when_one_target_fails_and_still_prints_every_line",
+        "tests/test_focus_task_pages_check.py::test_main_with_no_argument_builds_its_store_and_read_from_the_ledger"
       ]
     },
     {
@@ -15999,7 +16049,7 @@
       "id": "swarm-focus-read",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
-      "behaviour": "One ledger API read, GET focus or agentihooks api get focus, lists every focus record with its target, author, time and reason, the ids of the done tasks under it, every other task under it with its lane, state and claim gate verdict, the claimable count, and the minutes since the focus while a task under it is open and none is claimed or in a pull request; GET focus/<target> answers one target the same way and a target that does not exist reads 404 resource_missing.",
+      "behaviour": "One ledger API read, GET focus or agentihooks api get focus, lists every focus record with its target, author, time and reason, the ids of the done tasks under it, every other task under it with its lane, state and claim gate verdict, the claimable count, and the minutes since the focus while a task under it is open and none is claimed or in a pull request; GET focus/<target> answers one target the same way and a target that does not exist reads 404 resource_missing. Past the reply limit the focus list answers 413 and names the freezes read and the paged read of one target's tasks, and the read of one target names its own paged read, agentihooks api get focus/<target>/tasks.",
       "seam": "scripts.swarm_ledger.api.routes.focus_read through the ledger swarm port focus_check.read, ledger get focus, and LedgerClient.focus_verdicts",
       "tests": [
         "tests/swarm/test_focus_check.py::test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes",

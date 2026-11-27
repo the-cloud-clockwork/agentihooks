@@ -403,6 +403,10 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("enforcement session start failed", {"error": str(e)})
 
+    from hooks.context.delivery_requirements import inject_on_session_start as _inject_delivery_requirements
+
+    _inject_delivery_requirements()
+
     try:
         from hooks.context.injection_trace import record_session_start
         from hooks.targets import current_target as _trace_target

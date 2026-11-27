@@ -1,6 +1,7 @@
 import io
 import json
 import urllib.error
+from email.message import Message
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -122,6 +123,27 @@ def test_a_hierarchy_that_keeps_changing_gives_up_with_the_conflict(tmp_path, pa
     assert caught.value.code == 409
     assert len(served.paths) == 2 * (api_client.RETRIES + 1)
     assert len(pauses) == api_client.RETRIES and all(backoff(n, pause) for n, pause in enumerate(pauses))
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_a_collection_whose_name_only_begins_with_a_restart_name_takes_the_export_path(pauses: list) -> None:
+    calls: list[str] = []
+
+    class NearMiss(api_client.ResourceClient):
+        def __init__(self) -> None:
+            super().__init__("http://ledger.test", {})
+
+        def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+            calls.append(path)
+            if len(calls) == 1:
+                body = json.dumps({"error": {"code": "revision_conflict"}}).encode()
+                raise urllib.error.HTTPError(path, 409, "Conflict", Message(), io.BytesIO(body))
+            return {"data": {"_meta": {"rev": 1}}}
+
+    with pytest.raises(APIError):
+        NearMiss().collection("demo", "focusing/x")
+    assert calls[1] == "export"
+    assert pauses == []
 
 
 class Inbox:
