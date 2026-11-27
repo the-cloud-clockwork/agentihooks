@@ -66,6 +66,30 @@ def test_only_nonempty_test_only_pull_request_diffs_avoid_analysis(tmp_path, pat
     assert f"SONAR_TEST_ONLY={str(expected).lower()}" in (tmp_path / "environment").read_text().splitlines()
 
 
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+@pytest.mark.parametrize(
+    ("hand_off", "expected"), [("true", True), ("false", False), (None, False)], ids=["handed-off", "kept", "unset"]
+)
+def test_a_handed_off_push_decides_test_only_without_a_checkout(
+    tmp_path: Path, hand_off: str | None, expected: bool
+) -> None:
+    output, environment = tmp_path / "output", tmp_path / "environment"
+    env = {key: value for key, value in os.environ.items() if key != "SONAR_HAND_OFF"}
+    env |= {"BASE": "", "HEAD": "", "EVENT": "push", "GITHUB_OUTPUT": str(output), "GITHUB_ENV": str(environment)}
+    env |= {"RUNNER_TEMP": str(tmp_path)} | ({"SONAR_HAND_OFF": hand_off} if hand_off is not None else {})
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", _step("Decide whether Sonar has changed source")["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"test_only={str(expected).lower()}" in output.read_text().splitlines()
+    assert f"SONAR_TEST_ONLY={str(expected).lower()}" in environment.read_text().splitlines()
+    assert ("::notice::" in result.stdout) is expected
+
+
 def test_the_decision_uses_immutable_event_revisions_and_retains_source_renames():
     step = _step("Decide whether Sonar has changed source")
     assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
