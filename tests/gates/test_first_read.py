@@ -318,7 +318,13 @@ def test_profile_binding_canary_is_exempt() -> None:
 @pytest.mark.feature("first-read-canary-literal")
 @pytest.mark.parametrize(
     "command",
-    [MOUNTED_CANARY, f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r);"],
+    [
+        MOUNTED_CANARY,
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r);",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: 4000, yield_time_ms: 10000}}));",
+        f'const r = await tools.exec_command({{"cmd": {json.dumps(MOUNTED_CANARY)}, "yield_time_ms": 1000}}); text(r);',
+    ],
 )
 def test_mounted_literal_canary_is_exempt(command: str) -> None:
     assert _bootstrap(command)
@@ -345,6 +351,9 @@ def test_mounted_literal_canary_is_exempt(command: str) -> None:
         f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
         f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, shell: "/home/worker/x/evil"}});',
         f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}, evil);",
+        f'text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, workdir: "/home/worker/x"}}));',
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: limit}}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); fetch(1);",
         f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); await tools.exec_command({{cmd: "pwd"}});',
     ],
 )

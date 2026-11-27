@@ -17,8 +17,10 @@ CANARY_EXIT = ast.dump(ast.parse("sys.exit(main(sys.argv[2]))").body[0])
 SHELL_META = "$`<>(){}|;&\n"
 NAME_SAFE = "._-"
 LITERAL = re.compile(r"""(?:[A-Za-z0-9_@%+=:,./-]| |'[^']*'|"'")*""")
+EXEC_FIELD = r'\s*"?(?:cmd"?\s*:\s*"(?:[^"\\]|\\.)*"|(?:max_output_tokens|yield_time_ms)"?\s*:\s*\d+)\s*'
+EXEC_CALL = rf"(?:await\s+)?tools\.exec_command\(\s*\{{{EXEC_FIELD}(?:,{EXEC_FIELD})*,?\s*\}}\s*\)"
 EXEC_PROGRAM = re.compile(
-    r'\s*(?:const\s+\w+\s*=\s*)?(?:await\s+)?tools\.exec_command\(\s*\{\s*"?cmd"?\s*:\s*"(?:[^"\\]|\\.)*"\s*,?\s*\}\s*\);?(?:\s*text\(\w+\);?)?\s*'
+    rf"\s*(?:(?:const\s+\w+\s*=\s*)?{EXEC_CALL}\s*;?(?:\s*text\(\w+\)\s*;?)?|text\(\s*{EXEC_CALL}\s*\)\s*;?)\s*"
 )
 
 
