@@ -17,7 +17,7 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "collect", "gate-required"} | (
     {"test-summary"}
     if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else set()
@@ -28,6 +28,7 @@ PULL_REQUEST = (
     | {
         "select",
         "lint",
+        "lint-actions",
         "semgrep",
         "sonar",
         "mutation-plan",
@@ -54,8 +55,10 @@ PROMOTION = (
         "mutation-shard",
         "mutation",
         "lint",
+        "lint-actions",
         "semgrep",
         "test-count",
+        "collect",
         "lab-verdict",
     }
 ) | {
@@ -64,6 +67,7 @@ PROMOTION = (
     "coverage-ratchet",
     "coverage-baseline",
     "dep-manifest",
+    "sonar-after-unit",
     "promote",
     "promotion-ready",
     "refresh-durations",
@@ -78,6 +82,7 @@ PROMOTION = (
     "hierarchy-cpu",
     "tick-scale",
     "tick-pattern-tree",
+    "type-gate-tree",
     "launch-hotfix",
     "kind-due",
     "helm-kind",
@@ -85,7 +90,13 @@ PROMOTION = (
 }
 
 
-def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace], base_ref: str = "dev") -> bool:
+def enabled(
+    condition: str | bool,
+    event: str,
+    needs: dict[str, SimpleNamespace],
+    base_ref: str = "dev",
+    ref: str = "refs/heads/dev",
+) -> bool:
     if isinstance(condition, bool):
         return condition
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
@@ -98,7 +109,7 @@ def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace]
             expression,
             {"__builtins__": {}},
             {
-                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref="refs/heads/dev"),
+                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref=ref),
                 "contains": lambda values, value: value in values,
                 "results": [need.result for need in needs.values()],
                 "needs": needs,
@@ -111,7 +122,9 @@ def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace]
     )
 
 
-def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritative: str = "") -> set[str]:
+def jobs_for(
+    event: str, base_ref: str = "dev", scope: str = "full", collected: str = "false", authoritative: str = ""
+) -> set[str]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     completed = {}
     pending = dict(jobs)
@@ -142,6 +155,7 @@ def jobs_for(event: str, base_ref: str = "dev", scope: str = "full", authoritati
                     sonar="run",
                     probe="true",
                     probe_shards="[0, 1]",
+                    collected=collected,
                     authoritative=authoritative if runs else "",
                 ),
             )
@@ -168,6 +182,11 @@ def test_each_event_runs_only_its_tier_jobs(event: str, expected: set[str]) -> N
         assert jobs_for(event) in (expected, expected | {"install-smoke"})
     else:
         assert jobs_for(event) == expected
+
+
+def test_a_plan_that_collected_the_stats_skips_the_stats_and_refine_jobs() -> None:
+    expected = (PULL_REQUEST | _planned_jobs("pull_request")) - {"mutation-stats", "mutation-refine"}
+    assert jobs_for("pull_request", collected="true") == expected
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
@@ -260,21 +279,23 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert "type-gate" in jobs["gate-required"]["needs"]
     steps[0]["run"] = steps[0]["run"].replace('"docs", "semgrep"', '"semgrep"')
     assert steps in [
-        ci_reuse.typing_required(
-            ci_reuse.test_only_sonar(
-                ci_reuse.selection_diagnostic(
-                    forward(
-                        finish(
-                            rerun(
-                                ci_reuse.inline_mutation(
-                                    ci_reuse.postgres_required(
-                                        lab(
-                                            ci_reuse.gate_steps(
-                                                queue_tier=True,
-                                                promotion=True,
-                                                **options,
-                                                summary=summary,
-                                                watcher_loss=True,
+        ci_reuse.split_required(
+            ci_reuse.typing_required(
+                ci_reuse.test_only_sonar(
+                    ci_reuse.selection_diagnostic(
+                        forward(
+                            finish(
+                                rerun(
+                                    ci_reuse.inline_mutation(
+                                        ci_reuse.postgres_required(
+                                            lab(
+                                                ci_reuse.gate_steps(
+                                                    queue_tier=True,
+                                                    promotion=True,
+                                                    **options,
+                                                    summary=summary,
+                                                    watcher_loss=True,
+                                                )
                                             )
                                         )
                                     )
@@ -285,7 +306,7 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
                 )
             )
         )
-        for forward in (list, ci_reuse.forwarded_stats)
+        for forward in (list, ci_reuse.forwarded_stats, ci_reuse.collected_stats)
         for summary in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)

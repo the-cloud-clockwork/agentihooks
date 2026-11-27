@@ -2,6 +2,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,7 @@ SCENARIOS = [
     "scripts/packaging/compose-hive-smoke.sh",
     "scripts/packaging/compose-task-smoke.sh",
     "scripts/packaging/compose-recovery-drill.sh",
+    "scripts/packaging/compose-master-drill.sh",
     "scripts/packaging/swarm-init-smoke.sh",
     "scripts/packaging/stability-smoke.sh",
 ]
@@ -76,6 +78,52 @@ def test_scenarios_sharing_a_file_name_keep_their_own_results(tmp_path):
     assert re.search(rf"::group::{re.escape(scenarios[1])} failed with exit 4 in \d+s\ntwo output\n", result.stdout)
 
 
+@pytest.mark.feature("swarm-smoke-scenario-bound")
+def test_a_scenario_past_its_bound_is_stopped_and_named_with_its_log(tmp_path: Path) -> None:
+    hung = tmp_path / "hung.sh"
+    hung.write_text("echo hung output\nsleep 300\n")
+    passing = tmp_path / "passing.sh"
+    passing.write_text("echo passing output\n")
+    result = subprocess.run(
+        ["bash", str(RUNNER), str(hung), str(passing)],
+        env={"PATH": "/usr/bin:/bin", "RUNNER_TEMP": str(tmp_path), "SWARM_SMOKE_SCENARIO_SECONDS": "2"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert re.search(rf"::group::{re.escape(str(hung))} timed out after 2s in \d+s\nhung output\n", result.stdout)
+    assert f"::error title={hung}::timed out after 2s in " in result.stdout
+    assert re.search(rf"::group::{re.escape(str(passing))} passed in \d+s\npassing output\n", result.stdout)
+    assert f"::error title={passing}" not in result.stdout
+
+
+@pytest.mark.feature("swarm-smoke-scenario-bound")
+def test_a_scenario_that_ignores_the_stop_signal_is_killed_after_its_grace_and_named_as_timed_out(
+    tmp_path: Path,
+) -> None:
+    stubborn = tmp_path / "stubborn.sh"
+    stubborn.write_text("trap '' TERM\necho stubborn output\nsleep 300\n")
+    result = subprocess.run(
+        ["bash", str(RUNNER), str(stubborn)],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "RUNNER_TEMP": str(tmp_path),
+            "SWARM_SMOKE_SCENARIO_SECONDS": "1",
+            "SWARM_SMOKE_SCENARIO_GRACE_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert re.search(
+        rf"::group::{re.escape(str(stubborn))} timed out after 1s in \d+s\nstubborn output\n", result.stdout
+    )
+    assert f"::error title={stubborn}::timed out after 1s in " in result.stdout
+    assert re.search(rf"{re.escape(str(stubborn))} +exit 137, \d+s", result.stdout)
+
+
 def test_the_swarm_image_job_runs_every_scenario_in_one_parallel_step_on_the_built_image():
     job = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]
     steps = job["steps"]
@@ -106,7 +154,13 @@ def test_the_compose_install_scenario_leaves_the_default_ports_to_swarm_init():
     script = (ROOT / "scripts/packaging/swarm-smoke.sh").read_text()
     compose = (ROOT / "compose.yaml").read_text()
     taken = set()
-    for other in ("compose-hive-smoke.sh", "compose-task-smoke.sh", "compose-recovery-drill.sh", "stability-smoke.sh"):
+    for other in (
+        "compose-hive-smoke.sh",
+        "compose-task-smoke.sh",
+        "compose-recovery-drill.sh",
+        "compose-master-drill.sh",
+        "stability-smoke.sh",
+    ):
         taken |= set(
             re.findall(r'SWARM_\w*PORT="\$\{SWARM_\w*PORT:-(\d+)\}"', (ROOT / "scripts/packaging" / other).read_text())
         )

@@ -52,6 +52,15 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
 
 
+class Unpushed(SwarmError):
+    """A worktree holds commits origin lacks: branch is the one a push would write and base the commit they follow."""
+
+    def __init__(self, message: str, branch: str, base: str) -> None:
+        super().__init__(message)
+        self.branch = branch
+        self.base = base
+
+
 def pushed(root: Path, recorded: str = "") -> bool:
     git = ["git", "-C", str(root)]
     local = _out([*git, "branch", "--show-current"], "cannot read the worktree branch")
@@ -68,9 +77,11 @@ def pushed(root: Path, recorded: str = "") -> bool:
         return True
     if remote or _out([*git, "rev-list", "--count", "origin/dev..HEAD"], "cannot count the worktree commits") != "0":
         target = branch if branch == local else f"HEAD:{branch}"
-        raise SwarmError(
+        raise Unpushed(
             f"the worktree {root} holds commits origin lacks; "
-            f"push them with git -C {root} push -u {remote_name} {target} before blocking"
+            f"push them with git -C {root} push -u {remote_name} {target} before blocking",
+            branch,
+            remote[0] if remote else "origin/dev",
         )
     return False
 
@@ -259,9 +270,19 @@ def _origin_url(git: list[str]) -> str:
     return shell([*git, "remote", "get-url", "origin"]).stdout.strip()
 
 
+def _abandoned(dep: dict[str, object], branch: str) -> bool:
+    """Tell whether an unclaimed dependency records a branch that origin answers it does not hold."""
+    if dep.get("state") != "open" or dep.get("claimed_by"):
+        return False
+    listed = shell(["git", "ls-remote", "--heads", "origin", branch])
+    return listed.returncode == 0 and not any(
+        line.endswith(f"\trefs/heads/{branch}") for line in listed.stdout.splitlines()
+    )
+
+
 def _base_of(dep: dict[str, object], foreign: list[dict[str, object]]) -> str:
     branch = str(dep["branch"])
-    if _merged_into_dev(dep) or dep in foreign:
+    if _merged_into_dev(dep) or dep in foreign or _abandoned(dep, branch):
         return _dev_base()
     _fetch_origin(["git"], branch, f"cannot fetch {branch}")
     return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from scripts import herdr_host
-from scripts.quick import paths, registry, room, seeds
+from scripts.quick import paths, recipe, registry, room, seeds
 from scripts.quick.layout import MASTER
 from scripts.swarm.pane import INPUT_RULE
 
@@ -83,6 +83,14 @@ class LiveHerdr:
         """Submit ``text`` as a prompt to the pane's agent."""
         return herdr_host.prompt(pane_id, text, self.environ)
 
+    def run(self, pane_id: str, launcher: Path) -> bool:
+        """Run the seat ``launcher`` script in the pane; False when herdr refuses it."""
+        try:
+            herdr_host.run(pane_id, launcher, self.environ)
+        except (herdr_host.HerdrError, subprocess.TimeoutExpired):
+            return False
+        return True
+
 
 def _stamp(folder: Path, seat: str, name: str) -> Path:
     return paths.seat_dir(folder, seat) / name
@@ -124,6 +132,8 @@ def _busy(seat: registry.Seat, herdr: Herdr) -> str:
     shell = herdr.bare(seat.pane_id)
     if shell is not False:
         return "skipped-bare" if shell else "skipped-unknown"
+    if recipe.kind(seat) == recipe.PROGRAM:
+        return "skipped-program"
     status = herdr.status(seat.pane_id)
     if status not in READY_STATES:
         return f"skipped-{status}"

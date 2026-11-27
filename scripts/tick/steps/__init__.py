@@ -1,6 +1,7 @@
 """Registered tick steps that run a hand written call of the tick pass against the pass state."""
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from importlib import import_module
 from typing import Any, TypedDict, TypeGuard, Unpack, cast
@@ -40,12 +41,20 @@ BOX_KEYS = frozenset(
 
 
 class Declared(TypedDict, total=False):
-    """What a step declares beyond its graph: the ports it may write through, its feature map id and whether it is
-    kept, run even after its lane expired or a step it needs was dropped."""
+    """What a step declares beyond its graph: the ports it may write through, its feature map id, whether it is
+    kept, run even after its lane expired or a step it needs was dropped, and whether it is placing, run holding the
+    host placement lock on its pass's placement worker."""
 
     effects: frozenset[str]
     feature: str
     kept: bool
+    placing: bool
+
+
+def placed(tick: Any, placing: bool) -> AbstractContextManager[object]:
+    """Return the host placement lock of the tick module ``tick`` for a step that is ``placing``, else a context that
+    holds nothing."""
+    return tick.PLACING if placing else nullcontext()
 
 
 class CallStep:
@@ -70,6 +79,7 @@ class CallStep:
         self.effects = declared.get("effects", frozenset())
         self.feature = declared.get("feature", "")
         self.kept = declared.get("kept", False)
+        self.placing = declared.get("placing", False)
         self.name = name
         self.needs = needs
         self.group = group
@@ -85,9 +95,12 @@ class CallStep:
         return budgets.floored(self.name, self.floor_s)
 
     def run(self, ctx: Context) -> Result:
-        """Run the call with the tick module and a reader of the pass state, writing its actions."""
+        """Run the call with the tick module and a reader of the pass state, holding the host placement lock when the
+        step is placing, writing its actions."""
         reader = partial(declared_read, ctx, self.name, declared_keys(self.reads | self.writes))
-        found = self.call(import_module("scripts.swarm.tick"), reader)
+        tick = import_module("scripts.swarm.tick")
+        with placed(tick, self.placing):
+            found = self.call(tick, reader)
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
@@ -209,7 +222,7 @@ def fell(box: Mapping[str, Any], step: Step) -> bool:
     """Return whether ``step`` needs a fallen step of the pass ``box``, one that raised or one shut for needing one,
     naming ``step`` fallen in turn so the steps that need it stay shut too."""
     fallen: set[str] | None = box.get(FALLEN)
-    if fallen is None or fallen.isdisjoint(step.needs):
+    if fallen is None or fallen.isdisjoint(registry.failure_needs(step)):
         return False
     fallen.add(step.name)
     return True
@@ -296,6 +309,11 @@ MODULES = (
     "scripts.tick.steps.territory",
     "scripts.tick.steps.workflows",
     "scripts.tick.steps.knowledge",
+    "scripts.tick.steps.view_wait",
+    "scripts.tick.steps.orders",
+    "scripts.tick.steps.experts",
+    "scripts.tick.steps.review",
+    "scripts.tick.steps.thin",
 )
 
 for _module in MODULES:

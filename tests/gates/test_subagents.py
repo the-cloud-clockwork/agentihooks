@@ -1,13 +1,17 @@
 import io
 import json
+from pathlib import Path
 
 import pytest
 
 from scripts.gates import Call, Gate, Who, entry, modes
 from scripts.gates.budget import Budget
+from scripts.gates.recon import HEADINGS, RECON
 from scripts.gates.subagents import SubagentBudget, refusal
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_workspace
+from tests.swarm.client_class import client_class
 from tests.swarm.review_ledger import ReviewLedger
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
@@ -104,6 +108,51 @@ def test_a_session_outside_a_swarm_task_is_never_counted(tmp_path):
     assert rows(tmp_path) == []
 
 
+def write_recon() -> None:
+    folder = ledger_workspace.folder("demo", "t1")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / RECON).write_text("".join(f"{heading}\nx\n" for heading in HEADINGS))
+
+
+@pytest.mark.feature("subagent-recon-scouters")
+def test_recon_scouters_before_a_valid_recon_plan_leave_the_review_readers_their_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorded: list[str] = []
+    monkeypatch.setattr("scripts.gates.subagents.record_on_ledger", lambda who, readers: recorded.extend(readers))
+    gate = SubagentBudget()
+    assert all(gate.decide(launch("scouter"), ME, state(tmp_path)).allowed for _ in range(9))
+    assert Budget("demo", "subagents", tmp_path).spent("t1", "launches") == 1
+    assert [(r["gate"], r["kind"], r["tool"], r["reason"]) for r in rows(tmp_path)] == [
+        (
+            "subagents",
+            "count",
+            "Agent",
+            f"recon scouter {n} of 8 for task t1, not counted before its recon plan is valid",
+        )
+        for n in range(1, 9)
+    ] + [("subagents", "count", "Agent", "sub-agent launches 1 of 8 for task t1")]
+    write_recon()
+    readers = [gate.decide(launch(reader), ME, state(tmp_path)) for reader in ("standards-reader", "spec-reader")]
+    assert [d.allowed for d in readers] == [True, True]
+    assert recorded == ["standards-reader", "spec-reader"]
+    assert gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
+    assert rows(tmp_path)[-1]["reason"] == "sub-agent launches 4 of 8 for task t1"
+
+
+@pytest.mark.feature("subagent-recon-scouters")
+def test_only_scouter_launches_before_a_valid_recon_plan_go_uncounted(tmp_path: Path) -> None:
+    gate = SubagentBudget(launches=1, continuations=1)
+    assert gate.decide(launch("Explore"), ME, state(tmp_path)).allowed
+    assert not gate.decide(launch("general-purpose"), ME, state(tmp_path)).allowed
+    assert gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
+    assert gate.decide(launch("scouter", tool="Task"), ME, state(tmp_path)).allowed
+    assert gate.decide(Call("SendMessage", {"subagent_type": "scouter"}), ME, state(tmp_path)).allowed
+    assert not gate.decide(Call("SendMessage", {"subagent_type": "scouter"}), ME, state(tmp_path)).allowed
+    write_recon()
+    assert not gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
+
+
 def test_the_refusal_names_the_spend_the_cap_and_the_way_out():
     assert refusal("demo", "t1", "launches", 8) == (
         "the sub-agent budget for task t1 is spent: 8 of 8 launches. Merge with the ruled findings, file the spec "
@@ -122,9 +171,11 @@ class Refusing(ReviewLedger):
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter(tmp_path, monkeypatch):
+def test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ledger = ReviewLedger(slug="demo")
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     gate = SubagentBudget()
     gate.decide(Call("Agent", {"name": "standards-reader", "prompt": "go"}), ME, state(tmp_path))
     gate.decide(Call("Task", {"subagent_type": "spec-reader"}), ME, state(tmp_path))
@@ -153,9 +204,9 @@ class Unmoved(ReviewLedger):
     ],
 )
 def test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_allowed(
-    tmp_path, monkeypatch, capsys, ledger, error
-):
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], ledger: object, error: str
+) -> None:
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     decision = SubagentBudget().decide(Call("Agent", {"name": "spec-reader", "prompt": "go"}), ME, state(tmp_path))
     assert decision.allowed
     assert Budget("demo", "subagents", tmp_path).spent("t1", "spec-reader") == 1
@@ -181,9 +232,11 @@ class RefusingStandards(ReviewLedger):
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_one_launch_naming_both_readers_records_the_second_when_the_first_fails(tmp_path, monkeypatch, capsys):
+def test_one_launch_naming_both_readers_records_the_second_when_the_first_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     ledger = RefusingStandards(slug="demo")
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     call = Call("Agent", {"name": "spec-reader", "subagent_type": "standards-reader", "prompt": "go"})
     assert SubagentBudget().decide(call, ME, state(tmp_path)).allowed
     assert ledger.rows["t1"]["review_readers"] == ["spec-reader"]
@@ -193,15 +246,21 @@ def test_one_launch_naming_both_readers_records_the_second_when_the_first_fails(
     )
 
 
-def test_a_refused_reader_launch_is_not_recorded_on_the_ledger(tmp_path, monkeypatch):
+def test_a_refused_reader_launch_is_not_recorded_on_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = ReviewLedger(slug="demo")
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     decision = SubagentBudget(launches=0).decide(Call("Agent", {"name": "spec-reader"}), ME, state(tmp_path))
     assert (decision.allowed, ledger.writes) == (False, [])
 
 
-def test_a_launch_naming_no_reader_never_reaches_the_ledger(tmp_path, monkeypatch):
+def test_a_launch_naming_no_reader_never_reaches_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     made: list[ReviewLedger] = []
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: made.append(ReviewLedger()) or made[-1])
+
+    class Made(ReviewLedger):
+        def __init__(self) -> None:
+            super().__init__()
+            made.append(self)
+
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", Made)
     assert SubagentBudget().decide(launch(), ME, state(tmp_path)).allowed
     assert made == []

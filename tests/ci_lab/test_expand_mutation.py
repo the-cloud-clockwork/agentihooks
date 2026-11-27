@@ -1,14 +1,21 @@
 import json
 import subprocess
+import sys
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+from mutmut import configuration
 from mutmut.mutation.pragma_handling import PragmaParseError
 
-from scripts.ci_lab import expand_mutation
+from scripts.ci_lab import digests, expand_mutation, store
+from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.units import Unit
+from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats_cache import collect_cached_stats
+from scripts.ci_mutation.stats_dependencies import digest  # pyright: ignore[reportUnknownVariableType]
+from tests.test_ci_mutation_stats import stats_recorder_only
 
 SAMPLE = """import functools
 
@@ -86,6 +93,8 @@ STATS_FILES = {
     "tests/test_a.py": TEST_A,
     "tests/test_b.py": "def test_alone():\n    assert True\n",
 }
+LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
 
 
 def repository(root: Path, files: dict[str, str]) -> Path:
@@ -106,7 +115,7 @@ def function_of(unit: Unit) -> str:
 
 def keys(root: Path, covering: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
     """Map each function of the sample module that has mutants to its unit key."""
-    units = expand_mutation.mutant_units(root, EVERY_LINE, covering or {})
+    units = expand_mutation.mutant_units(root, EVERY_LINE, covering or {}, {})
     return {function_of(unit): unit.key for unit in units}
 
 
@@ -133,13 +142,13 @@ def edit(root: Path, name: str, old: str, new: str) -> None:
 )
 def test_one_unit_per_changed_function_with_mutants(tmp_path: Path, lines: list[int], functions: list[str]) -> None:
     root = repository(tmp_path, MUTANT_FILES)
-    units = expand_mutation.mutant_units(root, {PATH: lines}, {})
+    units = expand_mutation.mutant_units(root, {PATH: lines}, {}, {})
     assert [function_of(unit) for unit in units] == [f"scripts.sample.{name}" for name in functions]
 
 
 def test_a_unit_names_every_mutant_of_its_function_as_mutmut_does(tmp_path: Path) -> None:
     root = repository(tmp_path, MUTANT_FILES)
-    units = expand_mutation.mutant_units(root, {PATH: [12, 28]}, {})
+    units = expand_mutation.mutant_units(root, {PATH: [12, 28]}, {}, {})
     owners = {"scripts.sample.x_second", "scripts.sample.xǁBoxǁgrow"}
     every = [f"scripts.sample.{name}" for name in selected_mutant_names(PATH, SAMPLE, set(range(1, 40)))]
     assert [member for unit in units for member in unit.members] == [
@@ -152,22 +161,74 @@ def test_a_malformed_pragma_is_refused_naming_its_file(tmp_path: Path) -> None:
     broken = "# pragma: no mutate end\ndef first(value):\n    return value + 1\n"
     root = repository(tmp_path, {**MUTANT_FILES, "scripts/broken.py": broken})
     with pytest.raises(PragmaParseError) as refused:
-        expand_mutation.mutant_units(root, {"scripts/broken.py": [3]}, {})
+        expand_mutation.mutant_units(root, {"scripts/broken.py": [3]}, {}, {})
     assert str(refused.value) == "# pragma: no mutate end at scripts/broken.py:1 without a # pragma: no mutate start"
 
 
 def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Path) -> None:
-    first = expand_mutation.mutant_units(repository(tmp_path / "a", MUTANT_FILES), EVERY_LINE, {})
-    again = expand_mutation.mutant_units(tmp_path / "a", EVERY_LINE, {})
-    other = expand_mutation.mutant_units(repository(tmp_path / "b", MUTANT_FILES), EVERY_LINE, {})
+    first = expand_mutation.mutant_units(repository(tmp_path / "a", MUTANT_FILES), EVERY_LINE, {}, {})
+    again = expand_mutation.mutant_units(tmp_path / "a", EVERY_LINE, {}, {})
+    other = expand_mutation.mutant_units(repository(tmp_path / "b", MUTANT_FILES), EVERY_LINE, {}, {})
     assert first == again == other
     assert first
     assert len({unit.key for unit in first}) == len(first)
 
 
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_mutant_units_read_no_mutmut_config_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, elsewhere = repository(tmp_path / "tree", MUTANT_FILES), tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
+    expected = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
+    assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}) == expected
+    assert expected
+    assert vars(configuration)["_config"] is None
+
+
+@pytest.mark.feature("lab-mutant-unit-split")
+@pytest.mark.parametrize(
+    ("timeout", "sizes"),
+    [
+        (1.0, [1, 1, 1, 1, 1]),
+        (MUTANT_SECONDS + 1.0, [1, 1, 1, 1, 1]),
+        (2 * MUTANT_SECONDS + 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS - 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS, [2, 3]),
+    ],
+)
+def test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_price_within_it(
+    tmp_path: Path, timeout: float, sizes: list[int]
+) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    (whole,) = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {})
+    parts = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+    assert [len(unit.members) for unit in parts] == sizes
+    assert [member for unit in parts for member in unit.members] == list(whole.members)
+    assert [unit.kind for unit in parts] == ["mutant"] * len(parts)
+    assert len({unit.key for unit in parts} | {whole.key}) == len(parts) + 1
+    assert [unit.key for unit in parts] == [
+        f"mutant-v{digests.SCHEMAS['mutant']}-{digest([whole.key.split('-', 2)[2], list(unit.members)])}"
+        for unit in parts
+    ]
+    assert parts == expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+
+
+@pytest.mark.feature("lab-mutant-unit-split")
+def test_a_unit_priced_at_the_timeout_keeps_its_members_and_key(tmp_path: Path) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    whole = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
+    longest = max(len(unit.members) for unit in whole)
+    assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}, timeout=longest * MUTANT_SECONDS) == whole
+
+
 def test_the_same_function_in_another_module_gets_its_own_key(tmp_path: Path) -> None:
     root = repository(tmp_path, {**MUTANT_FILES, "scripts/copy.py": SAMPLE})
-    units = expand_mutation.mutant_units(root, {PATH: [7], "scripts/copy.py": [7]}, {})
+    units = expand_mutation.mutant_units(root, {PATH: [7], "scripts/copy.py": [7]}, {}, {})
     assert [function_of(unit) for unit in units] == ["scripts.copy.x_first", "scripts.sample.x_first"]
     assert units[0].key != units[1].key
 
@@ -233,6 +294,18 @@ def test_only_the_mutmut_pin_and_runner_tree_enter_the_key(
     assert [after[function] != before[function] for function in before] == [changed] * len(before)
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_rekeys_every_stats_unit(tmp_path: Path) -> None:
+    lock = ".github/test-requirements.lock"
+    root = repository(tmp_path, {**STATS_FILES, lock: "pytest==8.4.2\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = expand_mutation.stats_units(root, files)
+    edit(root, lock, "pytest==8.4.2", "pytest==8.4.3")
+    after = expand_mutation.stats_units(root, files)
+    assert [unit.members for unit in after] == [unit.members for unit in before]
+    assert {unit.key for unit in after}.isdisjoint(unit.key for unit in before)
+
+
 @pytest.mark.parametrize("line", ['dev = ["mutmut==3.6.0"]', "dev = ['mutmut == 3.6.0']"])
 def test_the_mutmut_pin_is_read_from_pyproject(tmp_path: Path, line: str) -> None:
     (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")
@@ -257,6 +330,48 @@ def test_covering_fingerprints_enter_only_their_function_key(tmp_path: Path) -> 
     assert all(one[other] == two[other] == base[other] for other in base if other != name)
 
 
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_an_unlisted_test_module_enters_the_key_of_every_function(tmp_path: Path) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    found = [
+        {function_of(unit): unit.key for unit in expand_mutation.mutant_units(root, EVERY_LINE, {}, unlisted)}
+        for unlisted in ({}, {"tests/test_new.py": "one"}, {"tests/test_new.py": "two"})
+    ]
+    assert found[0]
+    assert found[0].keys() == found[1].keys() == found[2].keys()
+    assert all(len({keys[name] for keys in found}) == 3 for name in found[0])
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+def test_covering_maps_each_function_of_the_changed_files_to_the_tests_that_ran_it_or_a_function_nested_in_it(
+    tmp_path: Path,
+) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    manifest = {
+        "units": [
+            "scripts/sample.py::first",
+            "scripts/sample.py::Box.grow",
+            "scripts/sample.py::second.helper",
+            "scripts/other.py::first",
+            "scripts/sample.py::Box.shrink.inner",
+        ],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [0, 3]},
+            "tests/test_a.py::test_two@group": {"units": [1, 2]},
+            "tests/test_b.py::test_three": {"units": [4, 0]},
+            "tests/test_b.py::test_other": {"units": [3]},
+        },
+    }
+    keys = {test: f"key {index}" for index, test in enumerate(manifest["tests"])}
+    assert expand_mutation.covering(root, manifest, keys, {PATH: [7]}) == {
+        "scripts.sample.x_first": {"tests/test_a.py::test_one": "key 0", "tests/test_b.py::test_three": "key 2"},
+        "scripts.sample.xǁBoxǁgrow": {"tests/test_a.py::test_two@group": "key 1"},
+        "scripts.sample.x_second": {"tests/test_a.py::test_two@group": "key 1"},
+        "scripts.sample.xǁBoxǁshrink": {"tests/test_b.py::test_three": "key 2"},
+    }
+    assert expand_mutation.covering(root, manifest, keys, {}) == {}
+
+
 def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     root = repository(tmp_path / "repo", STATS_FILES)
     for name in ("setup.cfg", "tests/fixtures/gone.json"):
@@ -271,5 +386,144 @@ def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     stored = {json.loads(record.read_text())["key"] for record in cache.glob("*.json")}
     units = expand_mutation.stats_units(root, files, ["-q"])
     assert [(unit.kind, unit.members) for unit in units] == [("stats", (path,)) for path in files]
-    assert {unit.key for unit in units} == stored
+    assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
     assert len(stored) == len(files)
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+def test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_worker_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = repository(tmp_path / "repo", {**STATS_FILES, LOCKFILE: "pytest==8.3.4\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    cache = tmp_path / "cache"
+
+    def collect(chosen: list[str]) -> list[dict]:
+        return [{"status": 0, "tests": {}, "durations": {f"{path}::test": 1.0 for path in chosen}, "cpu": 1.0}]
+
+    collect_cached_stats(root, cache, {}, files, ["-q"], collect)
+    stored = {json.loads(record.read_text())["key"] for record in cache.glob("*.json")}
+    monkeypatch.setattr(sys, "version", "3.13.0 (scheduler image)")
+    monkeypatch.setattr(metadata, "distributions", lambda: iter(()))
+    units = expand_mutation.stats_units(root, files, ["-q"])
+    assert len(stored) == len(files)
+    assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+@pytest.mark.parametrize(
+    ("path", "edit"),
+    [(LOCKFILE, "pytest==8.3.5\n"), (EXCLUDES, "opentelemetry-exporter-otlp-proto-http\n")],
+    ids=["lockfile", "excludes"],
+)
+def test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit(
+    tmp_path: Path, path: str, edit: str
+) -> None:
+    head = {LOCKFILE: "pytest==8.3.4\n", EXCLUDES: "opentelemetry-exporter-otlp-proto-grpc\n"}
+    root = repository(tmp_path / "repo", {**STATS_FILES, **head})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    (root / path).write_text(edit)
+    after = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    assert before.keys() == after.keys()
+    assert all(before[members] != after[members] for members in before)
+
+
+@pytest.mark.feature("lab-mutation-verdict-key-prefix")
+@pytest.mark.parametrize("schema_delta", [0, 1])
+@pytest.mark.parametrize(
+    ("kind", "timeout"),
+    [("stats", 1800.0), ("mutant", 1800.0), ("mutant", 1.0)],
+    ids=["stats", "whole-mutant", "split-mutant"],
+)
+def test_generated_mutation_unit_keys_can_be_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, timeout: float, schema_delta: int
+) -> None:
+    import fakeredis
+
+    monkeypatch.setitem(digests.SCHEMAS, kind, digests.SCHEMAS[kind] + schema_delta)
+    root = repository(tmp_path / "repo", STATS_FILES if kind == "stats" else MUTANT_FILES)
+    if kind == "stats":
+        units = expand_mutation.stats_units(root, ["tests/test_a.py", "tests/test_b.py"])
+    else:
+        units = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+    verdicts = store.Store(fakeredis.FakeRedis(), LocalObjects(tmp_path / "objects"))
+    assert units
+    for unit in units:
+        verdict = store.Verdict(unit.kind, unit.key, True, False, 1.0)
+        assert verdicts.put(verdict, {"members": list(unit.members)}, b"completed")
+        assert verdicts.get(unit.kind, unit.key) == verdict
+        assert unit.key.startswith(f"{kind}-v{digests.SCHEMAS[kind]}-")
+
+
+def committed(root: Path, files: dict[str, str], message: str) -> str:
+    """Write files under root, commit every change of the tree and return the commit."""
+    for name, text in files.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    author = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"]
+    subprocess.run(["git", *author, "commit", "-q", "-m", message], cwd=root, check=True)
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+@pytest.mark.parametrize(
+    ("lines", "functions"),
+    [
+        ({7}, ["first"]),
+        ({8}, ["second"]),
+        ({12, 28}, ["second", "grow"]),
+        ({16}, []),
+        ({19}, ["third"]),
+        ({37}, []),
+        (set[int](), []),
+    ],
+)
+def test_changed_functions_holds_the_graded_mutations_of_each_function_the_changed_lines_meet(
+    tmp_path: Path, lines: set[int], functions: list[str]
+) -> None:
+    wrapper, found = expand_mutation.changed_functions(PATH, SAMPLE, lines)
+    assert wrapper.module.code == SAMPLE
+    assert [function.name.value for function in found] == functions
+    for function, mutations in found.items():
+        assert [mutation.contained_by_top_level_function for mutation in mutations] == [function] * len(mutations)
+    units = expand_mutation.mutant_units(repository(tmp_path, MUTANT_FILES), {PATH: lines}, {}, {})
+    assert [len(mutations) for mutations in found.values()] == [len(unit.members) for unit in units]
+    assert all(found.values())
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_changed_tests_lists_the_test_modules_the_head_changes_and_still_holds(tmp_path: Path) -> None:
+    passing = "def test_it():\n    assert True\n"
+    files = {
+        "scripts/sample.py": "A = 1\n",
+        "hooks/test_hook.py": "HOOK = 1\n",
+        "tests/helper.py": "HELP = 1\n",
+        "tests/test_a.py": passing,
+        "tests/test_gone.py": passing,
+        "tests/test_same.py": passing,
+        "tests/unit/test_data.json": "{}\n",
+        "tests/unit/test_deep.py": passing,
+    }
+    root = repository(tmp_path, files)
+    base = committed(root, {}, "base")
+    (root / "tests/test_gone.py").unlink()
+    later = "def test_it():\n    assert 1\n"
+    edits = {
+        "scripts/sample.py": "A = 2\n",
+        "hooks/test_hook.py": "HOOK = 2\n",
+        "tests/helper.py": "HELP = 2\n",
+        "tests/test_a.py": later,
+        "tests/unit/test_data.json": "[]\n",
+        "tests/unit/test_deep.py": later,
+        "tests/unit/test_new.py": passing,
+    }
+    head = committed(root, edits, "head")
+    changed = ["tests/test_a.py", "tests/unit/test_deep.py", "tests/unit/test_new.py"]
+    assert expand_mutation.changed_tests(root, base, head) == changed
+    assert expand_mutation.changed_tests(root, head, head) == []
+    subprocess.run(["git", "switch", "-q", "-c", "side", base], cwd=root, check=True)
+    side = committed(root, {"tests/test_same.py": later}, "side")
+    assert expand_mutation.changed_tests(root, side, head) == changed

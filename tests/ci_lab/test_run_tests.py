@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import json
 import os
 import shutil
@@ -6,8 +7,10 @@ import sys
 from pathlib import Path
 
 import coverage
+import pytest
 
-from scripts.ci_lab import retry, run_tests, sandbox
+from scripts.ci_lab import open_capture, retry, run_tests, sandbox
+from tests.ci_lab import fail_once
 
 ROOT = Path(__file__).resolve().parents[2]
 VENV = Path(sys.prefix)
@@ -87,6 +90,7 @@ def _lab(tmp_path: Path, manifest: dict[str, object], whitelist: dict[str, str])
     )
 
 
+@pytest.mark.feature("lab-report-flake-rows")
 def test_a_planted_failure_is_red_on_both_attempts_and_final(tmp_path: Path) -> None:
     test = "tests/test_plant.py::test_one_is_two"
     tree = _tree(tmp_path / "tree", {"tests/test_plant.py": "def test_one_is_two():\n    assert 1 == 2\n"})
@@ -100,6 +104,7 @@ def test_a_planted_failure_is_red_on_both_attempts_and_final(tmp_path: Path) -> 
     assert not lab.flakes.exists()
 
 
+@pytest.mark.feature("lab-report-flake-rows")
 def test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger(tmp_path: Path) -> None:
     test = "tests/test_flake.py::test_flake"
     tree = _tree(tmp_path / "tree", {"tests/test_flake.py": FLAKE})
@@ -112,6 +117,41 @@ def test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger(tmp_path:
     rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
     assert [(row["test"], row["outcome"], row["attempts"]) for row in rows] == [(test, "flaky", 2)]
     assert "first attempt fails" in rows[0]["errors"][0]
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_seeded_flaky_batch_returns_the_rows_it_writes_to_the_flake_ledger(tmp_path: Path) -> None:
+    test = "tests/test_flake.py::test_flake"
+    tree = _tree(tmp_path / "tree", {"tests/test_flake.py": FLAKE})
+    lab = _lab(tmp_path, _manifest({test: []}), {"FLAKE_MARK": str(tmp_path / "mark")})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
+    assert [(row["test"], row["outcome"], row["attempts"]) for row in verdict.flakes] == [(test, "flaky", 2)]
+    assert list(verdict.flakes) == rows
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_red_retry_returns_no_flake_rows(tmp_path: Path) -> None:
+    test = "tests/test_plant.py::test_one_is_two"
+    tree = _tree(tmp_path / "tree", {"tests/test_plant.py": "def test_one_is_two():\n    assert 1 == 2\n"})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.attempts, verdict.flakes) == ("failed", 2, ())
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_green_first_attempt_returns_no_flake_rows(tmp_path: Path) -> None:
+    test = "tests/test_green.py::test_one_is_one"
+    tree = _tree(tmp_path / "tree", {"tests/test_green.py": "def test_one_is_one():\n    assert 1 == 1\n"})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.attempts, verdict.flakes) == ("passed", 1, ())
 
 
 def test_a_green_batch_stores_durations_coverage_and_files_opened_outside_its_manifest(tmp_path: Path) -> None:
@@ -211,7 +251,14 @@ def test_a_flake_row_keeps_the_first_attempts_errors_and_counts_two_attempts(tmp
 
 def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Path) -> None:
     skipped = (".git/HEAD", ".venv/x", ".playwright/x", "node_modules/x", ".pytest_cache/v")
-    shared = ("pyproject.toml", "uv.lock", ".test_durations", ".github/x.yml", *skipped, "pkg/m.pyc")
+    shared = (
+        "pyproject.toml",
+        ".github/test-requirements.lock",
+        ".test_durations",
+        ".github/x.yml",
+        *skipped,
+        "pkg/m.pyc",
+    )
     for path in ("data/a.txt", "data/b.txt", *shared):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text("")
@@ -228,3 +275,73 @@ def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Pa
     manifest = _manifest({"t::one": ["data/a.txt"], "t::two": []})
 
     assert run_tests.outside(opened, ("t::one", "t::two"), tmp_path, manifest) == ("data/b.txt",)
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_outside_lists_every_unshared_file_a_test_module_the_manifest_lacks_opened(tmp_path: Path) -> None:
+    for path in ("data/a.txt", "data/b.txt", ".github/test-requirements.lock"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("")
+    opened = {"data/a.txt", "data/b.txt", ".github/test-requirements.lock"}
+    manifest = _manifest({"t::one": ["data/a.txt"]})
+
+    assert run_tests.outside(opened, ("t::one", "tests/test_new.py"), tmp_path, manifest) == ("data/b.txt",)
+    assert run_tests.outside(opened, ("tests/test_new.py",), tmp_path, manifest) == ("data/a.txt", "data/b.txt")
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next(tmp_path: Path) -> None:
+    [edit] = json.loads((ROOT / "tests/ci_lab/plants/unit.fail-once.json").read_text())["edits"]
+    test = f"{edit['path']}::test_a_planted_test_fails_its_first_lab_attempt_and_passes_the_retry"
+    sources = [Path(inspect.getfile(module)).relative_to(ROOT) for module in (fail_once, open_capture)]
+    packages = {str(folder / "__init__.py"): "" for path in sources for folder in path.parents if folder.name}
+    copies = {str(path): (ROOT / path).read_text() for path in sources}
+    tree = _tree(tmp_path / "tree", {**packages, **copies, edit["path"]: edit["after"]})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    first = run_tests.run((test,), tree, VENV, 1, lab)
+    second = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (first.outcome, first.flaky, first.attempts) == ("passed", True, 2)
+    assert (second.outcome, second.flaky, second.attempts) == ("passed", False, 1)
+    rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
+    assert [(row["test"], row["outcome"], row["attempts"]) for row in rows] == [(test, "flaky", 2)]
+    assert "fail once" in rows[0]["errors"][0]
+    assert len(list(lab.root.glob("fail-once-*"))) == 1
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_fail_once_keys_its_lab_marker_by_head_tree_and_node_in_the_runs_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs, node = tmp_path / "runs", "tests/test_plant.py::test_plant"
+
+    def attempt(folder: str, head: str, test: str) -> None:
+        (runs / folder / "tmp").mkdir(parents=True)
+        monkeypatch.setenv("TMPDIR", str(runs / folder / "tmp"))
+        monkeypatch.setenv(open_capture.TREE, str(tmp_path / "trees" / head))
+        fail_once.fail_once(test, tmp_path / "fallback")
+
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("first", "head-a", node)
+    attempt("retry", "head-a", node)
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("other-head", "head-b", node)
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("other-node", "head-a", "tests/test_plant.py::test_other")
+    assert len(list(runs.glob("fail-once-*"))) == 3
+    assert not (tmp_path / "fallback").exists()
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_fail_once_falls_back_to_the_pytest_temp_root_outside_the_lab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(open_capture.TREE, raising=False)
+    node = "tests/test_plant.py::test_plant"
+
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        fail_once.fail_once(node, tmp_path)
+    fail_once.fail_once(node, tmp_path)
+
+    assert len(list(tmp_path.glob("fail-once-*"))) == 1

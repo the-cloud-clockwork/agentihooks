@@ -1,9 +1,12 @@
 import ast
 import importlib.metadata
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
+
+import pytest
 
 
 def test_ledger_dependencies_exclude_workstation_tools():
@@ -27,6 +30,12 @@ def test_swarm_image_installs_every_ledger_dependency_from_its_hashed_lock():
     dockerfile = (root / "Dockerfile").read_text()
     assert "--require-hashes -r requirements.lock" in dockerfile
     assert "!docker/swarm/requirements.lock" in (root / ".dockerignore").read_text().splitlines()
+
+
+def test_the_swarm_image_lock_pins_none_of_the_packages_the_swarm_smoke_refuses() -> None:
+    lock = (Path(__file__).parents[1] / "docker/swarm/requirements.lock").read_text()
+    pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
+    assert not pinned & {"playwright", "tree-sitter", "opentelemetry-sdk"}
 
 
 def _module_file(root: Path, module: str) -> Path | None:
@@ -68,19 +77,24 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
     return third_party
 
 
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy imports mutmut at module level")
 def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]
     lock = (root / "docker/swarm/requirements.lock").read_text()
     pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
     hub = sorted(f"scripts.hub.{source.stem}" for source in (root / "scripts/hub").glob("*.py"))
-    third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub])
+    lab = sorted(
+        ".".join(source.relative_to(root).with_suffix("").parts).removesuffix(".__init__")
+        for source in (root / "scripts/ci_lab").rglob("*.py")
+    )
+    third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub, *lab])
     distributions = importlib.metadata.packages_distributions()
     missing = sorted(
         module
         for module in third_party
         if not {name.lower().replace("_", "-") for name in distributions.get(module, [module])} & pinned
     )
-    assert {"packaging", "yaml"} <= third_party
+    assert {"packaging", "yaml", "pytest", "mutmut", "libcst"} <= third_party
     assert missing == []
 
 
@@ -104,7 +118,7 @@ def test_the_swarm_image_lock_pins_the_nats_extra_with_hashes():
     assert all(line.startswith("    --hash=sha256:") for line in hashes)
 
 
-def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
+def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins() -> None:
     root = Path(__file__).parents[1]
     dockerfile = (root / "Dockerfile").read_text()
     ignored = (root / ".dockerignore").read_text().splitlines()
@@ -117,11 +131,26 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
     bases = [line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM ")]
     assert len(bases) >= 3
-    assert set(bases) == {"mirror.gcr.io/library/python:3.12-slim-bookworm"}
-    assert "worker_image.py shell-packages --package openssh-client)" in dockerfile
+    python = json.loads((root / "docker/swarm-node/versions.lock").read_text())["python"]
+    assert set(bases) == {f"mirror.gcr.io/library/python:{python}-slim-bookworm"}
+    assert "worker_image.py shell-packages --package openssh-client --package git)" in dockerfile
     assert '["debian_snapshot"]' in dockerfile
     keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     assert "docker/swarm-node" in keyed
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    final = dockerfile.split("AS gh")[1]
+    assert "worker_image.py shell-packages --package openssh-client --package git)" in final
+    lock = json.loads((root / "docker/swarm-node/versions.lock").read_text())
+    assert lock["shell_packages"]["git"]
+    smoke = (root / "scripts/packaging/swarm-image-clients.sh").read_text()
+    assert "locked shell_packages git" in smoke
+    assert "dpkg-query \"$image\" -W -f '${Version}' git" in smoke
+    assert '--entrypoint git "$image" --version' in smoke
 
 
 def test_the_swarm_image_carries_gh_behind_the_app_token_wrapper_for_hub_pull_polls():

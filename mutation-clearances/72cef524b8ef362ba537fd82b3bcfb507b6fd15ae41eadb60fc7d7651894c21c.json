@@ -1,0 +1,6 @@
+{
+  "scripts/codex_router.py:scripts.codex_router.x__route:2051aac2372c9db17f0a290646d12f03b2be26d1d67b18224500eb539beafd25": {
+    "reader": "standards-reader",
+    "reason": "The normalized named reference is rejected when empty before calling select. A nonempty reference makes select return or raise within its forced branch, which never reads sessions. Passing None therefore changes no output or refusal; expiry receives unchanged time and environment, and the caller retains its session mapping for reporting."
+  }
+}

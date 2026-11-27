@@ -188,3 +188,28 @@ def test_real_retry_jitter_varies_within_its_bound(store: RedisStore, monkeypatc
     assert len(pauses) == 4 * failures
     assert len(set(pauses)) > 1
     assert all(0.001 <= pause <= 0.032 for pause in pauses)
+
+
+@pytest.mark.feature("swarm-seat-admission-race")
+def test_an_admission_that_loses_its_seat_to_another_admission_is_refused(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    check_uid = execution.ExecutionRegistry.check_uid
+    raced: list[str] = []
+
+    def racing(self: execution.ExecutionRegistry, slug: str, agent: AgentRecord, doc: dict[str, object]) -> None:
+        if not raced:
+            raced.append(agent.name)
+            store.start_execution("fixture", sibling(store, "eng-1@fixture"))
+        check_uid(self, slug, agent, doc)
+
+    monkeypatch.setattr(execution.ExecutionRegistry, "check_uid", racing)
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        store.start_execution("fixture", sibling(store, "eng-1@fixture"))
+    rows = fencing.read_executions(store, "fixture").values()
+    seated = [row["name"] for row in rows if row["seat"] == "eng-1@fixture"]
+    assert len(seated) == 1
+    assert seated[0] not in raced

@@ -18,7 +18,7 @@ cleanup() {
   if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then
     docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
   fi
-  kind delete cluster --name "$cluster"
+  kind delete cluster --name "$cluster" || echo "kind could not delete $cluster; the proof keeps exit status $status" >&2
 }
 trap cleanup EXIT
 docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null

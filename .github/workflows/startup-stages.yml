@@ -73,7 +73,8 @@ jobs:
           node_image="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"
           kind create cluster --name startup --image "$node_image" --config "$RUNNER_TEMP/kind.yaml" --wait 120s
           docker network connect kind kind-registry
-          for node in $(kind get nodes --name startup); do
+          nodes="$(kind get nodes --name startup)"
+          for node in $nodes; do
             docker exec "$node" mkdir -p /etc/containerd/certs.d/kind-registry:5000
             printf '[host."http://kind-registry:5000"]\n' | docker exec -i "$node" \
               tee /etc/containerd/certs.d/kind-registry:5000/hosts.toml > /dev/null

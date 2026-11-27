@@ -57,6 +57,11 @@ def _handoff(workers: int) -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-handed")
 
 
+def _placer() -> ThreadPoolExecutor:
+    """Return the one worker of a pass's steps that take the host placement lock."""
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="tick-placing")
+
+
 Item = TypeVar("Item")
 Found = TypeVar("Found")
 
@@ -82,10 +87,18 @@ class Pass:
     guard: Lock = field(default_factory=Lock, compare=False)
     tracked: set[str] = field(default_factory=set[str], compare=False)
     handoff: ThreadPoolExecutor | None = field(default=None, compare=False)
+    placer: ThreadPoolExecutor = field(default_factory=_placer, compare=False)
+    slow_origin: float = 0.0
+    slow_budgets: dict[str, float] | None = field(default=None, compare=False)
+    later_done: list[Event] = field(default_factory=list[Event], compare=False)
 
-    def executor(self, name: str) -> ThreadPoolExecutor:
-        """Return the workers step ``name`` runs on: the handed off steps' own when the pass has them, else the pass's
-        step workers, so the handed lane never takes a worker from the rest of the pass."""
+    def executor(self, name: str, placing: bool) -> ThreadPoolExecutor:
+        """Return the workers step ``name`` runs on: the pass's one placement worker when it is ``placing`` under the
+        host placement lock, so a step waiting for that lock holds no other worker; else the handed off steps' own
+        when the pass has them, else the pass's step workers, so the handed lane never takes a worker from the rest
+        of the pass."""
+        if placing:
+            return self.placer
         return self.handoff if self.handoff is not None and self.handed_of((name,)) else self.steps
 
     def hand(self, names: Iterable[str]) -> None:
@@ -127,19 +140,26 @@ class Pass:
                 self.gone.add(name)
             self.handed[name].set()
 
-    def ended(self, names: Iterable[str], timeout: float) -> bool:
-        """Return whether every handed off step in ``names`` ended within ``timeout`` seconds and none was dropped."""
+    def ended(self, names: Iterable[str], timeout: float, required: Iterable[str] | None = None) -> bool:
+        """Wait for every named step, rejecting loss only among required dependencies when supplied."""
         with self.guard:
             events = [self.handed[name] for name in set(names)]
         until = monotonic() + timeout
         if not all(event.wait(until - monotonic()) for event in events):
             return False
         with self.guard:
-            return not self.gone.intersection(names)
+            return not self.gone.intersection(names if required is None else required)
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""
-        thread = Thread(target=copy_context().run, args=(work,), name="tick-slow-lane", daemon=True)
+        ended = Event()
+        thread = Thread(
+            target=copy_context().run,
+            args=(_detached, work, ended),
+            name="tick-slow-lane",
+            daemon=True,
+        )
+        self.later_done.append(ended)
         self.later.append(thread)
         thread.start()
 
@@ -199,12 +219,38 @@ class _Beat:
         self.fire()
 
 
+def _detached(work: Callable[[], object], ended: Event) -> None:
+    try:
+        work()
+    finally:
+        ended.set()
+
+
+def _finish_pass(current: Pass) -> None:
+    for ended in current.later_done:
+        ended.wait()
+    current.steps.shutdown(wait=False, cancel_futures=True)
+    if current.handoff is not None:
+        current.handoff.shutdown(wait=False, cancel_futures=True)
+    current.placer.shutdown(wait=False, cancel_futures=True)
+    current.fans.shutdown(wait=False, cancel_futures=True)
+
+
+def budget_slow(current: Pass, budgets: Mapping[str, float]) -> None:
+    scheduled = current.slow_budgets
+    if scheduled is None:
+        return
+    with current.guard:
+        scheduled.update(budgets)
+        current.slow.expires_at = max(current.slow.expires_at, current.slow_origin + sum(scheduled.values()))
+
+
 @contextmanager
 def running(
     mode: str = PARALLEL,
     workers: int = WORKERS,
     critical_s: float = CRITICAL_S,
-    slow_s: float = SLOW_S,
+    slow_s: float | None = None,
     heartbeat: Callable[[], object] | None = None,
     closing_s: float = CLOSING_S,
     reserves: Mapping[str, float] | None = None,
@@ -215,7 +261,8 @@ def running(
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    lanes = (Deadline.after(critical_s), Deadline.after(slow_s))
+    lanes = (Deadline.after(critical_s), Deadline.after(SLOW_S if slow_s is None else slow_s))
+    slow_join = Deadline(lanes[1].expires_at, lanes[1].clock)
     current = Pass(
         mode,
         workers,
@@ -226,6 +273,8 @@ def running(
         closing_s,
         reserved(critical_s) if reserves is None else reserves,
         handoff=_handoff(workers),
+        slow_origin=slow_join.expires_at - SLOW_S,
+        slow_budgets={} if slow_s is None else None,
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
@@ -234,11 +283,11 @@ def running(
     finally:
         closing = current.closer[0].remaining if current.closer else 0.0
         for thread in current.later:
-            thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
-        current.steps.shutdown(wait=False, cancel_futures=True)
-        if current.handoff is not None:
-            current.handoff.shutdown(wait=False, cancel_futures=True)
-        current.fans.shutdown(wait=False, cancel_futures=True)
+            thread.join(max(slow_join.remaining, closing) + LATER_GRACE_S)
+        if all(ended.is_set() for ended in current.later_done):
+            _finish_pass(current)
+        else:
+            Thread(target=_finish_pass, args=(current,), name="tick-slow-cleanup", daemon=True).start()
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()

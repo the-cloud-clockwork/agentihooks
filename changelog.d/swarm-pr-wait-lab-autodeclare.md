@@ -1,0 +1,1 @@
+A swarm agent's push of one commit to a lab grade ref now sets its own wait on the lab grade of that head, so it no longer runs swarm wait; a lab wait also takes the lab grade url and ends when the lab closes the grade, green, red naming the failed checks, or superseded.

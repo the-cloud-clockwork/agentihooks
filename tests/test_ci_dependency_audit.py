@@ -91,14 +91,20 @@ def test_a_failed_resolve_is_an_error_naming_the_tree_and_the_reason(tmp_path, m
     assert str(error.value) == f"resolving {tmp_path} failed: no solution"
 
 
-def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, monkeypatch):
-    calls = []
+@pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
+def test_audit_runs_pip_audit_under_the_checked_in_audit_constraint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict[str, bool]]] = []
+    lock = _ROOT / ".github/ci-tools/audit.lock"
     monkeypatch.setattr(audit.subprocess, "run", _run(calls, 1, _report()))
     assert audit.audit(tmp_path / "head.txt") == _report()
     assert calls == [
         (
             [
                 "uvx",
+                "--constraints",
+                str(lock),
                 "pip-audit==2.10.1",
                 "-r",
                 str(tmp_path / "head.txt"),
@@ -110,6 +116,10 @@ def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, mo
             {"capture_output": True, "text": True},
         )
     ]
+    pins = lock.read_text().splitlines()
+    (platformdirs,) = [pin for pin in pins if pin.startswith("platformdirs==")]
+    assert "pip-audit==2.10.1" in pins
+    assert platformdirs != "platformdirs==4.14.8"
 
 
 def test_a_report_error_names_the_cause():
@@ -230,11 +240,12 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_dependency_audit_is_a_lint_step_graded_by_the_base():
+@pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
+def test_dependency_audit_is_a_lint_step_graded_by_the_base() -> None:
     jobs = _workflow()["jobs"]
-    job = jobs["lint"]
+    job = jobs["lint-actions"]
     assert "dependency-audit" not in jobs
-    assert "lint" in jobs["gate-required"]["needs"]
+    assert "lint-actions" in jobs["gate-required"]["needs"]
     assert job["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -261,7 +272,7 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
 
 
 def test_dependency_audit_refuses_a_base_without_its_script(tmp_path):
-    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint"]["steps"]}
+    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint-actions"]["steps"]}
     grade = steps["Fail on known vulnerabilities new against the base"]
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "ci_dependency_audit.py").write_text(

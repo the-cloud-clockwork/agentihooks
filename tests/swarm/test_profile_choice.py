@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import profile_choice, prompt, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -21,7 +21,7 @@ def _choose(
 
 
 REMEDY = (
-    "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, "
+    "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, "
     "or split the task into one public responsibility each, then reopen it"
 )
 INSTRUCTIONS = (
@@ -288,7 +288,7 @@ def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_pa
         _choose("eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
     assert str(refused.value) == (
         "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
-        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
         "into one public responsibility each, then reopen it"
     )
 
@@ -302,7 +302,7 @@ def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_pat
         profile_choice.classify("sw", TASK, {"AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE": "1.5"})
     assert str(refused.value) == (
         "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
-        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
         "into one public responsibility each, then reopen it"
     )
 
@@ -522,7 +522,10 @@ def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_t
     argv = calls[0]
     assert argv[argv.index("--profile") + 1] == "frontend"
     assert placed.profile_decision["source"] == "classifier"
-    assert "Go on from seam two" in Path(argv[argv.index("--prompt-file") + 1]).read_text()
+    text = Path(argv[argv.index("--prompt-file") + 1]).read_text()
+    assert "Go on from seam two" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.mark.feature("hub-admission-carries-ledger-intent")

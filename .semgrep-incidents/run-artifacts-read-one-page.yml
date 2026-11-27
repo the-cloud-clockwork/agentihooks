@@ -1,0 +1,48 @@
+rules:
+  - id: run-artifacts-read-one-page
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A script lists a run's artifacts with one request and no name filter, so it reads only the first page, 30
+      artifacts by default and 100 at most. On 19 November dev push run 44549657285 held 106 artifacts and
+      durations-merged was not on the first page of 100, so the Tests select job found no live durations-merged
+      artifact and every merge group based on that run failed. Ask for the artifact by name with the name query
+      parameter, or pass --paginate and read every page.
+    paths:
+      include:
+        - '**/.github/workflows/*.yml'
+        - '**/.github/workflows/*.yaml'
+        - '**/.github/actions/**/action.yml'
+        - '**/.github/actions/**/action.yaml'
+        - '**/run-artifacts-read-one-page.test.yaml'
+    patterns:
+      - pattern: |
+          run: $SCRIPT
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: (?ms)\A.*?^(?<!\\\n)(?!(?:[^\n]*\\\n)*[^\n]*--paginate)(?:[^\n]*\\\n)*[^\n]*actions/runs/[^/\n]+/artifacts(?![^\s"']*[?&]name=)
+  - id: run-artifacts-read-one-page-python
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Python code lists a run's artifacts with a query that has no page and no name parameter, so it reads only the
+      first page, 100 artifacts at most. On 19 November the two newest passed dev push runs each held 106 artifacts
+      with coverage shards on the second page, so the pull request test planner skipped both and reused tests from a
+      dev run four commits behind. Read every page with the page parameter, or ask for the artifact by name. A
+      listing passed to rows is exempt, because the storage report's rows reads it with gh api --paginate.
+    paths:
+      include:
+        - /scripts/**/*.py
+        - /hooks/**/*.py
+        - '**/run-artifacts-read-one-page.py'
+    pattern-either:
+      - patterns:
+          - pattern-regex: '/runs/[^/\s]+/artifacts(?=\?)(?![^"''\s]*[?&](?:page|name)=)'
+          - pattern-not-inside: rows(...)
+      - patterns:
+          - pattern-either:
+              - pattern: _api($URL, ...)
+              - pattern: api($URL, ...)
+          - metavariable-regex:
+              metavariable: $URL
+              regex: '.*/runs/[^/\s]+/artifacts["'']\Z'

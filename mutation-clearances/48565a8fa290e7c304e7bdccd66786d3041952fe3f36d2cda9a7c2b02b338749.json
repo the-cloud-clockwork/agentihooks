@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_legs_for:3f91b376e03671cadfb520792e7c3f621fc7bb8e1a96b0d61634e394ba717438": {
+    "reader": "standards_reader",
+    "reason": "With workers=2 the parallel term (load+seconds)/2 never exceeds the serial term, which equals load+seconds for the single \"\" group; for seconds >= 0 (pytest durations always are) the max and the sort key match workers=1 exactly."
+  }
+}

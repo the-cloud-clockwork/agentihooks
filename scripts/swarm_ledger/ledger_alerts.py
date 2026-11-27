@@ -4,12 +4,13 @@ and closes it done with an outcome."""
 from typing import Any
 
 from scripts.inbox import outbox
+from scripts.swarm_ledger.op_context import OpContext
 
 SETTLING = ("alert_claim", "alert_close")
 OPS = (*SETTLING, "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
-INBOX, SETUP = "inbox", "setup"
+INBOX, SETUP, AUTOSCALER = "inbox", "setup", "autoscaler"
 WRITER = "writer"
 TARGETS = {
     WRITER: "master",
@@ -22,8 +23,9 @@ TARGETS = {
     MERGE: "master",
     INBOX: "master",
     SETUP: "master",
+    AUTOSCALER: "master",
 }
-RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP)
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP, AUTOSCALER)
 ITEMIZED = (INBOX, SETUP)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
@@ -53,7 +55,7 @@ def check_raise(op):
         )
 
 
-def raise_source(doc, ctx, source, text, item=None):
+def raise_source(doc: dict[str, Any], ctx: OpContext, source: str, text: str, item: str | None = None) -> bool:
     rows = doc.setdefault("alerts", [])
     if any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
         return True
@@ -81,7 +83,7 @@ def check(op):
             raise ValueError(f"alert_close needs an outcome of up to {MAX_OUTCOME} characters")
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["op"] == "alert_raise":
         return raise_source(doc, ctx, op["source"], op["text"].strip(), op.get("item"))
     if "item" in op:
@@ -104,7 +106,7 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-def settled(alert: dict[str, Any] | None, op: dict[str, Any], ctx: Any, who: str) -> bool:
+def settled(alert: dict[str, Any] | None, op: dict[str, Any], ctx: OpContext, who: str) -> bool:
     """A claim or close of a missing or closed alert: its own writer's succeeds unchanged, any other is refused."""
     if alert is None:
         return refuse(ctx, f"{op['op']} refused: alert {op['target']} does not exist on this ledger")
@@ -119,13 +121,13 @@ def settling_refusal(text: str) -> bool:
     return text.startswith(tuple(f"{kind} refused: " for kind in SETTLING))
 
 
-def refuse(ctx: Any, reason: str) -> bool:
+def refuse(ctx: OpContext, reason: str) -> bool:
     """Record the server's reason for a refused alert op and refuse it."""
     ctx.refused.append(reason)
     return False
 
 
-def close_item(doc, op, ctx):
+def close_item(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     who, outcome = op.get("by", OPERATOR), op["outcome"].strip()
     for alert in doc.setdefault("alerts", []):
         if alert["source"] in ITEMIZED and alert.get("item") == op["item"] and alert["state"] != DONE:
@@ -140,17 +142,17 @@ def item(op: dict) -> str:
     return op.get("item") or op.get("thread") or op.get("target") or op["op"]
 
 
-def writer(op: dict, ctx: object) -> str | None:
+def writer(op: dict, ctx: OpContext) -> str | None:
     return ctx.author(op["by"]) if op.get("by") else None
 
 
-def close_refusal(alert: dict, ctx: object, outcome: str) -> None:
+def close_refusal(alert: dict, ctx: OpContext, outcome: str) -> None:
     who = alert.get("writer") or SENDER
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
 
 
-def recovered(doc: dict, op: dict, ctx: object) -> None:
+def recovered(doc: dict, op: dict, ctx: OpContext) -> None:
     by, target_item = writer(op, ctx), item(op)
     for alert in doc.get("alerts", []):
         if (
@@ -170,7 +172,7 @@ def expired(alert: dict, at: int) -> bool:
     )
 
 
-def raise_warning(doc: dict, ctx: object, warning: tuple, before: list) -> None:
+def warning_raised(doc: dict, rev: int, at: int, warning: tuple, before: list) -> bool:
     source, text, *owner = warning
     writer, target_item = owner if owner else (None, None)
     rows = doc["alerts"]
@@ -182,33 +184,44 @@ def raise_warning(doc: dict, ctx: object, warning: tuple, before: list) -> None:
     live = next((a for a in matching if a["state"] != DONE), None)
     if live:
         if source == SYNC and owner:
-            live["last_refused_at"] = ctx.at
-            ctx.dirty = True
-        return
+            live["last_refused_at"] = at
+            return True
+        return False
     if matching and text in before and not owner:
-        return
-    alert = new_alert(doc, ctx, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
+        return False
+    alert = alert_row(doc, rev, at, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
     if source == SYNC:
-        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
+        alert.update(writer=writer, item=target_item, last_refused_at=at)
+    return True
 
 
-def new_alert(doc, ctx, source, text, target):
+def raise_warning(doc: dict, ctx: OpContext, warning: tuple, before: list) -> None:
+    if warning_raised(doc, ctx.rev, ctx.at, warning, before):
+        ctx.dirty = True
+
+
+def alert_row(doc: dict[str, Any], rev: int, at: int, source: str, text: str, target: str) -> dict[str, Any]:
     rows = doc["alerts"]
     alert = {
-        "id": f"al-{ctx.rev}-{len(rows)}",
+        "id": f"al-{rev}-{len(rows)}",
         "text": text,
         "source": source,
         "target": target,
         "state": OPEN,
-        "at": ctx.at,
-        "rev": ctx.rev,
+        "at": at,
+        "rev": rev,
     }
     rows.append(alert)
+    return alert
+
+
+def new_alert(doc: dict[str, Any], ctx: OpContext, source: str, text: str, target: str) -> dict[str, Any]:
+    alert = alert_row(doc, ctx.rev, ctx.at, source, text, target)
     ctx.dirty = True
     return alert
 
 
-def derive(doc, ctx, raised, before):
+def derive(doc: dict[str, Any], ctx: OpContext, raised: list[tuple], before: list) -> None:
     rows = doc.setdefault("alerts", [])
     for warning in raised:
         raise_warning(doc, ctx, warning, before)

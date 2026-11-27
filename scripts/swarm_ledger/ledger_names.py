@@ -1,4 +1,7 @@
 import re
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("agent_rename",)
 AUTHOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
@@ -36,7 +39,7 @@ def rename(doc, meta, old, new):
     return changed
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict, op: dict[str, Any], ctx: OpContext) -> bool:
     if rename(doc, ctx.meta, op["old"], op["new"]):
         ctx.record("swarm", "agent renamed", "crew", old=op["old"], new=op["new"])
     return True

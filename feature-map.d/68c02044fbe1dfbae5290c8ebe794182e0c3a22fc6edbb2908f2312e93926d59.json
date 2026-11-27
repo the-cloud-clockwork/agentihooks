@@ -1,0 +1,10 @@
+{
+  "id": "ci-artifact-sanity-interpreter-imports",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-artifact-sanity-jsonschema",
+  "behaviour": "The lint-actions interpreter that runs the protected grader's artifact sanity checker has every third party package the checker imports installed before the step runs.",
+  "seam": "The lint-actions job installs before the Artifact sanity checks step, read against the import closure of scripts.swarm_ledger.artifact_sanity",
+  "tests": [
+    "tests/test_ci_artifact_sanity_step.py::test_the_lint_interpreter_installs_every_package_the_artifact_checker_imports"
+  ]
+}

@@ -3,12 +3,14 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from scripts.swarm_ledger import outbox_host, storage
+from scripts.swarm_ledger.events.publishing import Publishing
 from scripts.swarm_ledger.repository import bin_storage, postgres, sqlite
-from tests.swarm_ledger.test_sqlite import CONTENT, store
+from tests.swarm_ledger.test_sqlite import CONTENT, chat, store
 
 API_URL = "AGENTIHOOKS_SWARM_API_URL"
 DATABASE_URL = "postgresql://ledger@db/ledger"
@@ -210,11 +212,40 @@ def test_the_ledger_server_takes_no_writer_lease(monkeypatch: pytest.MonkeyPatch
     assert waits == []
 
 
-def test_the_ledger_server_follows_no_shared_database_with_an_api_address_set(
+class Stopped(BaseException):
+    """Ends the follow loop after one pass, past the retrying runner that restarts it on an ordinary error."""
+
+
+@pytest.mark.feature("folder-ledger-server-follows-other-writers")
+def test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """served() records the startup threads with threading.Thread replaced; undoing its patches before the follow
+    pass gives the publisher its real worker thread and the server module its real globals."""
     from scripts.swarm_ledger import ledger_server as server
 
     threads, _ = served(monkeypatch, tmp_path)
+    monkeypatch.undo()
+    assert server.follow_shared in [getattr(thread["target"], "__wrapped__", None) for thread in threads]
+    published: list[tuple[str, list[str]]] = []
 
-    assert server.follow_shared not in [getattr(thread["target"], "__wrapped__", None) for thread in threads]
+    def publish(slug: str, state: dict[str, Any]) -> None:
+        published.append((slug, [message["id"] for message in state.get("chat", [])]))
+
+    def stop(interval: float, timeout: float | None = None) -> None:
+        raise Stopped
+
+    writer = store(tmp_path)
+    writer.create("ledger", CONTENT)
+    reader = Publishing(store(tmp_path), publish)
+    reader.current("ledger")
+    reader.drain(5)
+    writer.apply_ops("ledger", ops=[chat(1)])
+    monkeypatch.setattr(server, "repository", reader)
+    monkeypatch.setattr(server, "HUB", SimpleNamespace(watched=lambda: ["ledger"]))
+    monkeypatch.setattr(server, "scheduled_wait", stop)
+    with pytest.raises(Stopped):
+        server.follow_shared()
+    reader.drain(5)
+
+    assert published == [("ledger", []), ("ledger", ["m1"])]

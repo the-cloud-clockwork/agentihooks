@@ -1,0 +1,22 @@
+rules:
+  - id: freeze-marks-admitted-per-task
+    languages: [python]
+    severity: ERROR
+    message: >-
+      freeze.marks builds the page view of every new ledger generation. Calling unfocused there without the admitted
+      queue makes admitted rebuild its memo key over every task once per open task, so the view costs open tasks
+      times all tasks. Compute the queue once with admitted and pass it to unfocused.
+    paths:
+      include:
+        - /scripts/swarm/freeze.py
+        - freeze-marks-admitted-per-task.py
+    patterns:
+      - pattern-inside: |
+          def $MARKS(...):
+              ...
+      - metavariable-regex:
+          metavariable: $MARKS
+          regex: ^marks(_\w+)?$
+      - pattern: unfocused(...)
+      - pattern-not: unfocused($TASK, $DOC, $GRAPH, $FIX, $QUEUE)
+      - pattern-not: unfocused(..., admitted_queue=$QUEUE, ...)

@@ -2089,6 +2089,36 @@ def test_required_green_holds_when_github_cannot_answer(monkeypatch, error):
     assert REAL_REQUIRED_GREEN(URL, "first") is False
 
 
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_required_green_logs_the_github_error_it_holds_on(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def view(url: str, run: Any) -> None:
+        raise SwarmError("To get started with GitHub CLI, please run:  gh auth login")
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+    assert capsys.readouterr().err == (
+        f"required checks of {URL} unread: To get started with GitHub CLI, please run:  gh auth login\n"
+    )
+
+
+@pytest.mark.feature("branch-rule-empty-read")
+def test_required_green_names_an_empty_pull_request_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def view(url: str, run: Any) -> None:
+        return None
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"required checks of {URL} unread: empty pull request read; GitHub backoff or rate limiting may be active\n"
+    )
+
+
 def test_the_required_reading_of_an_older_commit_carries_no_head():
     from scripts.swarm.ledger_events import GATE, _required_pull_request
 
@@ -2202,3 +2232,43 @@ def test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see
 
     assert waits.end_pass(store, "sw", {}, member, {}.get, 5_000, {}.get) == []
     assert (held := idle.wait(store.redis, "sw", ME)) is not None and held["on"] == {"kind": "reply", "target": item.id}
+
+
+JOURNALED = (
+    "scripts.swarm.pr_wait.enforce_pass",
+    "scripts.swarm.waits.resolution",
+    "scripts.swarm.waits.required_green",
+    "scripts.swarm.waits.dependency",
+    "scripts.swarm.waits._save_wait",
+    "scripts.inbox.store.InboxStore.send",
+)
+
+
+@pytest.mark.feature("swarm-waits-end-journals-its-phases")
+def test_the_waits_end_pass_journals_its_push_pass_each_resolution_with_its_holder_and_the_required_read(
+    tick: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+
+    green = PullRequest("OPEN", None, None, False, True, head="first")
+    monkeypatch.setattr(waits, "required_green", REAL_REQUIRED_GREEN)
+    monkeypatch.setattr(merge_queue, "required_view", lambda url, run: green)
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="first")
+    with timing.tick("sw", tick.store):
+        token = timing.PASS.set({"pass_id": "p0", "start_ms": 0})
+        try:
+            assert tick.end({"t1": {"id": "t1", "state": "claimed"}}) == [
+                f"ended the wait of {ME}: checks on {URL}, now green"
+            ]
+        finally:
+            timing.PASS.reset(token)
+    rows = [json.loads(fields["record"]) for _, fields in tick.store.redis.xrange(tick.store.key("sw", "tick:steps"))]
+    assert [(row["step"], row.get("agent"), row["pass_id"]) for row in rows if row["step"] in JOURNALED] == [
+        ("scripts.swarm.pr_wait.enforce_pass", None, "p0"),
+        ("scripts.swarm.waits.required_green", ME, "p0"),
+        ("scripts.swarm.waits.resolution", ME, "p0"),
+        ("scripts.swarm.waits.dependency", ME, "p0"),
+        ("scripts.swarm.waits._save_wait", ME, "p0"),
+        ("scripts.inbox.store.InboxStore.send", ME, "p0"),
+    ]

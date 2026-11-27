@@ -1,0 +1,10 @@
+{
+  "semgrep/scan/fail-on-findings-new-against-the-base": {
+    "needs": ["network"],
+    "reason": "its baseline producer supplies BASE, but its CONFIGS name Semgrep registry rule packs fetched online"
+  },
+  "semgrep/charts/guard-rules-hold-on-their-fixtures-and-at-their-computed-floors": {
+    "needs": ["network"],
+    "reason": "fetches the base branch from origin before it grades"
+  }
+}

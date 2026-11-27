@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_grade.py:scripts.ci_lab.plant_grade.x__verdict:73599f46589cb46bcb1deacf85d6419135b9a2a7ae6c5068822cc68e48ee1b31": {
+    "reader": "Standards",
+    "reason": "For the two admitted plant fixtures, neither I001 nor forbidden comment matches XXXX. Changing the empty-text fallback therefore preserves rejection and its diagnostic; nonempty output is unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__operator:bd80bb7c8d51cbf2491273d5c557a5967212c91acd46839e49155dfc2f619ef6": {
+    "reader": "standards_reader",
+    "reason": "The \"into\" value is only tested for truthiness and compared to \"out\"/\"dup\", so write_reason output is identical."
+  }
+}

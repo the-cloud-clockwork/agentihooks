@@ -127,7 +127,7 @@ def _run(
 @pytest.fixture
 def calm(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     log: list[Any] = []
-    monkeypatch.setattr(panic, "state", lambda store: log.append("panic read") and None)
+    monkeypatch.setattr(panic, "state", lambda store, slug: log.append("panic read") and None)
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     return log
 
@@ -206,7 +206,7 @@ def test_the_placement_notices_run_their_calls_with_the_pass_state(monkeypatch: 
 
 def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
     log: list[Any] = []
-    monkeypatch.setattr(panic, "state", lambda store: "halted")
+    monkeypatch.setattr(panic, "state", lambda store, slug: "halted")
     monkeypatch.setattr(bottleneck_remedy, "step", "bottleneck remedy")
     found = _run(place.PLACEMENT, _tick(log), _pass(log), monkeypatch)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]

@@ -8,13 +8,15 @@ from typing import Any, TextIO, cast
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from scripts.hub import admission
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, name_state, readiness, resume, snapshot
+from scripts.swarm import cli, commands, model_catalog, name_state, readiness, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
+from tests.helpers import narrow_ledger
 from tests.helpers.seat import seat_agent
 from tests.helpers.seat import view as seat_view
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -22,6 +24,11 @@ from tests.swarm_ledger import legacy_page
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import ledger_core as core  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: {"claude": [{"model": "opus"}], "codex": []})
 
 
 @pytest.fixture
@@ -124,6 +131,17 @@ def test_a_restore_over_a_listed_swarm_lists_its_old_style_names_again(store: Re
     assert store.seats.agent_names("sw") == []
     store.restore("sw", json.loads(json.dumps(state)))
     assert ("sw-eng-7", "eng-2@sw") in store.seats.agent_seats("sw")
+
+
+@pytest.mark.feature("swarm-learned-scope")
+def test_a_restore_over_a_listed_swarm_loads_learned_notes_a_snapshot_left_out_of_the_index(store: RedisStore) -> None:
+    seed(store, "sw")
+    state = store.export("sw")
+    del state["keys"][store.memory.learned_index("sw")]
+    store.redis.flushall()
+    assert store.memory.scoped("sw", "eng-1@sw") == []
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert [row["text"] for row in store.memory.scoped("sw", "eng-1@sw")] == ["run the gates twice"]
 
 
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
@@ -267,6 +285,91 @@ def close_mid_export(
     state = store.export("sw")
     after = dict(zip(read, (other.hgetall(read[0]), other.lrange(read[1], 0, -1))))
     return {**state, "seen": (before, after)}, inbox, item.id, eng
+
+
+@pytest.mark.feature("swarm-snapshot-batched-read")
+def test_an_export_over_more_keys_than_one_batch_reads_them_in_bounded_scripts_that_keep_each_address_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import store as store_module
+
+    calls: list[tuple[list[str], dict[str, list[str]]]] = []
+    store = RedisStore(dump_reads(calls))
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", eng, "read me with my address")
+    for index in range(40):
+        store.redis.set(store.key("sw", f"filler-{index}"), str(index))
+    for shared in ("waiting", "indexed", "open-indexed"):
+        store.redis.sadd(inbox.key(shared), *(agent.name for agent in store.agents("sw")))
+    whole = store.export("sw")
+    calls.clear()
+    monkeypatch.setattr(store_module, "DUMP_BATCH", 8)
+    batched = store.export("sw")
+    addresses = {address for _, sets in calls for address in sets.get(inbox.key("waiting"), [])}
+    bound = max(8, *(len(inbox.keys_at([address])[0]) for address in addresses))
+    assert len(calls) > 1 and sum(len(keys) for keys, _ in calls) > bound
+    assert all(len(keys) <= bound for keys, _ in calls)
+    held = {inbox.key("item", item.id), inbox.key("history", item.id), inbox.key("pending", eng)}
+    assert any(held <= set(keys) and eng in sets.get(inbox.key("waiting"), []) for keys, sets in calls)
+    assert {key: (row["type"], row["value"]) for key, row in batched["keys"].items()} == {
+        key: (row["type"], row["value"]) for key, row in whole["keys"].items()
+    }
+    assert batched["members"] == whole["members"]
+
+
+@pytest.mark.feature("swarm-snapshot-batched-read")
+def test_dump_packs_groups_in_order_and_runs_a_group_larger_than_a_batch_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import store as store_module
+
+    calls: list[tuple[list[str], dict[str, list[str]]]] = []
+    redis = dump_reads(calls)
+    redis.mset({key: f"value {key}" for key in "abcdefghij"})
+    redis.sadd("shared", "x", "y")
+    monkeypatch.setattr(store_module, "DUMP_BATCH", 3)
+    groups: list[tuple[list[str], dict[str, list[str]]]] = [
+        (["a", "b", "c", "d"], {"shared": ["x", "z"]}),
+        (["e"], {}),
+        (["f"], {}),
+        (["g"], {}),
+        (["h", "i"], {"shared": ["y"]}),
+        (["j"], {}),
+    ]
+    dumped, members = store_module._dump(redis, groups)
+    assert [keys for keys, _ in calls] == [["a", "b", "c", "d"], ["e", "f", "g"], ["h", "i", "j"]]
+    assert {key: row["value"] for key, row in dumped.items()} == {key: f"value {key}" for key in "abcdefghij"}
+    assert members == {"shared": ["x", "y"]}
+
+
+def dump_reads(calls: list[tuple[list[str], dict[str, list[str]]]]) -> Any:
+    """A fake Redis client that appends the keys and set checks of every DUMP_KEYS script it runs to calls."""
+    import fakeredis
+
+    from scripts.swarm.store import DUMP_KEYS
+
+    class Recording(fakeredis.FakeRedis):
+        def execute_command(self, *args: object, **options: object) -> object:
+            if args[:2] == ("EVAL", DUMP_KEYS):
+                calls.append(dump_call([str(arg) for arg in args[2:]]))
+            return super().execute_command(*args, **options)
+
+    return Recording(decode_responses=True)
+
+
+def dump_call(words: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    """The keys one DUMP_KEYS script reads and the candidates it checks in each set, from its EVAL arguments."""
+    count = int(words[0])
+    keys, argv = words[1 : count + 1], words[count + 1 :]
+    values, at = int(argv[0]), 1
+    sets: dict[str, list[str]] = {}
+    for shared in keys[values:]:
+        size = int(argv[at])
+        sets[shared] = argv[at + 1 : at + 1 + size]
+        at += size + 1
+    return keys[:values], sets
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
@@ -417,7 +520,7 @@ def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: 
     assert journal <= set(inbox.keys_at([eng])[0])
     with patch.object(InboxStore, "keys_at", autospec=True, side_effect=InboxStore.keys_at) as listed:
         exported = store.export("sw")
-    assert {"sw-eng-old", eng} <= set(listed.call_args.args[1])
+    assert {"sw-eng-old", eng} <= {address for call in listed.call_args_list for address in call.args[1]}
     assert journal <= set(exported["keys"])
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
@@ -432,8 +535,9 @@ def admitted_task(store: RedisStore, ledger: FakeLedger, task_id: str, at: int) 
     """The launch payload hub admission hands the hive for ``task_id`` of swarm ``sw`` at ``at``."""
     row = ledger.rows[task_id]
     request = {"hive": readiness.ROOT, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
-    source = SimpleNamespace(snapshot=lambda name: seat_view(store, ledger, name))
-    admitted = admission.Admission(store, ledger, source, lambda: at).admit("sw", request)  # pyright: ignore[reportArgumentType]
+    source = SimpleNamespace(slugs=lambda: ["sw"], snapshot=lambda name: seat_view(store, ledger, name))
+    admitter = narrow_ledger.viewed(admission.Admission(store, ledger, source, lambda: at))  # pyright: ignore[reportArgumentType]
+    admitted = admitter.admit("sw", request)
     assert admitted and "task" in admitted, admitted
     return admitted["task"]
 
@@ -600,6 +704,20 @@ def test_no_automatic_snapshot_while_paused_or_with_the_interval_at_zero(store):
     store.update("sw", state="running", snapshot_minutes=0)
     assert snapshot.auto(store, "sw", 0, {}, run=_no_git) is None
     assert snapshot.automatic("sw") == []
+
+
+@pytest.mark.feature("hosted-controller-no-automatic-snapshot")
+def test_the_chart_controller_takes_no_automatic_snapshot_for_a_swarm_without_its_own_interval(
+    store: RedisStore,
+) -> None:
+    chart = Path(__file__).resolve().parents[2] / "deploy" / "helm" / "agentihooks-swarm" / "values.yaml"
+    values = cast("dict[str, dict[str, dict[str, object]]]", yaml.safe_load(chart.read_text()))
+    env = {name: str(value) for name, value in values["controller"]["env"].items()}
+    store.create(SwarmConfig("sw", "/repo", 2, 1))
+    store.update("sw", state="running")
+
+    assert env.get("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES") == "0"
+    assert snapshot.auto(store, "sw", 0, env) is None
 
 
 def test_only_the_ten_newest_automatic_snapshots_are_kept(store):

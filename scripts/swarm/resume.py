@@ -2,12 +2,14 @@
 
 import json
 import os
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, fencing, idle, outage, profile_choice
+from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice, prompt
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -55,22 +57,52 @@ def quota_ignored(harness, account):
     return True
 
 
-def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
+def _master_login_blocker(name: str) -> str:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    now = time.time()
+    if any(
+        master_logins.usage(account, now)[1] < reservation.MASTER_LEAVES
+        and not reservation.primary_reserved(account, master_logins.week_left(account, now), os.environ)
+        for account in master_claude_login.free(name)
+    ):
+        return ""
+    return "no free stored master login slot above its drain line and outside the primary reserve"
+
+
+def blocker(
+    agent: AgentRecord,
+    worktree: str,
+    exists: Callable[[str], bool] = os.path.isdir,
+    has_quota: Any = account_quota,
+) -> str:
     """Why the agent cannot reopen its own conversation; empty when it can."""
+    from scripts.swarm_v2 import front_door
+
     if not agent.conversation_id:
         return "no conversation id"
     if not worktree:
         return "no worktree"
     if not exists(worktree):
         return "worktree gone"
+    if (
+        agent.lane == MASTER
+        and agent.harness == "claude"
+        and agent.profile == "master"
+        and front_door.holds(agent.seat.removeprefix("master@"), agent.seat)
+    ):
+        return _master_login_blocker(agent.name)
     if agent.account and has_quota(agent.harness, agent.account) is False:
         return f"account {agent.account} out of quota"
     return ""
 
 
-def restored_text(slug, agent, ledger):
+def restored_text(slug: str, agent: AgentRecord, ledger: object) -> str:
     sources = f"the ledger, printed by {ledger}"
-    if agent.lane != MASTER:
+    if agent.lane == expert_launch.LANE:
+        sources = f"your mission, printed by agentihooks swarm {slug} expert mission, and the recap of your seat"
+    elif agent.lane != MASTER:
         folder = ledger_workspace.named(slug, agent)
         sources = f"your task folder {folder} (steering.md, progress.md, proof.md) and {sources}"
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
@@ -121,6 +153,12 @@ class RestoreContext:
     has_quota: object = account_quota
 
 
+def continuity_text(slug: str, agent: AgentRecord, transfer: dict[str, Any]) -> str:
+    display = {**transfer, "next": transfers.normalized_next(slug, agent, transfer["next"])}
+    text = transfers.priming(slug, display, seated=bool(agent.seat))
+    return f"{prompt.SEAT_BRIEF}\n{text}" if agent.seat else text
+
+
 def _attempt(
     store: RedisStore, slug: str, agent: AgentRecord, worktree: str, context: "RestoreContext", transfer: dict
 ) -> "Outcome":
@@ -140,7 +178,7 @@ def _attempt(
             placed = context.runtime.resume(
                 store.ensure_code(slug),
                 agent,
-                restored_text(slug, agent, context.ledger) + "\n" + transfers.priming(slug, transfer),
+                restored_text(slug, agent, context.ledger) + "\n" + continuity_text(slug, agent, transfer),
             )
         except Exception as exc:
             why = f"resume failed to start: {exc}"

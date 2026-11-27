@@ -1,5 +1,6 @@
 import { h } from "./dom.js";
 import { closedLeft, loadClosed } from "./sync.js";
+import { loadOpen, openLeft } from "./seed.js";
 
 export const PAGE_SIZE = 50;
 export const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };
@@ -53,6 +54,17 @@ export function lazy(box, fill) {
   box.addEventListener("toggle", load);
   load();
   return box;
+}
+
+export function openMore(name, label, again) {
+  const left = openLeft(name);
+  if (!left) return null;
+  const button = h("button", { class: "link", type: "button", "data-open": name, text: `Load ${Math.min(left, PAGE_SIZE)} more ${label} · ${left} left` });
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    loadOpen(name).catch(() => null).finally(() => { button.disabled = false; again(); });
+  });
+  return h("li", { class: "page-more" }, button);
 }
 
 export function closedMore(name, label, again) {

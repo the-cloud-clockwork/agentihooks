@@ -404,7 +404,7 @@ class _Recorder:
 
 
 @pytest.mark.parametrize("typed", [False, True])
-def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
+def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch: pytest.MonkeyPatch, typed: bool) -> None:
     from hooks import config
     from hooks import hook_manager as hm
     from hooks.context import seat_notes
@@ -430,7 +430,7 @@ def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
         ("swarm_ledger", hm._swarm_ledger, (payload,)),
         ("trace_flush", hm._request_trace_flush, (payload, "prompt")),
         ("quota_usage", hm._prompt_quota_usage, ("s",)),
-        ("quota_policy", hm._prompt_quota_policy, (payload, "s")),
+        ("quota_policy", hm._prompt_quota_policy, (payload, "s", typed)),
         ("claude_md_cap", hm._prompt_claude_md_cap, (payload, "s")),
         ("enforcements", hm._prompt_enforcements, (payload, "s")),
         ("ci_manifesto", hm._prompt_ci_manifesto, ("s",)),

@@ -1,0 +1,6 @@
+{
+  "scripts/pr_body.py:scripts.pr_body.x_main:2b44e302a081facc616ce52daff8cd7ac48b30253cea51a713445e72f4375ceb": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: Python resolves utf-8 and UTF-8 to the same codec, preserving decoded body text and decoding errors."
+  }
+}

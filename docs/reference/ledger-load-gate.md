@@ -145,15 +145,24 @@ dispatch under its own name runs in a [hosted lane](../ci-timing.md).
 moved both Redis pulls from the Google mirror to public ECR, the registry the
 ledger load Redis service (`public.ecr.aws/docker/library/redis:7-alpine`) and
 the hierarchy CPU repair use. The pulls run in the `Build the swarm image` step,
-in parallel with the image build:
+in parallel with the image build, beside the NATS and nginx pulls the Compose
+scenarios need:
 
 ```bash
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
   docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
 redis=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
+  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
+nats=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
+  docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
+nginx=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
   docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
+wait "$nats" || status=$?
+wait "$nginx" || status=$?
 wait "$build" || status=$?
 exit "$status"
 ```
@@ -183,17 +192,80 @@ scenario scripts, `compose.yaml` and user facing defaults are unchanged:
 | Scenario | Image name it starts | Start |
 |---|---|---|
 | `hive-launch-smoke.sh` | `mirror.gcr.io/library/redis:7` | `docker compose up --pull never` |
-| `swarm-smoke.sh` | `mirror.gcr.io/library/redis:7` (from `compose.yaml`) | `docker compose up --pull never` |
+| `swarm-smoke.sh` | `mirror.gcr.io/library/redis:7`, `mirror.gcr.io/library/nats:2.15.1-alpine` and `mirror.gcr.io/library/nginx:1.27-alpine` (from `compose.yaml`) | `docker compose up --pull never` |
 | `compose-hive-smoke.sh` | `mirror.gcr.io/library/redis:7` | `docker compose up --pull never` |
 | `swarm-init-smoke.sh` | `mirror.gcr.io/library/redis:7` | `swarm init` from the installed package |
 | `hive-join-smoke.sh` | `mirror.gcr.io/library/redis:7-alpine` | `docker run --pull never` |
 
 Each scenario still calls `pull-runtime-image.sh` with the mirror name before it
 starts Redis. The workflow sets `SWARM_SMOKE_RUNTIME_IMAGES_READY=true` on the
-scenario steps; with it set, the script exits at once for either Redis mirror
-name when that image is already present locally as `amd64`, so CI makes no
+scenario steps; with it set, the script exits at once for
+`mirror.gcr.io/library/redis:7`, `mirror.gcr.io/library/redis:7-alpine`,
+`mirror.gcr.io/library/nats:2.15.1-alpine` or `mirror.gcr.io/library/nginx:1.27-alpine`
+when that image is already present locally as `amd64`, so CI makes no
 request to the Google mirror. Without the variable, for example when a scenario
 runs on a workstation, the script pulls the mirror name as before.
+
+### Runtime images the swarm smoke requires
+
+`swarm-smoke.sh` starts the whole `compose.yaml` stack with
+`docker compose up --pull never`, so Compose never fetches an image itself and
+every image the stack names must be present first. Before it starts, the script
+passes each one to its `require_image` function, which calls
+`pull-runtime-image.sh`:
+
+| Image | Used by |
+|---|---|
+| `mirror.gcr.io/library/redis:7` | `redis` |
+| `mirror.gcr.io/library/nats:2.15.1-alpine` | `nats` |
+| `mirror.gcr.io/library/nginx:1.27-alpine` | `front`, the ledger front every page request crosses |
+| `ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev` | `swarm`, `api` and `controller`, unless `SWARM_SMOKE_IMAGE` is set |
+
+When `SWARM_SMOKE_IMAGE` names a built image, the script tags it as
+`ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev` and starts with
+`--no-build`; otherwise it requires that image and starts with `--build`. A
+pull that still fails after its three attempts stops the script before
+`docker compose up` with the pull's exit status and this line on standard
+error:
+
+```text
+Swarm startup blocked: required image mirror.gcr.io/library/nginx:1.27-alpine could not be pulled
+```
+
+[Pull request 11667](https://github.com/the-cloud-clockwork/agentihooks/pull/11667)
+added the nginx line. Before it, the scenario reached `docker compose up` without
+the front image and failed after 11 seconds with `No such image` for
+`mirror.gcr.io/library/nginx:1.27-alpine` in
+[Tests run 43992907244](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43992907244).
+
+With the stack up, the scenario reads `/healthz`, the home page and its static
+assets, `/api/v1/ledgers`, `/logo.png` and `/favicon.ico` through the front on
+`SWARM_PORT` (default 12765), writes `PUT /api/v1/layout`, recreates the `swarm`
+container and reads the layout again. The non-default port exercises forwarding
+of the client `Host` with its port. The layout read checks persistence after
+recreation; the scenario does not compare the container's IP addresses. See
+[Ledger write path](ledger-write-path.md#compose-stack) for the front's DNS configuration.
+
+Two tests guard the pulls in CI:
+`tests/test_swarm_smoke_pull.py::test_smoke_selects_runtime_manifests_and_keeps_missing_images_red`
+runs the script with each of the four images missing in turn, and expects the
+blocked line and no `compose up`, then with none missing, and expects four digest
+pulls;
+`tests/test_ci_runtime_pulls.py::test_smoke_pulls_runtime_images_before_startup`
+expects the nginx pull among the four pulls `swarm-smoke.sh` makes before
+startup.
+
+To run the scenario on a workstation:
+
+```bash
+bash scripts/packaging/swarm-smoke.sh
+SWARM_SMOKE_IMAGE=local/agentihooks-swarm:check bash scripts/packaging/swarm-smoke.sh
+```
+
+The first form pulls the four images and builds the swarm image from the
+checkout; the second uses an image you built. Both use a random Compose project
+name, remove its volumes on exit and print `Swarm container smoke passed` at the
+end.
 
 ### Steps after a failed pull
 
@@ -233,6 +305,8 @@ guards the step conditions.
 | `Pull of public.ecr.aws/docker/library/redis:<tag> failed on attempt 3 of 3` | Public ECR did not serve the image within three bounded attempts. Read the earlier attempt errors; the scenarios were skipped, so no scenario result exists for that run. |
 | A scenario fails because `mirror.gcr.io/library/redis:<tag>` is missing locally | The tag step did not run. Check the build step for a failed pull, or a scenario run outside the workflow without a prior pull. |
 | The log shows a pull from `mirror.gcr.io/library/redis` | The scenario ran without `SWARM_SMOKE_RUNTIME_IMAGES_READY=true`, or the local image was not `amd64`. |
+| `Swarm startup blocked: required image <image> could not be pulled` | `require_image` could not get that image; read the `Pull of` lines above it. The stack was never started. |
+| `swarm-smoke.sh` fails with `No such image` before any request | The script started Compose without one of the images in [Runtime images the swarm smoke requires](#runtime-images-the-swarm-smoke-requires); a new image in `compose.yaml` needs its own `require_image` line. |
 | Redis pulls succeeded but a scenario failed | Acquisition is not the cause; read that scenario's own output. |
 
 ### Evidence
@@ -303,7 +377,8 @@ The current workflow grades as follows:
 | Part | Current behavior |
 |---|---|
 | Load pairs | A five job matrix, `pair: [1, 2, 3, 4, 5]`. Each job starts one base and one head gate side by side on its own runner, base first on odd pairs and head first on even pairs |
-| Load measures | Write p50 and the busiest CPU window. Write p95 stays an absolute budget inside each gate run |
+| Load measures | Write p50 and the busiest CPU window, summed over every ledger server process the side started: the ledger API service and the read only ledger server on a revision with the API service, the one ledger server on a revision before the write cutover such as `726353637`. Write p95 stays an absolute budget inside each gate run |
+| Load evidence | Each pair uploads `load-pair-N` holding `base.log`, `head.log` and every server log of each side: `server.log` and `server-read.log`, including logs under `repeat/` when a write breach repeats the window |
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
 | Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'`, described under [Hierarchy CPU grading](#hierarchy-cpu-grading) |
@@ -415,7 +490,7 @@ A compare dispatch skips the `load` job and runs these instead:
 
 | Job | What it does |
 |---|---|
-| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and both server logs either way |
+| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and every server log of each side, `server.log` and `server-read.log`, either way |
 | `compare-grade` | Runs after every pair job that was not cancelled. It downloads the five artifacts and runs `tests.ledger_load.paired` on them with `--margin "$SAME_CODE_MARGIN"` and `--same-code tests/ledger_load/compare_same_code_pairs.json` |
 
 The grade reads the last measure line of each log, takes the head over base
@@ -729,7 +804,7 @@ done
 | Item readers | 10, one single resource read a second each |
 | Page stream | one server-sent event stream held open through the run |
 | Duration | three bin sweeps of the server watcher: `(SWEEPS + 1) × BIN_SWEEP_EVERY × watch interval` = 3 × 15 × 2 s = 90 s |
-| Sampler | once a second: server CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
+| Sampler | once a second, summed over every ledger server process the run started (the ledger API service and the read only ledger server, or the one ledger server of a revision before the write cutover): CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
 
 ## Verdict
 

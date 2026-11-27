@@ -1,10 +1,11 @@
-import fcntl
 import hashlib
 import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+from hooks.compat import fcntl
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.context import master_coding, worker_mode
 from scripts.swarm_ledger import plan_read
@@ -12,6 +13,7 @@ from scripts.swarm_ledger import plan_read
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
 DEFAULT_EVERY = 40
 DEFAULT_MAX_CHARS = 1500
+FOCUS_READ = "Every loop run agentihooks api --slug <slug> get focus; clear or fix each focus with nothing claimable."
 
 
 def build_block(ledger, task_id, cap):
@@ -34,23 +36,37 @@ def build_block(ledger, task_id, cap):
 
 def _master_block(ledger: dict, cap: int) -> str:
     share = cap // 5
-    phases = "; ".join(
-        f"{phase.get('title', '')}: {phase.get('description', '')}"
-        for phase in ledger.get("phases", [])
-        if not phase.get("done")
-    )
     priorities = "; ".join(item.get("text", "") for item in ledger.get("priorities", []))
     return _clip(
         f"=== SWARM REFOCUS: {_clip(ledger.get('title', ''), share)} ===\n"
         "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
         "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
-        "and tools, handle operator inbox items, keep the ledger current and judge progress; "
+        "and tools, handle operator inbox items, keep progress current through agentihooks api and judge it; "
         "never edit code or config files in a repository, commit, merge or claim a task.\n"
+        f"{FOCUS_READ}\n"
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Priorities: {_clip(priorities, share)}\n"
-        f"Active phases: {_clip(phases, share * 2)}",
+        f"Active phases: {_clip(_phases(ledger), share * 2)}",
         cap,
     )
+
+
+def _phases(ledger: dict[str, Any]) -> str:
+    """The open phases: those an operator order stands on first, oldest order first, by id and title, then the
+    rest."""
+    from scripts.swarm import orders
+
+    ordered: list[tuple[int, str]] = []
+    rest: list[str] = []
+    for phase in ledger.get("phases", []):
+        if phase.get("done"):
+            continue
+        at = None if orders.closed(phase) else orders.marked(phase)
+        if at is None:
+            rest.append(f"{phase.get('title', '')}: {phase.get('description', '')}")
+        else:
+            ordered.append((at, f"operator order {phase.get('id', '')} {phase.get('title', '')}"))
+    return "; ".join([text for _, text in sorted(ordered)] + rest)
 
 
 def refocus_context(session_id, event, environ=None):

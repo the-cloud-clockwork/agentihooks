@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,10 @@ def measured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pat
     data.write()
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks/example.py").write_text("one\ntwo\nthree\n")
+    summary = tmp_path / "executed-lines.json"
+    summary.write_text(json.dumps({cache.OWN_DATABASE: {"hooks/example.py": [1, 2]}}))
     target = tmp_path / "baseline.json"
-    cache.record(tmp_path, [tmp_path / ".coverage"], target)
+    cache.record(tmp_path, [summary], target)
     return tmp_path, target
 
 

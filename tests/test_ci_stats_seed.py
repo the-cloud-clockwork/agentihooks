@@ -15,6 +15,11 @@ from scripts.ci_mutation.stats_dependencies import CONTEXT, SHARED
 pytestmark = pytest.mark.unit
 
 KEEP, SCOPED, STALE = "a" * 64, "b" * 64, "c" * 64
+LISTINGS = (
+    "pulls/7",
+    f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10",
+    "actions/runs/1/artifacts?per_page=100&page=1",
+)
 
 
 def _archive(files):
@@ -195,7 +200,9 @@ def test_api_fails_when_gh_fails(tmp_path, monkeypatch):
         seed.api("pulls/7")
 
 
-def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
+def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     archives = {
         5: _archive({"x.index": "old", "x.json": "{}"}),
         6: _archive(
@@ -205,10 +212,10 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 2}, {"id": 1}]},
-        "actions/runs/2/artifacts?per_page=100": {
+        "actions/runs/2/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 9, "name": "mutation-report-0", "expired": False}]
         },
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
                 {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
@@ -233,24 +240,267 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
     ]
 
 
-def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
-    def missing(path, binary=False, deadline=None):
+@pytest.mark.feature("ci-stats-seed-listing-retry")
+def test_harvest_skips_a_number_that_is_not_a_pull_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[str] = []
+    slept: list[float] = []
+
+    def missing(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        calls.append(path)
         raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Not Found (HTTP 404)\n")
 
     monkeypatch.setattr(seed, "api", missing)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
 
     assert seed.harvest(7, tmp_path, set()) == 0
+    assert calls == ["pulls/7"]
+    assert slept == []
     assert capsys.readouterr().out == "Mutation stats seed: #7 is not a readable pull request\n"
 
 
-def test_harvest_fails_when_github_cannot_answer(tmp_path, monkeypatch):
-    def unavailable(path, binary=False, deadline=None):
+def test_harvest_fails_when_github_cannot_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(path: str, binary: bool = False, deadline: float | None = None) -> object:
         raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Service Unavailable (HTTP 503)\n")
 
     monkeypatch.setattr(seed, "api", unavailable)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=lambda wait: None, monotonic=lambda: 0.0))
 
     with pytest.raises(subprocess.CalledProcessError):
         seed.harvest(7, tmp_path, set())
+
+
+@pytest.mark.feature("ci-stats-seed-download-retry")
+@pytest.mark.parametrize(("now", "waited", "shown"), [(0.0, 5, "5"), (40.0, 2.0, "2"), (45.0, 0.0, "0")])
+def test_harvest_downloads_a_failed_artifact_again_after_a_wait(
+    folder: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    now: float,
+    waited: float,
+    shown: str,
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    downloads: list[tuple[str, float | None]] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        if not binary:
+            return responses[path]
+        downloads.append((path, deadline))
+        if len(downloads) == 1:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Bad Gateway (HTTP 502)\n")
+        return _archive({"x.index": "k", f"{KEEP}.json": "{}"})
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: now))
+
+    assert seed.harvest(7, folder, set(), 42.0) == 2
+    assert downloads == [("actions/artifacts/5/zip", 42.0)] * 2
+    assert slept == [waited]
+    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "x.index"]
+    assert capsys.readouterr().out == (
+        f"Mutation stats seed: actions/artifacts/5/zip failed, asking again in {shown} s: gh: Bad Gateway (HTTP 502)\n"
+    )
+
+
+@pytest.mark.feature("ci-stats-seed-download-retry")
+def test_harvest_fails_naming_the_artifact_once_every_download_failed(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [
+                {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
+                {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
+            ]
+        },
+    }
+    failure = subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Bad Gateway (HTTP 502)\n")
+    downloads: list[tuple[str, float | None]] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        if not binary:
+            return responses[path]
+        downloads.append((path, deadline))
+        if path == "actions/artifacts/6/zip":
+            raise failure
+        return _archive({"x.index": "k"})
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+    taken: set[str] = set()
+
+    with pytest.raises(RuntimeError) as error:
+        seed.harvest(7, folder, taken, 42.0)
+
+    assert str(error.value) == (
+        "Mutation stats seed: every download of mutation-test-stats-cache-1 (6) failed: gh: Bad Gateway (HTTP 502)"
+    )
+    assert error.value.__cause__ is failure
+    assert downloads == [("actions/artifacts/5/zip", 42.0), *[("actions/artifacts/6/zip", 42.0)] * 4]
+    assert slept == [5, 10, 20]
+    assert taken == {"x.index"}
+
+
+@pytest.mark.feature("ci-stats-seed-download-retry")
+@pytest.mark.parametrize(
+    ("failure", "raised"),
+    [
+        (subprocess.TimeoutExpired(["gh", "api"], 0), subprocess.TimeoutExpired),
+        (subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Not Found (HTTP 404)\n"), RuntimeError),
+    ],
+    ids=["timeout", "not-found"],
+)
+def test_harvest_downloads_a_timed_out_or_missing_artifact_once(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, failure: subprocess.SubprocessError, raised: type[Exception]
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    downloads: list[str] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        if not binary:
+            return responses[path]
+        downloads.append(path)
+        raise failure
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+
+    with pytest.raises(raised) as error:
+        seed.harvest(7, folder, set())
+
+    assert failure in (error.value, error.value.__cause__)
+    assert downloads == ["actions/artifacts/5/zip"]
+    assert slept == []
+
+
+@pytest.mark.feature("ci-stats-seed-listing-retry")
+@pytest.mark.parametrize("failing", LISTINGS)
+def test_harvest_asks_again_for_a_listing_call_that_failed(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failing: str
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    calls: list[str] = []
+    deadlines: set[float | None] = set()
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        calls.append(path)
+        deadlines.add(deadline)
+        if path == failing and calls.count(path) == 1:
+            raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Bad Gateway (HTTP 502)\n")
+        return _archive({"x.index": "k"}) if binary else responses[path]
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+
+    assert seed.harvest(7, folder, set(), 42.0) == 1
+    assert calls.count(failing) == 2
+    assert deadlines == {42.0}
+    assert slept == [5]
+    assert capsys.readouterr().out == (
+        f"Mutation stats seed: {failing} failed, asking again in 5 s: gh: Bad Gateway (HTTP 502)\n"
+    )
+    assert (folder / "x.index").read_text() == "k"
+
+
+@pytest.mark.feature("ci-stats-seed-listing-retry")
+@pytest.mark.parametrize("failing", LISTINGS)
+def test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    failures: list[subprocess.CalledProcessError] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        if path == failing:
+            failures.append(
+                subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Bad Gateway (HTTP 502)\n")
+            )
+            raise failures[-1]
+        return _archive({"x.index": "k"}) if binary else responses[path]
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        seed.harvest(7, folder, set())
+
+    assert len(failures) == 4
+    assert error.value is failures[-1]
+    assert slept == [5, 10, 20]
+
+
+@pytest.mark.feature("ci-stats-seed-listing-retry")
+@pytest.mark.parametrize(
+    ("failing", "failure"),
+    [
+        *((path, subprocess.TimeoutExpired(["gh", "api"], 0)) for path in LISTINGS),
+        *(
+            (path, subprocess.CalledProcessError(1, ["gh", "api"], stderr=b"gh: Not Found (HTTP 404)\n"))
+            for path in LISTINGS[1:]
+        ),
+    ],
+)
+def test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found(
+    folder: Path, monkeypatch: pytest.MonkeyPatch, failing: str, failure: subprocess.SubprocessError
+) -> None:
+    responses = {
+        "pulls/7": {"head": {"sha": "abc"}},
+        f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
+        "actions/runs/1/artifacts?per_page=100&page=1": {
+            "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
+        },
+    }
+    calls: list[str] = []
+    slept: list[float] = []
+
+    def api(path: str, binary: bool = False, deadline: float | None = None) -> object:
+        calls.append(path)
+        if path == failing:
+            raise failure
+        return _archive({"x.index": "k"}) if binary else responses[path]
+
+    monkeypatch.setattr(seed, "api", api)
+    monkeypatch.setattr(seed, "time", SimpleNamespace(sleep=slept.append, monotonic=lambda: 0.0))
+
+    with pytest.raises(type(failure)) as error:
+        seed.harvest(7, folder, set())
+
+    assert error.value is failure
+    assert calls.count(failing) == 1
+    assert slept == []
 
 
 def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
@@ -337,11 +587,13 @@ def test_main_skips_a_pull_whose_github_call_timed_out(folder, monkeypatch, caps
     )
 
 
-def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monkeypatch):
+def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -357,11 +609,11 @@ def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monke
     assert taken == {"x.index", "y.index"}
 
 
-def test_harvest_passes_the_deadline_to_every_github_call(folder, monkeypatch):
+def test_harvest_passes_the_deadline_to_every_github_call(folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -377,11 +629,11 @@ def test_harvest_passes_the_deadline_to_every_github_call(folder, monkeypatch):
     assert deadlines == [42.0] * 4
 
 
-def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder, monkeypatch):
+def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [
                 {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},

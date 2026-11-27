@@ -247,10 +247,10 @@ def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
         )
     else:
         entry["tests"] = [*entry.get("tests", []), test_node(spec.name)]
+    entry = next(entry for entry in data["features"] if entry["id"] == spec.feature)
     if fragmented:
-        entry = next(entry for entry in data["features"] if entry["id"] == spec.feature)
         return feature_map.entry_path(path, spec.feature), json.dumps(entry, indent=2) + "\n"
-    return path, json.dumps(data, indent=2) + "\n"
+    return path, feature_map.with_entry(path.read_bytes().decode(), entry)
 
 
 def _join_modules(root: Path, module: str) -> tuple[Path, str]:

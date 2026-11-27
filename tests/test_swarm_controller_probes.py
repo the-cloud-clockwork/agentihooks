@@ -78,6 +78,29 @@ def test_live_takes_its_own_hive_from_the_controller_environment(store, monkeypa
     assert capsys.readouterr().out == "controller: the health endpoint did not answer: OSError: connection refused\n"
 
 
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+def test_live_without_the_control_api_passes_on_held_leases_with_no_endpoint_check(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    held(store)
+    fetch = Fetch()
+
+    assert controller_probes.live({}, store, fetch, "hive-fixture") == 0
+    assert fetch.calls == []
+    assert capsys.readouterr().out == "controller: live\n"
+
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+def test_live_without_the_control_api_still_fails_on_a_lapsed_lease(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fetch = Fetch()
+
+    assert controller_probes.live({}, store, fetch, "hive-fixture") == 1
+    assert fetch.calls == []
+    assert capsys.readouterr().out == "controller: no live controller lease for ['fixture']\n"
+
+
 def test_live_fails_when_the_served_swarm_has_no_lease_at_all(store, capsys):
     held(store)
     environ = {**ENV, "AGENTIHOOKS_CONTROL_SWARM": "absent"}

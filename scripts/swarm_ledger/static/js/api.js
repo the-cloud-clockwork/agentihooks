@@ -23,10 +23,6 @@ export function uploadImage(file) {
   return fetch(`${API_V1}/uploads/media`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
 }
 
-export function readMetadata() {
-  return fetch(API_V1, { cache: "no-store" });
-}
-
 export function readWorkspace(taskId) {
   return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store" });
 }
@@ -35,12 +31,33 @@ export function readContextEvidence(task, ref) {
   return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store" });
 }
 
+export function readSummary() {
+  return fetch(`${API_V1}/summary`, { cache: "no-store" });
+}
+
+export function readOpen(name, offset, limit) {
+  return fetch(`${API_V1}/${name}?state=open&offset=${offset}&limit=${limit}`, { cache: "no-store" });
+}
+
+export function readThread(key, cursor) {
+  return fetch(`${API_V1}/${key}/comments?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+}
+
+export function readSwarm(name, cursor) {
+  const page = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+  return fetch(`${API_V1}/swarm${name ? `/${name}?limit=100${page}` : ""}`, { cache: "no-store" });
+}
+
 export function readClosed(name, offset) {
   return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store" });
 }
 
 export function searchClosed(name, text, offset = 0) {
   return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store" });
+}
+
+export function readOrders() {
+  return fetch(`${API_V1}/orders`, { cache: "no-store" });
 }
 
 export function readArchitecture() {

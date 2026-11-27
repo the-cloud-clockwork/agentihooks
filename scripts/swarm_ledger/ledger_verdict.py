@@ -4,10 +4,12 @@ An approval of an ask to set a condition reads "approved, set a condition", so t
 """
 
 import re
+from typing import Any
 
 import ledger_priorities
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
 OPS = ("verdict",)
@@ -32,7 +34,7 @@ def text(verdict, ask):
     return f"{verdict}, {CONDITION if contains_condition_signal(ask) else ask}"
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id and not i.get("deleted")), None)
     if item is None:

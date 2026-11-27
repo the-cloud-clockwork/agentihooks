@@ -23,7 +23,7 @@ SENT_AT = 1_000_000
 @pytest.fixture
 def repo(tmp_path):
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repository.create("ledger", CONTENT)
+    repository.create("ledger", CONTENT, "swarm")
     return repository
 
 
@@ -115,7 +115,7 @@ def test_a_mark_table_without_the_sent_time_gains_it_and_its_old_marks_count_as_
         legacy.execute("CREATE TABLE outbox_sent (id TEXT PRIMARY KEY)")
         legacy.execute("INSERT INTO outbox_sent VALUES ('old')")
     repository = SQLiteLedgerRepository(path)
-    repository.create("ledger", CONTENT)
+    repository.create("ledger", CONTENT, "swarm")
     assert marks(repository) == [("old", 0)]
     created = rows(repository)
     outbox.relay(repository, bus.events, clock=lambda: SENT_AT)

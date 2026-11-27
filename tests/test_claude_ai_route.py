@@ -517,11 +517,11 @@ def test_an_expired_front_door_login_falls_back_to_a_quota_token_route(rendered,
 
     tokens = []
     monkeypatch.setattr(claude_ai, "_front", expired)
-    monkeypatch.setattr(login, "launch_token", lambda *args: tokens.append(args))
+    monkeypatch.setattr(login, "launch_token", lambda *args, **kwargs: tokens.append((args, kwargs)))
     environ = _front_door(rendered)
     args = ["--name", "master 1 · rig", "--remote-control", "master 1 · rig"]
     claude_ai.launch_claude("/opt/claude", args, environ, "/run/route")
-    assert tokens == [("/opt/claude", args, environ, "/run/route")]
+    assert tokens == [(("/opt/claude", args, environ, "/run/route"), {"forced": False})]
     assert executed == []
     assert capsys.readouterr() == ("", f"[agenti] claude ai login refused: {native_login.EXPIRED}\n")
 
@@ -537,3 +537,103 @@ def test_a_refused_login_outside_the_front_door_still_fails_the_route(rendered, 
     with pytest.raises(RoutingError) as raised:
         claude_ai.launch_claude("/opt/claude", ["--name", "master 2 · rig"], _front_door(rendered), "")
     assert str(raised.value) == native_login.EXPIRED
+
+
+FORCED = "--agentihooks-forced"
+FLOOR_HELD = (
+    "every stored master claude ai login is held by a live master (nestor_coltatgmail_com reserved at 2% of the week "
+    "left): add one with agentihooks claude login --master"
+)
+
+
+def _at_the_master_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    monkeypatch.setattr(master_logins, "week_left", lambda *_: 2.0)
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_front_door_launch_at_the_master_floor_starts_on_the_token_fallback(
+    rendered: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    executed: list[tuple[str, list[str], dict[str, str]]],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+
+    _at_the_master_floor(monkeypatch)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", dict)
+    picked: list[dict[str, object]] = []
+    closed = [
+        router.ProbeResult(account, "ok", "CLOSED", margin, router.QuotaWindow(), router.QuotaWindow(used))
+        for account, margin, used in (("spentatexample_com", 1.0, 99.0), ("workeratexample_com", 3.0, 97.0))
+    ]
+
+    def master(environ: dict[str, str], **options: object) -> router.RouteDecision:
+        picked.append(options)
+        raise router.RoutingError("no Claude account has a free session under its quota band", closed)
+
+    monkeypatch.setattr(router, "select_master_credential", master)
+    report = tmp_path / "route"
+    environ = {
+        **_front_door(rendered),
+        "AH_CC_TOKEN_spentatexample_com": "spent",
+        "AH_CC_TOKEN_workeratexample_com": "routed",
+    }
+    claude_ai.launch_claude("/opt/claude", [FORCED, "--name", "master 1 · rig"], environ, str(report))
+    assert picked == [{"claude_bin": "/opt/claude", "sessions": {}, "exclude": (router.API_ACCOUNT,)}]
+    assert report.read_text().splitlines() == [
+        "status=routed",
+        "account=workeratexample_com",
+        "placement=fallback",
+        "remote_control=off",
+    ]
+    binary, argv, env = executed[0]
+    assert (binary, FORCED in argv, env["CLAUDE_CODE_OAUTH_TOKEN"]) == ("/opt/claude", False, "routed")
+    assert argv[-2:] == ["--name", "master 1 · rig"]
+    out, err = capsys.readouterr()
+    assert out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
+    assert f"[agenti] claude ai login refused: {FLOOR_HELD}" in err.splitlines()
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_launch_hands_the_token_fallback_a_forced_start_without_the_flag(
+    rendered: Path, monkeypatch: pytest.MonkeyPatch, executed: list[tuple[str, list[str], dict[str, str]]]
+) -> None:
+    _at_the_master_floor(monkeypatch)
+    tokens: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(login, "launch_token", lambda *args, **kwargs: tokens.append((args, kwargs)))
+    environ = _front_door(rendered)
+    claude_ai.launch_claude("/opt/claude", ["--name", "master 1 · rig", FORCED], environ, "/run/route")
+    assert tokens == [(("/opt/claude", ["--name", "master 1 · rig"], environ, "/run/route"), {"forced": True})]
+    assert executed == []
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_launch_outside_the_front_door_also_takes_the_token_fallback(
+    rendered: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def spent(environ: dict[str, str], cwd: Path) -> None:
+        raise login.LoginRefused("no usable claude ai login: spent")
+
+    tokens: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(claude_ai, "prepare", spent)
+    monkeypatch.setattr(login, "launch_token", lambda *args, **kwargs: tokens.append((args, kwargs)))
+    environ = _front_door(rendered)
+    claude_ai.launch_claude("/opt/claude", [FORCED, "--name", "master 2 · rig"], environ, "")
+    assert tokens == [(("/opt/claude", ["--name", "master 2 · rig"], environ, ""), {"forced": True})]
+
+
+@pytest.mark.feature("forced-master-start")
+def test_an_unforced_front_door_launch_at_the_master_floor_still_fails_the_route(
+    rendered: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.claude_quota_balancer import RoutingError
+
+    _at_the_master_floor(monkeypatch)
+    monkeypatch.setattr(login, "launch_token", lambda *args, **kwargs: pytest.fail("token fallback unforced"))
+    with pytest.raises(RoutingError) as raised:
+        claude_ai.launch_claude("/opt/claude", ["--name", "master 1 · rig"], _front_door(rendered), "")
+    assert str(raised.value) == FLOOR_HELD

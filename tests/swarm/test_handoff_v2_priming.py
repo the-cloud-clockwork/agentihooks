@@ -57,7 +57,7 @@ def test_a_legacy_recap_argument_cannot_replace_the_document_recap(
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
-def test_priming_reads_the_envelope_and_ranked_addresses_before_older_recaps(lane):  # noqa: F811
+def test_priming_reads_the_envelope_and_ranked_addresses_before_older_recaps(lane: str) -> None:
     handoff = """# Handoff v2
 ## Intent
 Finish the task.
@@ -87,11 +87,9 @@ Finish the task.
     }
     rendered = prompt.build("sw", "/repo", lane, "successor", task)
     envelope = rendered.index('"reason": "quota"')
-    document = rendered.index("# Handoff v2")
-    reading = rendered.index("Open each address in rank order")
-    first = rendered.index("workspace:t1/proof", reading)
-    second = rendered.index("ledger:sw/tasks/t1", reading)
-    assert envelope < document < reading < first < second < rendered.index("older recap contents")
+    assert envelope < rendered.index(prompt.SEAT_BRIEF)
+    assert handoff not in rendered
+    assert "workspace:t1/proof" not in rendered and "older recap contents" not in rendered
     assert "previous conversation" in rendered
 
 
@@ -118,18 +116,19 @@ def test_a_successor_spawn_receives_the_stored_envelope(
     store.put_agent("sw", replace(first, state="finished"))
     tick("sw", store, ledger, runtime, 2)
     primed = runtime.masters[-1][1] if lane == MASTER else runtime.tasks[-1]
-    assert primed["handoff_envelope"] == envelope
+    assert primed["handoff_envelope"] == {**envelope, "launch": {**envelope["launch"], "effort": "xhigh"}}
     assert store.handoff_envelope("sw", first.task) is None
 
 
-def test_take_master_renders_the_stored_envelope(taker, capsys):  # noqa: F811
+def test_take_master_renders_the_stored_envelope(taker: Any, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811
     swarm, _, _, _ = taker
     envelope = {"reason": "operator", "agent": "old master"}
     swarm.put_handoff("sw", MASTER, "master handoff", seat="master@sw", envelope=envelope)
     capsys.readouterr()
     assert run("sw", "take-master") == 0
     rendered = capsys.readouterr().out
-    assert rendered.index('"agent": "old master"') < rendered.index("master handoff")
+    assert rendered.index('"agent": "old master"') < rendered.index(prompt.SEAT_BRIEF)
+    assert "master handoff" not in rendered
     assert swarm.handoff_envelope("sw", MASTER) is None
 
 
@@ -214,12 +213,20 @@ def test_codex_master_handoff_next_uses_the_inbox_wait():
     assert task["transfer"]["next"] == action
 
 
-def test_claude_master_preserves_its_handoff_next():
+def test_claude_master_preserves_its_handoff_next() -> None:
     from scripts.swarm import prompt
 
     action = "Rearm a Monitor on the ledger and continue."
-    task = {"id": "master", "harness": "claude", "handoff": "# Handoff v2\n## Next\n" + action}
-    assert action in prompt.build_master("sw", "/repo", "master", task)
+    task = {
+        "id": "master",
+        "harness": "claude",
+        "seat": "master@sw",
+        "handoff": "# Handoff v2\n## Next\n" + action,
+        "transfer": {"id": "transfer", "next": action, "handoff": "saved handoff"},
+    }
+    text = prompt.build_master("sw", "/repo", "master", task)
+    assert f"confirm-handoff transfer --next '{action}'" in text
+    assert "saved handoff" not in text
 
 
 def test_codex_master_spawn_passes_its_harness_to_the_prompt(tmp_path):

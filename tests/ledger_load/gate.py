@@ -408,12 +408,14 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
 
 
-def sample_cpu(pid: int, deadline: float, results: dict) -> None:
+def sample_cpu(pids: list[int], deadline: float, results: dict) -> None:
+    """Each second until the deadline, the CPU seconds, threads and RSS of every ledger server process, summed."""
     try:
         while True:
             at = time.monotonic()
-            results["cpu"].append((at, cpu_seconds(pid)))
-            results["resources"].append((at, *server_resources(pid)))
+            results["cpu"].append((at, sum(cpu_seconds(pid) for pid in pids)))
+            threads, rss = zip(*(server_resources(pid) for pid in pids))
+            results["resources"].append((at, sum(threads), sum(rss)))
             if at >= deadline:
                 break
             time.sleep(1)
@@ -449,7 +451,7 @@ class Front(ResourceClient):
         return super().request(slug, path, payload)
 
 
-def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
+def load(write_port: int, read_port: int, token: str, pids: list[int], seconds: float) -> dict:
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
     results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
     apis = []
@@ -474,7 +476,7 @@ def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) 
         for n, (_, reader_client, _, _) in enumerate(apis)
     ]
     threads.append(threading.Thread(target=watcher, args=(read_base, {"X-Ledger-Token": token}, deadline, results)))
-    threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
+    threads.append(threading.Thread(target=sample_cpu, args=(pids, deadline, results)))
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -493,7 +495,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     with log_path.open("w") as log, read_log_path.open("w") as read_log:
         servers = start_servers(folder, write_port, read_port, log, read_log)
         try:
-            results = load(write_port, read_port, token, servers[0].pid, seconds)
+            results = load(write_port, read_port, token, [server.pid for server in servers], seconds)
         finally:
             for server in reversed(servers):
                 stop_server(server)

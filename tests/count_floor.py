@@ -705,6 +705,7 @@ def _admitted(
 
 
 _RETIREMENTS = "test-retirements"
+_DECIDING = ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")
 _SKIPPED = {".git", "__pycache__"}
 
 
@@ -783,8 +784,8 @@ def _signed(ruling: object) -> bool:
     )
 
 
-def retirements(base: Path, head: Path) -> dict[str, str]:
-    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to that reader."""
+def _new_retirements(base: Path, head: Path) -> dict[str, str]:
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it."""
     retired = {}
     if (head / _RETIREMENTS).is_symlink():
         print(f"{_RETIREMENTS} is a symbolic link, so it admits nothing")
@@ -807,6 +808,95 @@ def retirements(base: Path, head: Path) -> dict[str, str]:
             continue
         retired[entry[0]] = entry[1]["reader"]
     return retired
+
+
+def _reviewed(base: Path, retired: dict[str, str]) -> dict[str, str]:
+    """Keep the retirements a code owner approved while TEST_COUNT_REVIEWED_HEAD names the pull request head, and
+    all of them while it names none."""
+    reviewed = os.environ.get("TEST_COUNT_REVIEWED_HEAD")
+    reviews = Path(os.environ.get("TEST_COUNT_REVIEWS", ""))
+    return _approved(base, retired, reviews, reviewed) if reviewed and retired else retired
+
+
+def retirements(base: Path, head: Path) -> dict[str, str]:
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it.
+
+    While TEST_COUNT_REVIEWED_HEAD names the pull request head, only the retirements a code owner approved are kept.
+    """
+    return _reviewed(base, _new_retirements(base, head))
+
+
+def hold_approvals(base: Path, head: Path) -> int:
+    """Fail when the reviewed pull request head newly retires a test under a ruling no code owner approved."""
+    retired = _new_retirements(base, head)
+    refused = sorted(set(retired) - set(_reviewed(base, retired)))
+    for nodeid in refused:
+        print(f"::error::{nodeid} is retired without a code owner's approval of the pull request head.")
+    return 1 if refused else 0
+
+
+def code_owners(root: Path, path: str) -> list[str]:
+    """Return the owners named by the last rule of the tree's CODEOWNERS that matches a repository path.
+
+    Rules are read as anchored paths with a star inside one segment and a trailing slash for a folder; one rule
+    outside that grammar leaves every path without a known owner.
+    """
+    rules = root / ".github" / "CODEOWNERS"
+    owners: list[str] = []
+    for line in rules.read_text().splitlines() if rules.is_file() else []:
+        pattern, *named = line.split() or ["#"]
+        if pattern.startswith("#"):
+            continue
+        folder = pattern.endswith("/")
+        if (
+            not pattern.startswith("/")
+            or any(mark in pattern for mark in ("**", "?", "[", "!", "\\"))
+            or (not folder and (root / pattern.strip("/")).is_dir())
+        ):
+            print(f"CODEOWNERS rule {pattern} is outside the grammar the floor matches, so no code owner is known")
+            return []
+        body = re.escape(pattern.strip("/")).replace(r"\*", "[^/]*") + ("/.*" if folder else "")
+        if re.fullmatch(body, path):
+            owners = named
+    return owners
+
+
+def approvers(reviews: Path, commit: str) -> set[str]:
+    """Return each reviewer, as a lower case @login, whose last deciding review is an approval of the commit.
+
+    Approvals, change requests and dismissals decide; a comment leaves the previous decision standing.
+    """
+    deciding = {}
+    try:
+        for line in reviews.read_text().splitlines():
+            review = json.loads(line)
+            if isinstance(review.get("user"), str) and review.get("state") in _DECIDING:
+                deciding[review["user"].lower()] = review
+    except (OSError, ValueError, AttributeError):
+        print("The pull request reviews could not be read, so no retirement is admitted")
+        return set()
+    return {
+        f"@{user}"
+        for user, review in deciding.items()
+        if review["state"] == "APPROVED" and review.get("commit_id") == commit
+    }
+
+
+def _approved(base: Path, retired: dict[str, str], reviews: Path, commit: str) -> dict[str, str]:
+    """Keep each retirement a code owner of its file approved on the commit, naming that owner beside its reader."""
+    approved = approvers(reviews, commit)
+    kept = {}
+    for nodeid, reader in retired.items():
+        name = retirement_path(base, nodeid).relative_to(base).as_posix()
+        owners = code_owners(base, name)
+        if approving := [owner for owner in owners if owner.lower() in approved]:
+            kept[nodeid] = f"{reader} and approved by {approving[0]}"
+        else:
+            print(
+                f"{name} is not approved on the pull request head by a code owner ({', '.join(owners) or 'none'}), "
+                "so it admits nothing"
+            )
+    return kept
 
 
 def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) -> int:
@@ -866,11 +956,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collected", type=Path, help="with --record, the head collection the floor already exported")
     parser.add_argument("--reader", default="", help="with --retire, the Standards reader who signs the ruling")
     parser.add_argument("--reason", default="", help="with --retire, why the removed behaviour needs no test")
+    parser.add_argument(
+        "--approvals",
+        action="store_true",
+        help="with --base, grade only that a code owner approved each new signed retirement, without collecting",
+    )
     args = parser.parse_args(argv)
+    if args.approvals and args.base is None:
+        parser.error("--approvals grades a head against a base, so it needs --base")
     if args.retire:
         return write_retirements(args.head, args.retire, args.reader, args.reason)
     if args.record:
         return write_record(args.head, args.tests, args.record, args.collected)
+    if args.approvals:
+        return hold_approvals(args.base, args.head)
     collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:

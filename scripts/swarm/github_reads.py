@@ -220,6 +220,22 @@ def location(repo: str) -> dict[str, Any]:
     return {"env": {**os.environ, "GH_REPO": repo}}
 
 
+def _signed(command: list[str], options: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    """Sign a gh call with the App token this process holds, so a process with the App key starts no token wrapper.
+
+    A process without the App key, or a call github_app_cli.signed leaves to the wrapper, keeps its command and options.
+    """
+    if os.environ.get("HIVE_GITHUB_AUTH_MODE") != "app" or "GITHUB_APP_PRIVATE_KEY" not in os.environ:
+        return command, options
+    from scripts import github_app_cli
+
+    base = options.get("env")
+    found = github_app_cli.signed(command, os.environ if base is None else base)
+    if found is None:
+        return command, options
+    return found[0], {**options, "env": found[1]}
+
+
 def rest(
     caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run, **options: Any
 ) -> subprocess.CompletedProcess[Any]:
@@ -228,14 +244,16 @@ def rest(
     path = gh_audit.endpoint(_github.command(args)) if args[0] == "api" else None
     if path is None:
         with pool.limit("github"):
-            return run(_github.command(args), **options)
+            signed, settings = _signed(_github.command(args), options)
+            return run(signed, **settings)
     endpoint = next(word for word in args[1:] if word.split("?")[0].removeprefix("/") == path)
     paginate = "--paginate" in args
     include = "--include" in args or "-i" in args
     command = _github.command(args if include or not paginate else [*args, "--include"])
     try:
         with gh_audit.uncharged(), pool.limit("github"):
-            result = run(command, **options)
+            signed, settings = _signed(command, options)
+            result = run(signed, **settings)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         if not _not_modified(exc.stdout):
             charge(caller, endpoint, time.time())

@@ -188,3 +188,62 @@ events = loop.verdicts(store, "rig-grade-swarm-doctor").events(since, until, swa
 | `doctor: no Doctor watches <slug>; start one with ...` | The slug names neither a Doctor nor a ledger it watches | Use the watched ledger or its `-doctor` ledger |
 | `event_count` is 0 while `latest_count` is above 0 | The verdicts were written by Doctor code from before pull request 6825 | Check that the Doctor's checkout contains pull request 6825, and count only windows that start after collection began |
 | `event_count` is below `latest_count` | The window starts before collection began | Start the window after the application time |
+
+## Lab health findings
+
+The Doctor judges the CI lab like any other finding. Two detectors read it on
+every Doctor pass:
+
+- `lab` reads the lab block the tick stores from the lab's `/capacity`
+  answer, the same block `agentihooks swarm <slug> status --json` shows.
+- `lab gate` compares the lab with GitHub Actions for each gate that the
+  watched swarm checkout's `delivery.yaml` lists under `lab.authoritative`.
+  That checkout is the swarm's primary `dev` checkout, which `wt.sh done`
+  fast forwards after every merge, so the list is dev's as last pulled.
+  It makes no GitHub call while that list is empty. With a gate listed, one
+  pass reads the newest ten distinct heads of completed pull request Tests
+  runs and the check runs of each of those heads once, whatever the number
+  of listed gates: one page of runs and one or two pages of check runs a
+  head, 11 to 21 reads on usual heads.
+
+| Finding id | Raised when | Measure |
+|---|---|---|
+| `lab-unreachable/<swarm>` | The last capacity read failed. No other lab finding is raised from that block. | Minutes since the last good read, or since the failure when no read ever succeeded |
+| `lab-behind/<swarm>` | A reading under ten minutes old predicts pull request grading more than `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (20) minutes behind, the same limit that holds eng claims | Minutes behind |
+| `lab-cache-hit-ratio/<class>` | A reading under ten minutes old gives the class a verdict cache hit ratio below `AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR` (0.6). A class with no lookups has no ratio and is skipped | Hit ratio in percent |
+| `lab-gate-mismatch/<gate>` | An authoritative gate disagrees with GitHub Actions on any of the newest ten pull request heads. The window is those ten heads whatever they hold; a head counts only when it holds both verdicts | Mismatches |
+
+The floor must be a fraction from 0 to 1; any other value falls back to 0.6.
+The `lab gate` detector takes lab verdicts only from the GitHub App that
+`AGENTIHOOKS_LAB_APP` names. While a gate is authoritative and that variable
+is unset, the detector fails, so the mismatch count reads as unknown rather
+than zero.
+
+The lab verdict of a listed gate is the newest check run of that App named
+`lab/<gate>`, the name the lab posts under authority, or `lab-shadow/<gate>`.
+The Actions verdict is the gate's job on the same head. On a pull request the
+Tests workflow skips the Actions job of a listed gate, and a skipped job is
+no verdict, so such a head counts no mismatch: the detector reports the heads
+that still hold both, which are dispatched runs, runs under the kill switch
+and heads from before the gate was listed. The acceptance report command
+`python -m scripts.ci_lab shadow report --gate` is a different read: it walks
+back until its window of heads with an Actions verdict is full and reads only
+`lab-shadow/<gate>`, so do not run it on a listed gate to reproduce this
+finding.
+
+Run the detectors once and print what they find now:
+
+```bash
+agentihooks doctor <slug> findings --detector lab --detector "lab gate" --json
+```
+
+`findings` runs on any swarm ledger, with or without a Doctor. Without
+`--detector` it runs every detector except the trace read. Each finding
+prints with its `id` and `measure`. A detector that fails prints a line on
+stderr, and the command still exits 0.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `the lab gate detector failed: ValueError: AGENTIHOOKS_LAB_APP names no lab App, ...` | A gate is authoritative and the Doctor's environment does not name the lab App | Set `AGENTIHOOKS_LAB_APP` to the lab App slug in the Doctor's environment |
+| `doctor: no detector <name>; the detectors are ...` | A `--detector` value is not a detector name | Use one of the names listed |
+| No `lab` findings while the lab is down | The swarm has no `lab_url`, so the tick never reads capacity | Set the swarm's `lab_url`, then wait for a tick |

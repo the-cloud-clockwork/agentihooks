@@ -1,0 +1,6 @@
+{
+  "hooks/context/gate_import.py:hooks.context.gate_import.x_report:1285e1cdab778dcf41826f216a6f0ed0cf0bad90845d7f2fa9823387d74ccf3f": {
+    "reader": "standards-reader",
+    "reason": "For absent or false stderr, both the empty string and XXXX fail the import-error and launcher regexes. import_failure returns None, report skips reading the condition and returns without emitting rows or alerts. Nonempty stderr remains unchanged."
+  }
+}

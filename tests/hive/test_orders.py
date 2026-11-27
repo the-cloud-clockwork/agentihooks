@@ -2,7 +2,8 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -812,13 +813,19 @@ def test_an_order_for_another_hive_does_not_hold_back_the_rest_of_the_batch(setu
     ],
 )
 def test_launch_keeps_lane_settings_and_selected_assignment(
-    setup, agent_model, agent_effort, lane_model, expected_model, expected_effort
-):
+    setup: SimpleNamespace,
+    agent_model: str,
+    agent_effort: str,
+    lane_model: str,
+    expected_model: str,
+    expected_effort: str,
+) -> None:
     agent = replace(setup.agent, model=agent_model, effort=agent_effort)
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
     lane = {**config.lanes.get("eng", {}), "model": lane_model, "setting": "retained"}
-    setup.store.update("fixture", lanes={**config.lanes, "eng": lane})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": lane_model}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": lane})
     setup.consumer.apply(setup.order)
     request = setup.runtime.spawn.call_args.args[0]
     assert request.config.lanes["eng"] == {**lane, "agent": "codex", "role": "engineer"}
@@ -830,6 +837,42 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
         "effort": expected_effort,
         "overlays": [],
     }
+
+
+@pytest.mark.feature("review-lane-spawn")
+def test_a_hive_order_launches_a_review_seat_with_the_reviewer_profile(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import carried
+    from scripts.swarm.store import AgentRecord
+
+    agent = setup.store.start_execution(
+        "fixture",
+        AgentRecord(
+            setup.store.next_name("fixture", "review"),
+            "review",
+            "review-task",
+            seat="review-1@fixture",
+            state="launching",
+            harness="codex",
+            profile="reviewer",
+            account="account",
+            hive="host",
+            runtime_target={"host_id": "host"},
+        ),
+    )
+    setup.redis.set("review-prompt", json.dumps(carried("fixture", {"id": "review-task"}, "opening")))
+    order = replace(
+        setup.order,
+        execution_id=agent.execution_id,
+        generation=agent.generation,
+        profile="reviewer",
+        lane="review",
+        task="review-task",
+        prompt_ref="review-prompt",
+    )
+    setup.consumer.apply(order)
+    request = setup.runtime.spawn.call_args.args[0]
+    assert (request.lane, request.config.lanes["review"]["role"]) == ("review", "reviewer")
+    assert request.task["launch_assignment"]["profile"] == "reviewer"
 
 
 @pytest.mark.feature("launch-model-suits-harness")
@@ -847,7 +890,8 @@ def test_a_hive_order_never_launches_the_other_harness_lane_model(
     agent = replace(setup.agent, harness=harness, model="", effort="")
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
-    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": lane_model}})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": lane_model}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": lane_model}})
     setup.consumer.apply(replace(setup.order, harness=harness))
     assignment = setup.runtime.spawn.call_args.args[0].task["launch_assignment"]
     assert (assignment["harness"], assignment["model"]) == (harness, getattr(config, field))
@@ -858,7 +902,8 @@ def test_a_hive_order_keeps_a_lane_model_its_harness_runs(setup: SimpleNamespace
     agent = replace(setup.agent, harness="claude", model="", effort="")
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
-    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": "fable"}})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": "fable"}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": "fable"}})
     setup.consumer.apply(replace(setup.order, harness="claude"))
     assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["model"] == "fable"
 
@@ -1013,3 +1058,141 @@ def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch)
     ack = setup.consumer.launch(order, agent, {"id": order.task})
     assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["account"] == slot
     assert ack.status == "live"
+
+
+@pytest.fixture
+def failed_master(setup: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    from scripts import master_claude_login
+    from scripts.hive.orders import Consumer, carried
+    from scripts.swarm import commands, runtime
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import SpawnError
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    agent = setup.store.start_execution(
+        "fixture",
+        AgentRecord(
+            setup.store.next_name("fixture", "master"),
+            "master",
+            "master",
+            seat="master@fixture",
+            state="launching",
+            harness="claude",
+            profile="master",
+            account="account",
+            hive="host",
+            runtime_target={"host_id": "host"},
+        ),
+    )
+    order = replace(
+        setup.order,
+        execution_id=agent.execution_id,
+        generation=agent.generation,
+        profile="master",
+        lane="master",
+        task="master",
+        harness="claude",
+    )
+    setup.redis.set("prompt", json.dumps(carried("fixture", {"id": "master"}, "master opening")))
+    state = SimpleNamespace(open=True, owner=agent.name, refused=False, closed=[])
+    pane = "w5M:p3VA"
+
+    def pane_command(argv: list[str]) -> dict[str, Any]:
+        if argv == ["agent", "get", pane]:
+            if not state.open:
+                raise RuntimeError("pane not found")
+            return {"name": state.owner}
+        assert argv == ["pane", "close", pane]
+        assert setup.orders.ack(order) is None
+        if state.refused:
+            raise RuntimeError("pane close refused")
+        state.open = False
+        state.closed.append(pane)
+        return {}
+
+    herdr = runtime.HerdrRuntime(home=tmp_path, herdr=pane_command)
+    monkeypatch.setattr(
+        herdr, "spawn", Mock(side_effect=SpawnError("exited before canary", pane_id=pane, harness="claude"))
+    )
+    monkeypatch.setattr(herdr, "end", Mock(return_value=SimpleNamespace(refusal="", process=0)))
+    monkeypatch.setattr(herdr, "live_names", Mock(return_value=set()))
+    monkeypatch.setattr(runtime, "_pane_process", Mock(return_value=None))
+    monkeypatch.setattr(commands, "hive_id", Mock(return_value="host"))
+    monkeypatch.setattr(master_claude_login, "unusable", Mock(return_value=""))
+    adapter = LocalHerdrRuntime(herdr)
+    consumer = Consumer(setup.redis, "host", adapter)
+    return SimpleNamespace(
+        setup=setup, agent=agent, order=order, state=state, pane=pane, herdr=herdr, adapter=adapter, consumer=consumer
+    )
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+def test_a_failed_master_launch_closes_its_shell_before_acknowledging(failed_master: Any) -> None:
+    launch = failed_master
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.state.closed == ["w5M:p3VA"]
+    assert launch.state.open is False
+    ack = launch.setup.orders.ack(launch.order)
+    assert ack.status == "failed"
+    assert ack.failure == "refused: exited before canary"
+    assert ack.target == {"host_id": "host"}
+    assert ack.execution == {"pane_id": "w5M:p3VA"}
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.setup.orders.ack(launch.order) == ack
+    assert launch.herdr.spawn.call_count == 1
+    assert launch.state.closed == ["w5M:p3VA"]
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+def test_a_failed_master_without_a_pane_keeps_its_failure(failed_master: Any) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    launch = failed_master
+    launch.herdr.spawn.side_effect = SpawnError("exited before canary", harness="claude")
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    ack = launch.setup.orders.ack(launch.order)
+    assert (ack.status, ack.failure, ack.target, ack.execution) == ("failed", "refused: exited before canary", {}, {})
+    assert launch.state.closed == []
+    assert launch.herdr.spawn.call_count == 1
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+@pytest.mark.parametrize("blocker", ["foreign", "refused", "raised"])
+def test_failed_master_cleanup_retries_after_restart_and_expiry_without_spawning(
+    failed_master: Any, monkeypatch: pytest.MonkeyPatch, blocker: str
+) -> None:
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
+
+    launch = failed_master
+    terminate = launch.adapter.terminate
+    if blocker == "foreign":
+        launch.state.owner = "a-successor"
+    elif blocker == "refused":
+        launch.state.refused = True
+    else:
+        monkeypatch.setattr(launch.adapter, "terminate", Mock(side_effect=RuntimeError("cleanup unavailable")))
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.setup.orders.ack(launch.order) is None
+    assert launch.state.open is True
+    assert launch.state.closed == []
+    assert launch.herdr.spawn.call_count == 1
+    launch.state.owner = launch.agent.name
+    launch.state.refused = False
+    monkeypatch.setattr(launch.adapter, "terminate", terminate)
+    monkeypatch.setattr(lease, "now_ms", Mock(return_value=launch.order.expires_at + 1))
+    restarted = Consumer(launch.setup.redis, "host", launch.adapter, pod="replacement-pod")
+    restarted.poll()
+    assert launch.state.closed == ["w5M:p3VA"]
+    ack = launch.setup.orders.ack(launch.order)
+    assert (ack.status, ack.failure, ack.target, ack.execution) == (
+        "failed",
+        "refused: exited before canary",
+        {"host_id": "host"},
+        {"pane_id": "w5M:p3VA"},
+    )
+    assert launch.herdr.spawn.call_count == 1

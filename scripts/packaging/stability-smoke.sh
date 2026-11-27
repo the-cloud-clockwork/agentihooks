@@ -14,7 +14,7 @@ compose=(docker compose -f compose.yaml -f "$override")
 cleanup() {
   docker rm -f "$run-member" >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 
@@ -30,6 +30,9 @@ services:
       LEDGER_TLS_KEY: /tls/key.pem
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('https://127.0.0.1:8765/healthz', timeout=2).read()"]
+  front:
+    environment:
+      SWARM_LEDGER_SCHEME: https
 YAML
 chmod 0755 "$tls"
 chmod 0644 "$tls"/*.pem "$override"
@@ -61,6 +64,20 @@ create(slug, {"title": "Stability proof", "phases": [{"title": "Hold every stabi
 store.create(SwarmConfig(slug, "/data", 2, 0, state="paused"))
 print(f"created swarm {slug} with its ledger")
 PY
+if ! python3 - "$slug" <<'PY'
+import os
+import sys
+import urllib.request
+
+base, slug = f"http://127.0.0.1:{os.environ['SWARM_PORT']}", sys.argv[1]
+for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):
+    with urllib.request.urlopen(base + route, timeout=5) as response:
+        print(f"GET {route} through the front: {response.status}, {len(response.read())} bytes")
+PY
+then
+  "${compose[@]}" logs --tail 40 front swarm >&2 || true
+  exit 1
+fi
 
 docker run -d --name "$run-member" --network "${run}_default" -v "$tls/ca.pem:/tls/ca.pem:ro" \
   -v "${run}_swarm-data:/data" -e LEDGER_DIR=/data \
@@ -125,7 +142,7 @@ PY
 
 live=""
 live_row="$member_id"$'\t'live$'\t'
-for _ in $(seq 60); do
+for _ in {1..60}; do
   live="$(docker exec "$run-member" agentihooks hive list 2>/dev/null || true)"
   if [[ $live == *"$live_row"* ]]; then
     break

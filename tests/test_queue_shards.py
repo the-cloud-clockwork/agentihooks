@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.shard_sizing import SLOWDOWN
 from tests import refresh_durations
-from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+from tests.queue_shards import STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -154,7 +155,7 @@ def test_a_single_test_that_cannot_fit_reports_the_queue_budget(tmp_path, capsys
         assert "::warning::" in capsys.readouterr().out
 
 
-def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
+def test_the_unit_command_uses_the_computed_queue_partition(tmp_path: Path) -> None:
     import os
     import subprocess
     from pathlib import Path
@@ -182,7 +183,8 @@ def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
     args = json.loads((tmp_path / "args.json").read_text())
     assert args[args.index("--shard") + 1] == "7/48"
     assert workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] == (
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}"
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312)"
+        ' || needs.split.outputs.source != \'\' && \'[{"python-version":"3.12","shard":"copy"}]\' || \'[]\') }}'
     )
 
 
@@ -448,7 +450,7 @@ def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
         main(["combine", "--plans", json.dumps(plan)[1:-1]])
 
 
-def test_merge_group_runs_unit_shards_on_python_312_only():
+def test_merge_group_runs_unit_shards_on_python_312_only() -> None:
     from pathlib import Path
 
     import yaml
@@ -457,8 +459,12 @@ def test_merge_group_runs_unit_shards_on_python_312_only():
     legs = workflow["jobs"]["unit"]["strategy"]["matrix"]
     assert legs["python-version"] == ["3.12"]
     queue_only = "${{ github.event_name == 'merge_group' && '3.12' || '' }}"
-    assert {entry["python-version"] for entry in legs["exclude"]} == {queue_only}
-    assert [entry["shard"] for entry in legs["exclude"]] == legs["shard"][12:]
+    floor = [entry for entry in legs["exclude"] if "shard" in entry]
+    assert {entry["python-version"] for entry in floor} == {queue_only}
+    assert [entry["shard"] for entry in floor] == legs["shard"][12:]
+    assert [entry for entry in legs["exclude"] if "shard" not in entry] == [
+        {"python-version": "${{ needs.split.outputs.source != '' && '3.12' || '' }}"}
+    ]
     shard_check = workflow["jobs"]["shard-check"]["strategy"]["matrix"]["python-version"]
     assert shard_check == ["3.12"]
 
@@ -567,9 +573,11 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
     import yaml
 
     root = Path(__file__).resolve().parents[1]
-    steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
+    steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["collect"]["steps"]
     runner = tmp_path / "runner"
-    (runner / "planner").mkdir(parents=True)
+    (runner / "planner/scripts").mkdir(parents=True)
+    (runner / "planner/scripts/__init__.py").write_text("")
+    (runner / "planner/scripts/dep_manifest.py").write_text((root / "scripts/dep_manifest.py").read_text())
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     common = "tests/test_common.py::test_common"
@@ -673,7 +681,7 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         step.get("name")
         for step in yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())[
             "jobs"
-        ]["test-count"]["steps"]
+        ]["collect"]["steps"]
     ]
     assert count.index("Deselect the reused tests") < count.index("Upload the early collection")
     sizing = next(step for step in steps if step.get("name") == "Size queue shards from median durations")

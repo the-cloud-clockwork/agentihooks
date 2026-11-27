@@ -63,6 +63,7 @@ def decide(root, changed, durations=None, limit=3):
         [".github/test-excludes.txt"],
         ["tests/__init__.py"],
         ["tests/shards.py"],
+        ["scripts/shard_sizing.py"],
         ["tests/flake_ledger.py"],
         ["tests/browser_coverage.py"],
         ["tests/node_capture.cjs"],
@@ -523,6 +524,64 @@ def test_a_markdown_change_skips_tests_that_glob_other_files(repo: Path) -> None
 def test_a_source_change_does_not_select_the_tests_that_glob_markdown(repo: Path) -> None:
     write(repo, {"tests/test_journal.py": "DOCS = sorted(ROOT.rglob('*.md'))\n"})
     assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
+CATALOGUE_TEST = "tests/test_docs_tick.py"
+CATALOGUE_IMPORTS = "from scripts.tick import catalogue, registry\n"
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_changed_tick_step_module_selects_the_catalogue_page_test(repo: Path) -> None:
+    write(
+        repo,
+        {
+            CATALOGUE_TEST: CATALOGUE_IMPORTS,
+            "scripts/tick/steps/report.py": "VALUE = 1\n",
+            "tests/tick/test_report.py": "import scripts.tick.steps.report\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/steps/report.py"]) == (
+        "selected",
+        [[CATALOGUE_TEST, "tests/tick/test_report.py"]],
+    )
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite(repo: Path) -> None:
+    write(repo, {CATALOGUE_TEST: CATALOGUE_IMPORTS, "scripts/tick/steps/lonely.py": "VALUE = 1\n"})
+    assert decide(repo, ["scripts/tick/steps/lonely.py"]) == ("full", [])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test(repo: Path) -> None:
+    write(
+        repo,
+        {
+            CATALOGUE_TEST: CATALOGUE_IMPORTS,
+            "scripts/tick/engine.py": "VALUE = 1\n",
+            "tests/tick/test_engine.py": "import scripts.tick.engine\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/engine.py"]) == ("selected", [["tests/tick/test_engine.py"]])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tree_without_the_catalogue_page_test_never_selects_it(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "scripts/tick/steps/report.py": "VALUE = 1\n",
+            "tests/tick/test_report.py": "import scripts.tick.steps.report\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/steps/report.py"]) == ("selected", [["tests/tick/test_report.py"]])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page-edit")
+def test_a_hand_edited_catalogue_page_selects_its_page_test(repo: Path) -> None:
+    source = Path(__file__).with_name("test_docs_tick.py").read_text()
+    write(repo, {CATALOGUE_TEST: source})
+    assert decide(repo, ["docs/reference/tick-step-catalogue.md"]) == ("selected", [[CATALOGUE_TEST]])
 
 
 @pytest.mark.parametrize("name", ["hooks/new.py", "scripts/static/new.js"])
@@ -1121,6 +1180,21 @@ def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_se
         "tests": {"tests/test_box.py::test_size": {"units": [0]}, "tests/test_other.py::test_other": {"units": []}},
     }
     assert ci_select.recorded_tests(manifest, ["hooks/sample.py"]) == {"tests/test_box.py"}
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file() -> None:
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [], "files": [], "outside": ["docs/a.md"]},
+            "tests/test_b.py::test_two": {"units": [], "files": ["docs/b.md"]},
+            "tests/test_c.py::test_three": {"units": []},
+        },
+    }
+    assert ci_select.recorded_tests(manifest, ["docs/a.md"]) == {"tests/test_a.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/b.md"]) == {"tests/test_b.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/other.md"]) == set()
 
 
 def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):

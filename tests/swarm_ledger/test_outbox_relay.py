@@ -33,7 +33,7 @@ class CrashAfterPublish:
 @pytest.fixture
 def repo(tmp_path):
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repository.create("ledger", CONTENT)
+    repository.create("ledger", CONTENT, "swarm")
     return repository
 
 
@@ -85,7 +85,7 @@ def test_the_relay_takes_at_most_one_batch_of_rows_in_revision_order(repo, bus):
 def test_the_default_batch_is_one_hundred_rows(tmp_path, bus):
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     tasks = [{"title": f"task {number}", "phase": "p1", "lane": "eng"} for number in range(101)]
-    repository.create("ledger", {**CONTENT, "tasks": tasks})
+    repository.create("ledger", {**CONTENT, "tasks": tasks}, "swarm")
     assert len(rows(repository)) == 102
     assert outbox.relay(repository, bus.events) == 100
     assert outbox.relay(repository, bus.events) == 2

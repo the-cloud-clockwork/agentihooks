@@ -424,6 +424,76 @@ def test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_que
     assert sorted(entered) == [str(n).encode() for n in range(8)]
 
 
+@pytest.mark.feature("hub-slot-request-queue-timing")
+def test_every_slot_request_reports_queue_wait_and_shared_running_handlers(
+    hub: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    queued: list[tuple[Any, ...]] = []
+    entered = threading.Event()
+    release = threading.Event()
+    handled: list[bytes] = []
+
+    def held(subject: str, data: bytes) -> bytes:
+        entered.set()
+        assert release.wait(5)
+        return data
+
+    def slot(subject: str, data: bytes) -> bytes:
+        handled.append(data)
+        if data == b"fail":
+            raise ValueError("handler failed")
+        return data
+
+    with monkeypatch.context() as patch:
+        patch.setattr(hub, "_nc", SimpleNamespace(max_payload=100, subscribe=AsyncMock(), flush=AsyncMock()))
+        patch.setattr(hub, "_loop", SimpleNamespace(run=asyncio.run))
+        patch.setattr(hub, "_serving", SimpleNamespace(submit=lambda *call: queued.append(call)))
+        patch.setattr(nats, "time", SimpleNamespace(monotonic_ns=lambda: 20_000_000_000))
+        hub.serve("exits.rig.m1", "exits", held)
+        exit_callback = hub._nc.subscribe.await_args.kwargs["cb"]
+        hub.serve("slots.rig.m1", "slots", slot, wait_ms=10000)
+        slot_callback = hub._nc.subscribe.await_args.kwargs["cb"]
+        message = SimpleNamespace(subject="exits.rig.m1", data=b"exit", reply="r", respond=AsyncMock())
+        asyncio.run(exit_callback(message))
+        answer_exit, exit_message, received = queued.pop()
+        assert received == 20_000_000_000
+        thread = threading.Thread(target=answer_exit, args=(exit_message, received))
+        thread.start()
+        try:
+            assert entered.wait(5)
+            message = SimpleNamespace(subject="slots.rig.m1", data=b"slot", reply="r", respond=AsyncMock())
+            asyncio.run(slot_callback(message))
+            answer_slot, slot_message, received = queued.pop()
+            assert received == 20_000_000_000
+            answer_slot(slot_message, 19_250_000_000)
+            slot_message.respond.assert_awaited_once_with(b"slot")
+        finally:
+            release.set()
+            thread.join(5)
+        assert not thread.is_alive()
+        failed = SimpleNamespace(subject="slots.rig.m1", data=b"fail", reply="r", respond=AsyncMock())
+        answer_slot(failed, 19_998_000_000)
+        failed.respond.assert_not_awaited()
+        expired = SimpleNamespace(subject="slots.rig.m1", data=b"expired", reply="r", respond=AsyncMock())
+        answer_slot(expired, 10_000_000_000)
+        expired.respond.assert_not_awaited()
+        answer_slot(slot_message, 19_999_000_000)
+    assert handled == [b"slot", b"fail", b"slot"]
+    records = [line for line in capsys.readouterr().err.splitlines() if line.startswith("bus: serve ")]
+    assert records == [
+        "bus: serve subject=exits.rig.m1 waited_ms=0 running=1 workers=8",
+        "bus: serve subject=slots.rig.m1 waited_ms=750 running=2 workers=8",
+        "bus: serve subject=slots.rig.m1 waited_ms=2 running=1 workers=8",
+        "bus: serve subject=slots.rig.m1 waited_ms=10000 running=1 workers=8",
+        "bus: serve subject=slots.rig.m1 waited_ms=1 running=1 workers=8",
+    ]
+
+
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
     client = member(signer)
     try:

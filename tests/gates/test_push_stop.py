@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
@@ -113,10 +113,10 @@ def test_it_is_a_stop_gate_that_ships_enforcing():
     assert not gate.matches(Call("Bash"))
 
 
-def test_the_template_is_the_operator_text():
+def test_the_template_is_the_operator_text() -> None:
     assert TEMPLATE == (
         "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull "
-        "request. If not, update the issue and the pull request and record progress on the ledger."
+        "request. If not, update the issue and the pull request and record progress through the swarm API."
     )
 
 
@@ -705,7 +705,7 @@ def gone(pid):
         try:
             if "State:\tZ" in status.read_text():
                 return True
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         time.sleep(0.05)
     return False
@@ -1164,7 +1164,18 @@ def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refu
 def panic_on(rig: SimpleNamespace) -> None:
     from scripts.swarm import panic
 
-    panic.engage(rig.store, "test", False, (), NOW)
+    panic.engage(rig.store, SLUG, "test", False, (), NOW)
+
+
+@pytest.mark.feature("panic-holds-only-its-swarm")
+def test_another_swarms_panic_leaves_the_stop_hook_pushing(rig: SimpleNamespace) -> None:
+    from scripts.swarm import panic
+
+    panic.engage(rig.store, f"{SLUG}-other", "test", False, (), NOW)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
 
 
 def test_fleet_panic_keeps_the_stop_hook_from_pushing_and_names_panic(rig: SimpleNamespace) -> None:
@@ -1210,7 +1221,7 @@ def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
 
     from scripts.swarm import panic
 
-    def broken(store: object) -> NoReturn:
+    def broken(store: object, slug: str) -> NoReturn:
         raise RedisError("down")
 
     monkeypatch.setattr(panic, "state", broken)
@@ -1280,3 +1291,13 @@ def test_running_checks_on_a_pull_request_in_another_repo_still_demand_the_push(
     rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
     rig.gate._github = lambda url: running_pull()
     assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_stop_with_uncommitted_work(rig: Any, monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
+    monkeypatch.setattr("scripts.gates.push_stop.lane_of", lambda name: lane)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop(Who(name=ME, swarm=SLUG, lane=lane, task="t1"))
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)

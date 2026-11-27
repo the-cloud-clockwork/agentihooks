@@ -231,6 +231,7 @@ def _faked_bus(monkeypatch: pytest.MonkeyPatch, config: BusConfig) -> tuple[nats
         stream_info=AsyncMock(side_effect=nats.NotFoundError()),
         streams_info=AsyncMock(return_value=[]),
         add_stream=AsyncMock(),
+        add_consumer=AsyncMock(),
         create_key_value=AsyncMock(),
         key_value=AsyncMock(),
     )

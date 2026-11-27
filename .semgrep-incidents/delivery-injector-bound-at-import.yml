@@ -1,0 +1,16 @@
+rules:
+  - id: delivery-injector-bound-at-import
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Resolve the common context injector when the delivery summary runs. A module-level import can retain a
+      temporary injector replacement and silently drop the delivery requirements from later SessionStart calls.
+    paths:
+      include:
+        - /hooks/context/delivery_requirements.py
+        - delivery-injector-bound-at-import.py
+    patterns:
+      - pattern: from hooks.common import inject_context
+      - pattern-not-inside: |
+          def $FUNCTION(...):
+              ...

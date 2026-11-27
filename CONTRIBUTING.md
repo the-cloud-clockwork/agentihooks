@@ -55,7 +55,7 @@ The full list, all of which a harness must redirect before calling
 | `AGENTIHOOKS_ROOT` | the repo itself — used as `cwd` for `uv tool install/uninstall` |
 
 `AGENTIHOOKS_ROOT` is the sharp one: **every** `init` shells a real
-`uv tool install --editable --force .` gated only by it, and `uninstall_global`
+`uv tool install --editable --force .[nats]` gated only by it, and `uninstall_global`
 shells a real `uv tool uninstall`. Neither is gated by `CLAUDE_HOME`, so a
 harness that redirects only the CLAUDE paths still uninstalls the developer's
 CLI for real.
@@ -68,6 +68,13 @@ inside the function body, and `cmd_init_unified` calls it unconditionally. Patch
 The suite-wide autouse fixture in `tests/conftest.py` already does all of this and
 asserts nothing still resolves under the real home. Use it; don't hand-roll
 per-file isolation — that is exactly how the gap reopened twice.
+
+## Swarm task owners in tests
+
+Use the [admission seat helper](docs/reference/test-seat-helper.md) when a test
+needs an agent before exercising waits, pull request confirmation or another
+feature. The guide covers fixture imports, direct calls, launch options and
+the execution state supplied without starting the swarm or spawning a session.
 
 ## Environment variables in tests
 

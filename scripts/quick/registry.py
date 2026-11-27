@@ -5,7 +5,7 @@ import dataclasses
 import fcntl
 import json
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,9 @@ class Seat:
     name: str
     session_id: str = ""
     state: str = READY
+    auth: str = "routed"
+    account: str = ""
+    command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -51,8 +54,13 @@ def path(folder: Path) -> Path:
     return folder / FILE
 
 
+def _seat(data: Any) -> Seat:
+    found = Seat(**data)
+    return dataclasses.replace(found, command=tuple(found.command))
+
+
 def _decode(data: Any) -> Swarm:
-    seats = tuple(Seat(**seat) for seat in data["seats"])
+    seats = tuple(_seat(seat) for seat in data["seats"])
     return Swarm(str(data["quick_id"]), str(data["directory"]), seats)
 
 
@@ -82,13 +90,13 @@ def locked(folder: Path) -> Generator[None, None, None]:
         yield
 
 
-def _change(folder: Path, name: str, want: str | None, state: str) -> Seat | None:
+def _change(folder: Path, name: str, allowed: Callable[[Seat], bool], **fields: str) -> Seat | None:
     with locked(folder):
         swarm = load(folder)
         found = swarm.seat(name) if swarm else None
-        if swarm is None or found is None or (want is not None and found.state != want):
+        if swarm is None or found is None or not allowed(found):
             return None
-        changed = dataclasses.replace(found, state=state)
+        changed = dataclasses.replace(found, **fields)
         seats = tuple(changed if seat.seat == name else seat for seat in swarm.seats)
         save(folder, dataclasses.replace(swarm, seats=seats))
         return changed
@@ -96,9 +104,21 @@ def _change(folder: Path, name: str, want: str | None, state: str) -> Seat | Non
 
 def set_state(folder: Path, name: str, state: str) -> Seat | None:
     """Set the state of the seat called ``name``; None when the swarm or the seat is not there."""
-    return _change(folder, name, None, state)
+    return _change(folder, name, lambda seat: True, state=state)
 
 
 def take(folder: Path, name: str, want: str, then: str) -> Seat | None:
     """Move the seat from state ``want`` to ``then`` under the lock; None when it was not in ``want``."""
-    return _change(folder, name, want, then)
+    return _change(folder, name, lambda seat: seat.state == want, state=then)
+
+
+def bind(folder: Path, name: str, pane_id: str, session_id: str) -> Seat | None:
+    """Record the pane and session a launching seat's new agent runs in; None when the seat is not launching."""
+    return _change(folder, name, lambda seat: seat.state == LAUNCHING, pane_id=pane_id, session_id=session_id)
+
+
+def adopt(folder: Path, name: str, pane_id: str, session_id: str) -> Seat | None:
+    """Make the session in ``pane_id`` the seat's ready occupant; None when the seat is launching or not there."""
+    return _change(
+        folder, name, lambda seat: seat.state != LAUNCHING, pane_id=pane_id, session_id=session_id, state=READY
+    )

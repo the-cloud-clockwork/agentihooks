@@ -1,17 +1,27 @@
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import time
+import urllib.request
+from collections.abc import Callable, Iterator
 from contextlib import redirect_stderr
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+from hooks.context import blocker_window
 from scripts import ci_prepush
+from scripts.ci_lab import head_notice
+from scripts.ci_lab.remote import checkout
 from scripts.gates import entry as gate_entry
 from scripts.swarm import continuation, git_https, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_ledger import ledger_workspace
 
 
 class PublicationRefusal(SwarmError):
@@ -19,6 +29,81 @@ class PublicationRefusal(SwarmError):
         super().__init__(reason)
         self.repository = str(repository)
         self.branch = branch
+
+
+LAB = "lab"
+GRADE_REFS = "refs/grade/"
+GRADE_URL = re.compile(r"lab grade: (\S+)")
+GREEN = "success"
+LAB_WAIT_S = 1800
+LAB_POLL_S = 15
+LAB_READ_TIMEOUT_S = 10
+
+
+@dataclass(frozen=True)
+class LabRoute:
+    """A publish through the lab, with an optional recorder for each accepted grade push."""
+
+    task: str
+    direct: bool
+    pushed: Callable[[str, str], None] | None = field(default=None, compare=False)
+
+
+def route_flags(lab: LabRoute | None) -> list[str]:
+    """The publish flags that repeat a lab route, empty for a publish straight to origin."""
+    if lab is None:
+        return []
+    return ["--via", LAB, "--direct"] if lab.direct else ["--via", LAB]
+
+
+def read_grade(url: str) -> dict[str, Any]:
+    """Return the lab's answer for one head's grades, as GET /grades/<sha> gives it."""
+    with urllib.request.urlopen(url, timeout=LAB_READ_TIMEOUT_S) as answer:
+        return json.load(answer)
+
+
+def lab_grades(url: str) -> list[dict[str, Any]]:
+    """Return the grades the lab holds at url; an answer that cannot be read refuses the publish."""
+    try:
+        return read_grade(url)["grades"]
+    except (OSError, ValueError, KeyError) as exc:
+        raise SwarmError(f"the lab grade {url} could not be read, so origin was not pushed: {exc!r}") from exc
+
+
+def lab_conclusion(url: str) -> str:
+    """Wait for the newest grade at url to conclude and return its conclusion; refuse once LAB_WAIT_S has passed."""
+    deadline = time.monotonic() + LAB_WAIT_S
+    while not (grades := lab_grades(url)) or not grades[-1]["conclusion"]:
+        if time.monotonic() >= deadline:
+            raise SwarmError(f"the lab grade {url} has not concluded after {LAB_WAIT_S} s; origin was not pushed")
+        time.sleep(LAB_POLL_S)
+    return grades[-1]["conclusion"]
+
+
+def lab_push(root: Path, task: str, branch: str) -> str:
+    """Push HEAD to the task's grade ref on the lab remote with the branch the relay writes, show the lab's answer and
+    return the grade url it names."""
+    if not checkout.carry(checkout.at(root), os.environ):
+        raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
+    done = git_https.run(
+        ["git", "-c", "push.negotiate=true", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"],
+        cwd=root,
+    )
+    sys.stderr.write(done.stderr)
+    found = GRADE_URL.search(done.stderr)
+    if done.returncode or not found:
+        raise SwarmError(f"the lab push named no grade url; origin was not pushed: {done.stderr.strip()}")
+    return found[1]
+
+
+def through_lab(root: Path, route: LabRoute, fields: dict[str, str], head: str) -> None:
+    """Grade HEAD on the lab before origin: push it there and, unless the route is direct, wait for a green grade."""
+    url = fields["lab_grade"] = lab_push(root, route.task, fields["branch"])
+    if route.pushed is not None:
+        route.pushed(head, url)
+    verdict = GREEN if route.direct else lab_conclusion(url)
+    if verdict != GREEN:
+        raise SwarmError(f"the lab grade {url} concluded {verdict}; origin was not pushed")
 
 
 def execute(argv: list[str], root: Path) -> str:
@@ -33,7 +118,7 @@ def git(root: Path, *args: str) -> str:
     return output if "-z" in args else output.strip()
 
 
-def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
+def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict[str, Any]:
     task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
@@ -155,8 +240,10 @@ def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict
     return {**scoped, "branch": recorded}
 
 
-def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
-    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+def publishing_root(
+    repo: str, task: dict[str, Any], agent: AgentRecord, cwd: Path | None = None
+) -> tuple[Path | None, Path, dict[str, Any]]:
+    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, cwd=cwd)
     root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())
@@ -183,8 +270,24 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         raise PublicationRefusal(primary, refusal_branch(primary, task), str(exc)) from exc
 
 
-def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
-    record, resolved = {}, []
+def session_root(slug: str, cwd: Path) -> Path | None:
+    """The root publishing_root selects from *cwd* for this session's claimed task, or None on any failure."""
+    try:
+        from scripts.swarm.runtime import REPO_VARIABLE
+
+        environ = os.environ
+        agent = AgentRecord(
+            environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_LANE"], environ["AGENTIHOOKS_SWARM_TASK"]
+        )
+        task = task_row(slug, agent, LedgerClient())
+        return publishing_root(environ.get(REPO_VARIABLE) or str(cwd), task, agent, cwd)[0]
+    except Exception:
+        return None
+
+
+def task_worktrees(repo: str, task: dict[str, Any], agent: AgentRecord) -> Iterator[tuple[Path, dict[str, Any], Path]]:
+    """Yield each task repository found here with its scoped task and the worktree that holds the task's work."""
+    resolved: list[Path] = []
     for value in task.get("repositories") or []:
         try:
             resolved.append(local_repository(value, repo))
@@ -194,9 +297,63 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     for repository in dict.fromkeys(candidates):
         scoped = repository_task(repository, task)
         root = existing(repository, scoped, agent)
-        if root and stack.pushed(root, scoped["branch"]):
+        if root:
+            yield repository, scoped, root
+
+
+def pushed_branches(repo: str, task: dict[str, Any], agent: AgentRecord) -> dict[str, Any]:
+    record: dict[str, Any] = {}
+    for repository, scoped, root in task_worktrees(repo, task, agent):
+        if stack.pushed(root, scoped["branch"]):
             record = branch_record(checkout_fields(root), repository, {**task, **record})
     return record
+
+
+def block_branches(
+    repo: str, task: dict[str, Any], agent: AgentRecord, slug: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return the branch record block writes and the patches it saved: the pushed branches check, or, when it refuses,
+    each task worktree judged again against the swarm's panic."""
+    try:
+        return pushed_branches(repo, task, agent), []
+    except stack.Unpushed:
+        return held_branches(repo, task, agent, slug)
+
+
+def held_branches(
+    repo: str, task: dict[str, Any], agent: AgentRecord, slug: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Record each pushed task worktree and, once no unpushed worktree refuses as the pushed branches check does, save
+    each unpushed one whose push the swarm's panic holds as a patch in the task work folder."""
+    record: dict[str, Any] = {}
+    waiting: list[tuple[Path, Path, stack.Unpushed]] = []
+    for repository, scoped, root in task_worktrees(repo, task, agent):
+        try:
+            if stack.pushed(root, scoped["branch"]):
+                record = branch_record(checkout_fields(root), repository, {**task, **record})
+        except stack.Unpushed as unpushed:
+            if not blocker_window.held_push(str(root), unpushed.branch, slug):
+                raise
+            waiting.append((root, repository, unpushed))
+    folder = ledger_workspace.folder(slug, agent.task)
+    return record, [save_patch(root, repository, unpushed, folder) for root, repository, unpushed in waiting]
+
+
+def save_patch(root: Path, repository: Path, unpushed: stack.Unpushed, folder: Path) -> dict[str, Any]:
+    """Write the worktree's commits after the unpushed base as one patch file in folder and return its record."""
+    span = f"{unpushed.base}..HEAD"
+    text = execute(["git", "format-patch", "--stdout", span], root)
+    folder.mkdir(parents=True, exist_ok=True)
+    patch = folder / f"{repository.name}.patch"
+    patch.write_bytes(text.encode())
+    return {
+        "repository": str(repository),
+        "branch": unpushed.branch,
+        "head": git(root, "rev-parse", "HEAD"),
+        "base": unpushed.base,
+        "commits": int(git(root, "rev-list", "--count", span)),
+        "patch": str(patch),
+    }
 
 
 def merged_record(repo: Path, task: dict[str, str]) -> bool:
@@ -244,7 +401,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             root = None if retired else existing(repository, scoped, agent)
             if root is None:
                 command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-                if scoped.get("branch"):
+                if scoped.get("branch") and (scoped.get("pr_url") or remote_head(repository, scoped["branch"])):
                     command.extend(["--from", f"origin/{scoped['branch']}"])
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
@@ -365,7 +522,7 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
 def cut_from(root: Path, recorded: str) -> bool:
     head = remote_head(root, recorded)
     if not head:
-        return False
+        return True
     return git(root, "merge-base", head, "HEAD") == head
 
 
@@ -409,7 +566,27 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
+def lab_repository(remote: str) -> str:
+    """Return the repository a lab head notice names for an origin remote, in the form GitHub deliveries give it."""
+    return f"https://{stack.repo_key(remote)}"
+
+
+def notify_lab(root: Path, fields: dict[str, str], head: str) -> None:
+    """Send the lab receiver the signed notice of the head just pushed, based on its merge base with dev, and record
+    the receiver's answer as lab_notice; a notice that is not configured is not sent, and one that fails leaves the
+    push standing."""
+    base = subprocess.run(["git", "merge-base", head, "origin/dev"], cwd=root, capture_output=True, text=True)
+    status = head_notice.send(os.environ, lab_repository(fields["branch_repo"]), head, base.stdout.strip())
+    if status is not None:
+        fields["lab_notice"] = str(status)
+
+
+def grade_and_push(
+    slug: str, root: Path, primary: Path, fields: dict[str, str], head: str, route: LabRoute | None = None
+) -> None:
+    held = blocker_window.held_push(str(root), fields["branch"], slug)
+    if held:
+        raise SwarmError(held)
     python = gate_python(primary)
     source = root / "scripts" / "ci_prepush"
     if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
@@ -422,10 +599,21 @@ def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
         raise SwarmError("the committed HEAD has no passing prepush evidence")
     ref = f"refs/heads/{fields['branch']}"
     publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
+    if route is not None:
+        through_lab(root, route, fields, head)
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
+    notify_lab(root, fields, head)
 
 
-def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
+def publish(
+    slug: str,
+    agent: AgentRecord,
+    repo: str,
+    ledger: LedgerClient,
+    message: str,
+    files: list[str],
+    lab: LabRoute | None = None,
+) -> dict:
     task = task_row(slug, agent, ledger)
     primary, scoped, fields = Path(repo), task, {}
     retry = ""
@@ -435,7 +623,9 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
         fields = checkout_fields(root)
         selected = selected_files(root, files)
-        retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+        retry = shlex.join(
+            ["agentihooks", "swarm", slug, "publish", "--message", message, *route_flags(lab), "--", *files]
+        )
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
         ledger.update_task(
             slug, agent.task, branch_record(fields, primary, drop_repository(task, primary)), by=agent.name
@@ -447,7 +637,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         if changed or remote_head(root, fields["branch"]) != head:
-            grade_and_push(root, primary, fields, head)
+            grade_and_push(slug, root, primary, fields, head, lab)
         else:
             fields["unchanged"] = (
                 "no changes in the listed files and the remote branch already points at this head; nothing pushed"

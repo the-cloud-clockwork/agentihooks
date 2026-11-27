@@ -1,0 +1,26 @@
+rules:
+  - id: lab-post-seeds-without-forgetting
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A check run post step seeds the poster for a check the grade holds and has no branch that forgets one it does
+      not hold. The grade document is the record of what a grade posted, and the poster keeps its own copy for the
+      life of the scheduler process. On 27 November a pull request was closed and reopened on the same head and
+      base: the scheduler forgot the grade, started it again under the same run name, the first post of the new
+      grade met the statuses the poster remembered of the forgotten one, and the ValueError ended the scheduler
+      process. Forget the check run in the else branch of the seed, so a grade started again opens new check runs.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-post-seeds-without-forgetting.py
+    patterns:
+      - pattern: |
+          if $CHECK in $STATE.runs:
+              $POSTER.seed(...)
+      - pattern-not: |
+          if $CHECK in $STATE.runs:
+              $POSTER.seed(...)
+          else:
+              ...
+              $POSTER.forget(...)
+              ...

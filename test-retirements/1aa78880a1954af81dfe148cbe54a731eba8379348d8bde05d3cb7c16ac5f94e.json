@@ -1,0 +1,6 @@
+{
+  "tests/swarm/test_queue_priority.py::test_refused_reorder_keeps_pending_request_for_retry": {
+    "reader": "Standards reader",
+    "reason": "The head removes the stored deferred merge priority replay (PENDING, pending, replay, drop_reason, blocking and the ahead argument of apply); a priority applies at once, so no stored record, replay, drop or carried ahead list remains to test. Live lift and requeue behaviour keeps its tests."
+  }
+}

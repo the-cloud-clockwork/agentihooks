@@ -194,7 +194,7 @@ def test_the_record_step_passes_every_flag_the_writer_parses(tmp_path, started):
     assert "Branch record for leg 7" in result.stdout
 
 
-def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
+def _planner_repo(tmp_path: Path, branch_planner: bool, filter_copy: str) -> Path:
     workspace = tmp_path / "workspace"
     files = {
         ".github/scripts/pypi-retry.sh": "exit 0\n",
@@ -205,8 +205,9 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
             "import os\nopen(os.environ['GITHUB_OUTPUT'], 'a').write(f\"reused={os.environ['FAKE_REUSED']}\\n\")\n"
         ),
         "tests/__init__.py": "",
-        "tests/reused_coverage.py": "",
     }
+    if filter_copy:
+        files[filter_copy] = ""
     if branch_planner:
         files["scripts/ci_branch_plan.py"] = (
             "import json, os, sys\n"
@@ -224,9 +225,14 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
 
 
 def _plan(
-    tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True, bash_env: str = ""
+    tmp_path: Path,
+    event: str,
+    reused: str = "0",
+    branch_planner: bool = True,
+    bash_env: str = "",
+    filter_copy: str = "scripts/reused_coverage.py",
 ) -> tuple[Path, str]:
-    workspace = _planner_repo(tmp_path, branch_planner)
+    workspace = _planner_repo(tmp_path, branch_planner, filter_copy)
     runner, marks = tmp_path / "runner", tmp_path / "marks"
     runner.mkdir()
     marks.mkdir()
@@ -251,7 +257,7 @@ def _plan(
     if bash_env:
         (tmp_path / "bash_env").write_text(bash_env)
         env["BASH_ENV"] = str(tmp_path / "bash_env")
-    run = _step("test-count", "Plan the tests whose inputs did not change")["run"]
+    run = _step("collect", "Plan the tests whose inputs did not change")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     deadline = time.monotonic() + 30
     while not (runner / "plan.status").is_file() and time.monotonic() < deadline:
@@ -295,13 +301,30 @@ def test_a_grader_without_the_branch_planner_reuses_nothing_from_earlier_runs(tm
     assert "The grader has no branch planner" in outputs
 
 
+@pytest.mark.parametrize("filter_copy", ["scripts/reused_coverage.py", "tests/reused_coverage.py"])
+def test_a_pull_request_plans_with_the_reused_coverage_filter_in_either_package(
+    tmp_path: Path, filter_copy: str
+) -> None:
+    called, outputs = _plan(tmp_path, "pull_request", filter_copy=filter_copy)
+    assert called.exists()
+    assert "branch=2" in outputs
+
+
+def test_a_grader_without_the_reused_coverage_filter_reuses_nothing(tmp_path: Path) -> None:
+    called, outputs = _plan(tmp_path, "pull_request", reused="3", filter_copy="")
+    assert not called.exists()
+    assert "The grader cannot carry reused tests' coverage into Sonar; every test runs." in outputs
+    assert "reused=0" in outputs
+    assert "branch=" not in outputs
+
+
 def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path):
     slow_echo = 'echo() { [[ "${1:-}" =~ ^[0-9]+$ ]] && sleep 1; builtin echo "$@"; }\n'
     _plan(tmp_path, "pull_request", bash_env=slow_echo)
 
 
 def test_the_planners_run_unbuffered_so_their_lines_reach_the_log_as_written():
-    assert _step("test-count", "Plan the tests whose inputs did not change")["env"]["PYTHONUNBUFFERED"] == "1"
+    assert _step("collect", "Plan the tests whose inputs did not change")["env"]["PYTHONUNBUFFERED"] == "1"
 
 
 @pytest.mark.wall_clock
@@ -315,7 +338,7 @@ def test_the_wait_prints_each_planner_line_while_the_planner_still_runs(tmp_path
         planner = subprocess.Popen(["bash", "-c", script], stdout=log, stderr=subprocess.STDOUT)
     (runner / "plan.pid").write_text(str(planner.pid))
     env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(tmp_path / "outputs")}
-    run = _step("test-count", "Wait for the test plan")["run"]
+    run = _step("collect", "Wait for the test plan")["run"]
     wait = subprocess.Popen(["bash", "-e", "-c", run], env=env, stdout=subprocess.PIPE, text=True)
     lines: queue.Queue[str] = queue.Queue()
     threading.Thread(target=lambda: [lines.put(line) for line in wait.stdout], daemon=True).start()
@@ -340,7 +363,7 @@ def test_the_wait_prints_each_planner_line_while_the_planner_still_runs(tmp_path
     ],
 )
 def test_the_branch_plan_is_published_only_when_it_reuses_a_test(event, branch, uploaded):
-    upload = _step("test-count", "Upload the pull request runs' test plan")
+    upload = _step("collect", "Upload the pull request runs' test plan")
     assert upload["with"]["name"] == "reused-branch-${{ matrix.python-version }}"
     assert upload["with"]["path"] == "${{ runner.temp }}/reused-branch.json"
     values = {"github.event_name": event, "steps.plan.outputs.branch": branch}
@@ -351,15 +374,15 @@ def test_the_branch_plan_is_published_only_when_it_reuses_a_test(event, branch, 
 def test_the_deselect_and_its_upload_run_when_either_plan_reuses_a_test(reused, branch, deselects):
     values = {"steps.plan.outputs.reused": reused, "steps.plan.outputs.branch": branch}
     for name in ("Deselect the reused tests", "Upload the deselected tests"):
-        assert _evaluate(_step("test-count", name)["if"], values) is deselects
+        assert _evaluate(_step("collect", name)["if"], values) is deselects
 
 
 def _deselect(tmp_path: Path, dev: bool) -> dict:
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner, workspace = tmp_path / "runner", tmp_path / "workspace"
-    (runner / "planner/tests").mkdir(parents=True)
-    (runner / "planner/tests/__init__.py").write_text("")
-    (runner / "planner/tests/dep_manifest.py").write_text((ROOT / "tests/dep_manifest.py").read_text())
+    (runner / "planner/scripts").mkdir(parents=True)
+    (runner / "planner/scripts/__init__.py").write_text("")
+    (runner / "planner/scripts/dep_manifest.py").write_text((ROOT / "scripts/dep_manifest.py").read_text())
     workspace.mkdir()
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": collected[:2]}))
     (runner / "reused-branch.json").write_text(json.dumps({"version": 1, "runs": [], "tests": collected[2:]}))
@@ -372,7 +395,7 @@ def _deselect(tmp_path: Path, dev: bool) -> dict:
         "DEV_PLAN": str(workspace / "reused-tests.json") if dev else "",
         "BRANCH_PLAN": str(runner / "reused-branch.json"),
     }
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     return json.loads((runner / "reused.json").read_text())
 
@@ -519,14 +542,17 @@ def test_full_scope_shard_check_grades_and_summarizes_the_branch_plan():
         ({"steps.source.outputs.test_only": "true"}, False),
     ],
 )
-def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(values, carried):
+def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(
+    values: dict[str, str], carried: bool
+) -> None:
     base = {**SAME_REPO, "needs.select.outputs.scope": "selected", "steps.source.outputs.test_only": "false"}
     names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
     carry = _step("sonar", "Carry the pull request runs' coverage of the reused tests")
     mint = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "app-token")
     assert mint["if"] == carry["if"]
     assert _evaluate(carry["if"], {**base, **values}) is carried
-    assert names.index("Download shard coverage") < names.index(carry["name"]) < names.index("Merge shard coverage")
+    arrivals = "Take each shard's coverage as it lands"
+    assert names.index(carry["name"]) < names.index(arrivals) < names.index("Merge shard coverage")
     assert carry["env"] == {
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "GRADER": "${{ github.event.pull_request.base.sha }}",
@@ -585,19 +611,13 @@ def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carri
     assert not _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.13", **values})
 
 
-def test_sonar_downloads_the_branch_coverage_only_for_a_selected_scope():
-    download = _step("sonar", "Download shard coverage")
-    assert download["with"]["pattern"] == (
-        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}"
-    )
+def test_sonar_takes_the_branch_coverage_only_for_a_selected_scope() -> None:
+    arrivals = _step("sonar", "Take each shard's coverage as it lands")
+    assert arrivals["env"]["SCOPE"] == "${{ needs.select.outputs.scope }}"
     take = _step("sonar", "Take each selected leg's latest branch coverage")
     assert take["if"] == "needs.select.outputs.scope == 'selected'"
     names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
-    assert (
-        names.index("Download shard coverage, attempt 2")
-        < names.index(take["name"])
-        < names.index("Merge shard coverage")
-    )
+    assert names.index(arrivals["name"]) < names.index(take["name"]) < names.index("Merge shard coverage")
 
 
 def test_sonar_takes_each_legs_newest_branch_coverage_over_an_older_uploaded_attempt(tmp_path: Path) -> None:

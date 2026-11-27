@@ -1,0 +1,21 @@
+rules:
+  - id: lab-static-base-read-at-delivered-base
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The base files of a static unit are read at the base the request delivered. That base is ahead of the fork
+      point when dev moved on before the delivery, so the unit reads what dev gained as removed by the head.
+      Key the unit on the files at the merge base of head and base.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-static-base-read-at-delivered-base.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              $BASE = self._files($MIRROR, $REQUEST.base)
+              ...
+          - pattern-inside: |
+              $HEAD, $BASE = $READ, self._files($MIRROR, $REQUEST.base)
+              ...
+      - pattern: _within($BASE, $GATE.base_paths)

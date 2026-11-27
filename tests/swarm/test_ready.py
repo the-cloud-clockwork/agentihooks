@@ -1,6 +1,7 @@
 import copy
 import json
 import subprocess
+from collections.abc import Callable
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, TypeVar
 
@@ -10,10 +11,10 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, outage, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
@@ -403,7 +404,9 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action, url, journal=None):
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         attempts.append(url)
         if pull.queued:
             return {}
@@ -411,14 +414,15 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
 
     merge_pass = ready.Pass
     monkeypatch.setattr(ready, "Pass", lambda *args: merge_pass(*args, queue=queue))
-    for minutes in (0, 10, 30, 60):
+    ticks = (0, 10, 19) if pull is GREEN else (0, 10, 30, 60)
+    for minutes in ticks:
         monkeypatch.setattr(cli, "now_ms", lambda: NOW + minutes * 60_000)
         cli.run_tick(store, "sw", ledger, cli.HerdrRuntime(), FakeHerdr({}))
         assert ledger.rows["t1"]["state"] == "pr"
         assert ledger.rows["t1"]["awaiting"] == ready.AWAITING
         assert not any(a.task == "t1" for a in store.agents("sw"))
         assert ready.record(store, "sw", "t1")["head"] == HEAD
-    assert attempts == ([URL] * 4 if pull is GREEN else [URL] if pull is QUEUED else [])
+    assert attempts == ([URL] * 3 if pull is GREEN else [URL] if pull is QUEUED else [])
 
 
 @pytest.mark.parametrize("trigger", ["queue_exit", "ready_mark"])
@@ -583,7 +587,7 @@ class Ledger:
 
 
 @pytest.fixture
-def merging(monkeypatch):
+def merging(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -600,7 +604,9 @@ def merging(monkeypatch):
     monkeypatch.setattr(stack, "shell", shell)
     _port(monkeypatch, shell.port)
 
-    def queue(action, url, journal=None):
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         queued.append((action, url))
         queue.journals.append(journal)
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
@@ -658,7 +664,10 @@ def test_a_queue_pass_watches_the_merge_whatever_the_queue_command_reports(mergi
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
 
 
-def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging, monkeypatch):
+def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merging.store.create(SwarmConfig("sw", TOP, 1, 1))
     merging.pulls[URL] = GREEN
     monkeypatch.setattr(merge_queue.ledger_events, "view", read_pull)
     pull = {
@@ -700,17 +709,21 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action, url, journal=None):
-        return merge_queue.operate(action, url, github, journal=journal)
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
+        return merge_queue.operate(action, url, github, admit=admit, journal=journal, priority=priority)
 
-    merging.run(queuer=queue)
-    assert merged_heads == [f"head={HEAD}"]
+    actions = merging.run(queuer=queue)
+    assert merged_heads == [f"head={HEAD}"], actions
     assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["awaiting"] == ""
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action, url, journal=None):
+def refused(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -753,7 +766,9 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action, url, journal=None):
+    def failed(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -781,7 +796,9 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action, url, journal=None):
+    def down(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     for _ in range(6):
@@ -790,10 +807,84 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
     assert merging.rows["t1"]["state"] == "pr"
 
 
+def timed_out(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
+    raise SwarmError("GitHub API: timed out")
+
+
+STALLED = f"task t1 reopened, {URL} stayed green and unqueued for 20 minutes while the merge pass could not queue it"
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+@pytest.mark.parametrize("stuck", ["checks wait", "queue hold"])
+def test_a_released_pull_request_the_merge_pass_cannot_queue_reopens_after_twenty_green_minutes(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stuck: str
+) -> None:
+    merging.pulls[URL] = GREEN
+    if stuck == "checks wait":
+        monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    held = [] if stuck == "checks wait" else [f"could not queue {URL} for task t1: GitHub API: timed out"]
+    assert merging.run(NOW, timed_out) == held
+    assert merging.run(NOW + 19 * 60_000, timed_out) == held
+    assert merging.rows["t1"]["state"] == "pr" and merging.ledger.comments == []
+    assert merging.run(NOW + 20 * 60_000, timed_out) == [STALLED]
+    row = merging.rows["t1"]
+    assert (row["state"], row["claimed_by"], row["awaiting"]) == ("open", "", "fix")
+    assert merging.ledger.comments == [
+        (
+            "t1",
+            f"Reopened by the swarm: its pull request {URL} stayed green and unqueued for 20 minutes while the merge "
+            "pass could not queue it. The next engineer continues it from the handoff its engineer left.",
+            "swarm",
+        ),
+    ]
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert ready.record(merging.store, "sw", "t1") is None
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+@pytest.mark.parametrize("interrupted", [RUNNING, QUEUED])
+def test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_its_hold(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, interrupted: PullRequest
+) -> None:
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW, timed_out) == []
+    merging.pulls[URL] = interrupted
+    merging.run(NOW + 10 * 60_000, timed_out)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW + 15 * 60_000, timed_out) == []
+    assert merging.run(NOW + 34 * 60_000, timed_out) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.run(NOW + 35 * 60_000, timed_out) == [STALLED]
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paused: list[tuple[str, int, int]] = []
+
+    def pause(slug: str, since_ms: int, now_ms: int) -> int:
+        paused.append((slug, since_ms, now_ms))
+        return 5 * 60_000
+
+    monkeypatch.setattr(outage, "paused_ms", pause)
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW, timed_out) == []
+    assert merging.run(NOW + 24 * 60_000, timed_out) == []
+    assert paused[-1] == ("sw", NOW, NOW + 24 * 60_000)
+    assert merging.run(NOW + 25 * 60_000, timed_out) == [STALLED]
+
+
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action, url, journal=None):
+    def elsewhere(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1006,6 +1097,15 @@ def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(
     assert merging.store.redis.get(merging.store.key("sw", "claim", "t1")) is None
     assert merging.shell.calls == [REMOVE]
     assert merging.run() == []
+
+
+@pytest.mark.feature("review-done-findings")
+def test_a_merged_review_task_stays_open_for_swarm_done(merging: Any) -> None:
+    merging.rows["t1"].update(kind="review", lane="review")
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 awaits its proof, {URL} merged", f"removed the worktree {TOP}"]
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.ledger.comments == [("t1", ready.PROOF.format(url=URL, kind="review"), "swarm")]
 
 
 def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
@@ -1383,7 +1483,9 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action, url, journal=None):
+    def refused_enqueue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
@@ -1510,7 +1612,9 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action, url, journal=None):
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
@@ -1538,7 +1642,7 @@ def test_an_unmergeable_entry_reopens_with_its_cause_within_one_tick(merging, qu
         }
     )
 
-    def dequeue(action, url, journal=None):
+    def dequeue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         assert (action, url) == ("dequeue", URL)
         merging.queued.append((action, url))
         return {"queued": False}
@@ -1719,7 +1823,9 @@ def test_a_failed_requeue_raises_a_ledger_alert(merging):
     dequeued_transient(merging)
     merging.pulls[URL] = GREEN
 
-    def refuse(action, url, journal=None):
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         merging.queued.append((action, url))
         raise SwarmError("timed out")
 
@@ -1916,7 +2022,7 @@ def test_a_stale_conflict_watch_cannot_clear_a_new_claim_generation(merging, suc
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def replace_owner(action, url, journal=None):
+    def replace_owner(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.rows["t1"] = {**merging.rows["t1"], "claimed_by": successor, "claim_generation": 2}
         merging.store.release("sw", "t1", AGENT)
         merging.store.claim("sw", "t1", successor, 60_000)
@@ -1980,7 +2086,7 @@ def test_a_changed_pull_binding_survives_the_stale_conflict_watch(merging, field
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def changed(action, url, journal=None):
+    def changed(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.rows["t1"] = {**merging.rows["t1"], field: value}
         return {"queued": False}
 
@@ -2018,7 +2124,7 @@ def test_an_owner_registered_during_dequeue_keeps_its_claim(merging):
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def registered(action, url, journal=None):
+    def registered(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1"))
         return {"queued": False}
 
@@ -2110,7 +2216,7 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     queued_at_now(merging)
     merging.pulls[URL] = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
 
-    def dequeue(action, url, journal=None):
+    def dequeue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         assert (action, url) == ("dequeue", URL)
         if failure != "still queued":
             raise SwarmError(failure)
@@ -2301,3 +2407,212 @@ def test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green(merging):
     assert merging.queued == []
     assert run(GREEN, GREEN) == [f"queued {URL} for task t1"]
     assert merging.queued == [("queue", URL)]
+
+
+HOLD = f"sw: merge pass holds task t1 {URL}: "
+
+
+def _holds(capsys: pytest.CaptureFixture[str]) -> list[str]:
+    """The merge pass hold lines a pass wrote to stderr."""
+    return [line for line in capsys.readouterr().err.splitlines() if " merge pass holds " in line]
+
+
+def _pass(merging: SimpleNamespace, github: Any, reread: Any, now: int = NOW) -> list[str]:
+    """Run one merge pass over the fixture's rows with its own snapshot and fresh readers."""
+    run = ready.Pass(merging.store, "sw", merging.ledger, github, reread, now, merging.queue, merging.exits)
+    return ready.merge_pass(run, merging.rows)
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "pull, reason",
+    [
+        (RUNNING, "its required checks have not all finished"),
+        (PullRequest("OPEN", None, 1, False, True, head=HEAD, unpassed_gate="Gate"), "its Gate never passed"),
+    ],
+    ids=["checks-run", "gate-never-passed"],
+)
+def test_a_released_checks_wait_logs_why_it_holds(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], pull: PullRequest, reason: str
+) -> None:
+    merging.pulls[URL] = pull
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "fresh, reason",
+    [
+        (None, "GitHub did not answer a read of its pull request"),
+        (PullRequest("OPEN", None, 1, False, True), "GitHub did not answer a read of its pull request"),
+        (RUNNING, "its required checks have not all finished"),
+        (PullRequest("OPEN", None, 1, False, True, head=HEAD, unpassed_gate="Gate"), "its Gate never passed"),
+        (
+            PullRequest("OPEN", None, 1, False, True, head="b" * 40),
+            "its head moved, so its checks are read again on the new head",
+        ),
+    ],
+    ids=["unread", "headless", "checks-run", "gate-never-passed", "head-moved"],
+)
+def test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], fresh: PullRequest | None, reason: str
+) -> None:
+    assert _pass(merging, {URL: GREEN}.get, {URL: fresh}.get) == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_green_head_github_does_not_read_green_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + "GitHub does not read every required check green on its head"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_moved_head_logs_that_its_checks_are_read_again(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ready.save(merging.store, "sw", "t1", ready.held_record(URL, "b" * 40, TOP, AGENT, NOW))
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "its head moved, so its checks are read again on the new head"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_an_unread_pull_request_logs_its_hold(merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    merging.pulls.clear()
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "GitHub did not answer a read of its pull request"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_queued_pull_request_logs_that_it_waits_in_the_queue(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    queued_at_now(merging)
+    merging.pulls[URL] = QUEUED
+    capsys.readouterr()
+    assert merging.run(NOW + 60_000) == []
+    assert _holds(capsys) == [HOLD + "it waits in the merge queue"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_dependency_wait_logs_its_target(merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    found = ready.held_record(URL, HEAD, TOP, AGENT, NOW)
+    found["dependency"] = {"kind": "task", "target": "t2"}
+    ready.save(merging.store, "sw", "t1", found)
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + "it waits on its dependency t2"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "retry_at, reread, reason",
+    [
+        (NOW + 1, GREEN, "it queues again after its backoff"),
+        (NOW, None, "GitHub did not answer a read of its pull request"),
+    ],
+    ids=["backoff", "unread"],
+)
+def test_a_recovery_wait_logs_why_it_holds(
+    merging: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+    retry_at: int,
+    reread: PullRequest | None,
+    reason: str,
+) -> None:
+    found = ready.held_record(URL, HEAD, TOP, AGENT, NOW)
+    found.update(on={"kind": ready.RECOVER, "head": HEAD}, retry_at=retry_at, recoveries=0)
+    ready.save(merging.store, "sw", "t1", found)
+    assert _pass(merging, {URL: GREEN}.get, {URL: reread}.get) == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_an_unmergeable_pull_request_with_a_working_owner_logs_the_restack(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="working"))
+    pull = pull_request({"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": None})
+    merging.pulls[URL] = pull
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + f"its owner was told to restack it: {pull.merge_problem}"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "fresh, reason",
+    [
+        (GREEN, "its merge problem cleared on a fresh read"),
+        (None, "GitHub did not answer a read of its pull request"),
+    ],
+    ids=["cleared", "unread"],
+)
+def test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], fresh: PullRequest | None, reason: str
+) -> None:
+    from scripts.swarm.ledger_events import pull_request
+
+    pull = pull_request({"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": None})
+    assert _pass(merging, {URL: pull}.get, {URL: fresh}.get) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_a_live_agent_owns_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="working"))
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "a live agent still owns it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_whose_ready_record_moved_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(merging.store, "release_ready", lambda *args: False)
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "the ledger or its ready record changed before the swarm could release it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(merging.ledger, "update_task", lambda *args, **kwargs: dict(merging.rows["t1"]))
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "the ledger or its ready record changed before the swarm could release it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ready.done_gate, "refusal", lambda row, url, github: "another split pull request is open")
+    merging.rows["t1"]["split"] = True
+    merging.pulls[URL] = MERGED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "the done gate refuses its split pull requests"]

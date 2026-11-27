@@ -8,14 +8,16 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
+from scripts.ci_lab.remote import checkout
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.scheduler.service import revision
 from scripts.swarm.commands import hive_id
 
 if TYPE_CHECKING:
@@ -40,6 +42,7 @@ WAKE_SLACK_S = 2
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def beat(redis: "Redis", local_id: str) -> None:
@@ -64,7 +67,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _index_hive(redis, local_id)
     fields = {name: report[name] for name in ("slots", "interactive", "repos")}
-    fields["master_login"] = {"claude": master_claude_login.signed_in()}
+    logins = _master_login_inventory()
+    fields["master_logins"] = logins
+    fields["master_login"] = {"claude": logins[0]["account"] if logins else master_claude_login.signed_in()}
     fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
     fields["version"] = updater.installed_version()
     beat_ms = int(time.time() * 1000)
@@ -102,6 +107,38 @@ def beat(redis: "Redis", local_id: str) -> None:
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
     registry.finished(redis, local_id, int(time.time() * 1000))
+
+
+def _master_login_inventory() -> list[dict[str, Any]]:
+    from scripts import master_logins
+    from scripts.routing import reservation
+
+    if master_claude_login.unusable():
+        return []
+    offered = master_claude_login.logins()
+    now = time.time()
+    ranks = master_claude_login.preferred()
+    marker = master_claude_login.slot()
+    ordered = sorted(
+        offered,
+        key=lambda number: (
+            master_claude_login.failed(number),
+            master_logins.usage(offered[number], now)[1] >= reservation.MASTER_LEAVES,
+            ranks.get(offered[number], len(ranks)),
+            -master_logins.left(offered[number], now),
+            number != marker,
+            number,
+        ),
+    )
+    return [
+        {
+            "harness": "claude",
+            "account": offered[number],
+            "slot": number,
+            "week_left": master_logins.week_left(offered[number], now),
+        }
+        for number in ordered
+    ]
 
 
 def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:
@@ -253,8 +290,9 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
 
 
 def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
-    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
-    from hooks.observability import presence
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness, then
+    exports the agent sessions seen on this home and their last token fill and burn rate."""
+    from hooks.observability import presence, token_monitor
 
     shown = registry.show(redis, local_id) or {}
     agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
@@ -266,6 +304,8 @@ def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
         agents,
         now_ms / 1000,
     )
+    presence.export_agents(now_ms / 1000)
+    token_monitor.export_tokens(now_ms / 1000)
 
 
 def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
@@ -305,7 +345,9 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
+    loaded = revision(ROOT)
     fill_operator_env()
+    carry_lab(os.environ)
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = bundled = time.time()
@@ -325,6 +367,8 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 beat(redis, local_id)
                 if marker := os.environ.get("HIVE_READY_FILE"):
                     Path(marker).touch()
+                if not dispatch.busy() and _moved(loaded):
+                    return
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
                 scheduled_wait(
@@ -337,6 +381,18 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
             failures += 1
         finally:
             stop.set()
+
+
+def _moved(loaded: str) -> bool:
+    """Say on stderr and return True when the checkout this hive loaded its code from now sits at another revision."""
+    current = revision(ROOT)
+    if not current or current == loaded:
+        return False
+    print(
+        f"the hive {os.getpid()} restarts on the new code: the checkout moved from {loaded} to {current}",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _keep_helpers(helpers: dict, args: tuple) -> None:
@@ -395,18 +451,28 @@ def install(
     unit_dir: Path | None = None,
     run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run,
 ) -> bool:
+    from scripts.swarm import timer
+
     binary = binary or shutil.which("agentihooks")
     if not binary:
         raise registry.HiveError("agentihooks executable not found")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    path = unit_dir / UNIT
-    text = unit(binary)
-    if not path.exists() or path.read_text() != text:
-        path.write_text(text)
+    writer = "agentihooks-ledger-writer.service"
+    units = {UNIT: unit(binary), writer: timer.units(binary)[writer]}
+    changed = False
+    for name, text in units.items():
+        path = unit_dir / name
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+            changed = True
+    if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
-    result = run(["systemctl", "--user", "enable", "--now", UNIT], capture_output=True, text=True, timeout=30)
-    return result.returncode == 0
+    results = [
+        run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
+        for name in units
+    ]
+    return all(result.returncode == 0 for result in results)
 
 
 def restart(run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> bool:
@@ -557,6 +623,20 @@ def local_checkout(repo: str) -> str:
     return matches[0] if matches else repo
 
 
+def carry_lab(environ: Mapping[str, str]) -> list[Path]:
+    """Give each hive checkout whose origin the lab remote serves the lab remote; return the checkouts that carry it."""
+    return [path for path in _checkouts() if _carried(path, environ)]
+
+
+def _carried(path: Path, environ: Mapping[str, str]) -> bool:
+    """Give one checkout the lab remote; a git that fails or hangs there leaves it without one and is said on stderr."""
+    try:
+        return checkout.carry(checkout.at(path), environ)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"hive: the lab remote was not set in {path}: {exc}", file=sys.stderr)
+        return False
+
+
 def _checkouts() -> list[Path]:
     root = Path(os.environ.get("HIVE_REPO_ROOT") or Path.home() / "dev").expanduser()
     if not root.is_dir():
@@ -574,14 +654,14 @@ def _checkouts() -> list[Path]:
 def origin(checkout: Path) -> str:
     """The checkout's origin remote as a lowercase host/owner/name, the name a hosted swarm gives its repo."""
     try:
-        found = ORIGIN.search((_common_gitdir(checkout) / "config").read_text())
+        found = ORIGIN.search((common_gitdir(checkout) / "config").read_text())
     except OSError:
         return ""
     remote = found and REMOTE.fullmatch(found.group(1).strip())
     return f"{remote.group(1)}/{remote.group(2)}".lower() if remote else ""
 
 
-def _common_gitdir(checkout: Path) -> Path:
+def common_gitdir(checkout: Path) -> Path:
     git = checkout / ".git"
     if git.is_file():
         git = checkout / git.read_text().removeprefix("gitdir:").strip()
@@ -690,6 +770,7 @@ def _pane_ids(herdr: "HerdrRuntime") -> list[str] | None:
 def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
+    from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(redis)
@@ -701,18 +782,22 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
     report["started_at"] = started_ms()
-    admitted = {
-        agent.execution_id: {"generation": agent.generation, "pane": asdict(herdr.observe(agent))}
-        for _, agent in records
-        if not agent.runtime_target and agent.hive == local_id
-    }
+    admitted = [agent for _, agent in records if not agent.runtime_target and agent.hive == local_id]
     if admitted:
-        report["admitted"] = admitted
+        bound = live_binding.observed(herdr.bindings(admitted))
+        report["admitted"] = {
+            agent.execution_id: {
+                "generation": agent.generation,
+                "pane": asdict(herdr.observe(agent)),
+                "binding": bound.get(agent.name),
+            }
+            for agent in admitted
+        }
     if not hosted:
         return report
     report["process_namespace"] = local_namespace()
     report["pane_ids"] = _pane_ids(herdr)
-    facts = herdr.bindings([agent for _, agent in hosted])
+    facts = live_binding.observed(herdr.bindings([agent for _, agent in hosted]))
     report["panes"] = herdr.conversations() or {}
     for slug, agent in hosted:
         report["executions"][agent.execution_id] = {

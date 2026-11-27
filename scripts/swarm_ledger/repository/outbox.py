@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import re
 import sqlite3
 import sys
@@ -17,6 +18,7 @@ PENDING = (
     " ORDER BY revision, subject LIMIT ?"
 )
 SENT = "INSERT OR IGNORE INTO outbox_sent (id, sent_at) VALUES (?, ?)"
+SUMMARY = "SELECT summary FROM ledgers WHERE slug = ?"
 SENT_COLUMNS = "SELECT * FROM outbox_sent LIMIT 0"
 ADD_SENT_AT = "ALTER TABLE outbox_sent ADD COLUMN sent_at INTEGER NOT NULL DEFAULT 0"
 DUPLICATE = "duplicate column name: sent_at"
@@ -29,6 +31,7 @@ CAP_UNSENT = (
 MAX_UNSENT = 10_000
 BATCH = 100
 AUTHOR = "ledger"
+SMALL = "small"
 RESERVED = re.compile(r"[%.*>\s]")
 
 
@@ -48,7 +51,10 @@ def changed(before: dict, after: dict) -> list:
     return found
 
 
-def write(connection, slug: str, revision: int, before: dict, after: dict) -> None:
+def write(connection: Any, slug: str, revision: int, before: dict, after: dict) -> None:
+    """One relay row per changed task and phase, and none for a small ledger, which has no swarm stream to take them."""
+    if (after or before).get("size") == SMALL:
+        return
     for entity, key, item in changed(before, after):
         event = envelope.create(
             type=f"{entity}.{'removed' if item is None else 'changed'}",
@@ -78,7 +84,7 @@ def relay(repository: Any, events: Publisher, batch: int = BATCH, clock: Callabl
     """Publish up to a batch of each ledger's unsent rows under their row id, which the bus dedupes within its window.
 
     A row the bus refuses as too large is marked sent and reported, so it never holds back the rows after it.
-    A ledger whose events no stream takes keeps its rows unsent and never holds back another ledger's rows.
+    A swarm ledger whose events no stream takes keeps its rows unsent and never holds back another ledger's rows.
     """
     with repository.connect() as connection:
         return sum(
@@ -87,7 +93,10 @@ def relay(repository: Any, events: Publisher, batch: int = BATCH, clock: Callabl
 
 
 def relay_ledger(connection: Any, slug: str, events: Publisher, batch: int, clock: Callable[[], int]) -> int:
-    """Publish up to a batch of one ledger's unsent rows in revision order, stopping at a row no stream takes."""
+    """Publish up to a batch of one ledger's unsent rows in revision order, stopping at a row no stream takes.
+
+    A row no stream takes is marked sent and reported instead when its ledger is small or no longer stored.
+    """
     pending = connection.execute(PENDING, (slug, batch)).fetchall()
     for published, (row_id, subject, value) in enumerate(pending):
         try:
@@ -95,10 +104,18 @@ def relay_ledger(connection: Any, slug: str, events: Publisher, batch: int, cloc
         except PayloadTooLarge as error:
             sys.stderr.write(f"ledger outbox: row {row_id} skipped: {error}\n")
         except NoStream:
-            return published
+            if awaited(connection, slug):
+                return published
+            sys.stderr.write(f"ledger outbox: row {row_id} dropped: ledger {slug} is small or no longer stored\n")
         with connection:
             connection.execute(SENT, (row_id, clock()))
     return len(pending)
+
+
+def awaited(connection: Any, slug: str) -> bool:
+    """Whether a stream may yet take the ledger's rows: the ledger is still stored and its size is not small."""
+    found = connection.execute(SUMMARY, (slug,)).fetchone()
+    return found is not None and json.loads(found[0]).get("size") != SMALL
 
 
 def slim(event: envelope.Envelope) -> envelope.Envelope:

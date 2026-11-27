@@ -13,6 +13,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hooks.context import injection_trace, profile_chain, quarantine, tool_matcher
+from hooks.context import gate_import, injection_trace, profile_chain, quarantine, tool_matcher
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop", "start": "SessionStart"}
 _NO_MATCHER_STEPS = frozenset({"stop", "start"})
@@ -32,7 +33,7 @@ _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
 JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
 SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
-_INDEX_VERSION = 2
+_INDEX_VERSION = 3
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
@@ -109,12 +110,13 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     linked = profile_chain.linked_profiles(state)
     layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
-        layers.append(("bundle", bundle / ".claude" / "conditions"))
+        layers.append(("bundle", profile_chain.layer_root(bundle) / ".claude" / "conditions"))
     if shared is not None:
-        layers.append(("shared-bundle", shared / ".claude" / "conditions"))
+        layers.append(("shared-bundle", profile_chain.layer_root(shared) / ".claude" / "conditions"))
     if user is not None:
-        layers.append(("user-bundle", user / ".claude" / "conditions"))
-    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user, shared):
+        layers.append(("user-bundle", profile_chain.layer_root(user) / ".claude" / "conditions"))
+    chain = profile_chain.profile_dirs(bundle, profile_csv, linked, user, shared)
+    for name, profile_dir in profile_chain.unlayered(chain, (bundle, shared, user)):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
     layers.append(("runtime", runtime_dir()))
     root = repo_root(cwd)
@@ -254,7 +256,7 @@ def _fresh(sig: list[int], now_ns: int) -> bool:
 
 
 def load_index(cwd: str | Path | None = None) -> dict:
-    """The condition index, rebuilt only when state.json or a condition dir changed."""
+    """The condition index, rebuilt only when state.json, a condition dir or a bundle.yml changed."""
     cache = _cache_path(repo_root(cwd))
     state_sig = _sig(profile_chain.state_path())
     try:
@@ -286,7 +288,8 @@ def _rebuild(cache: Path, state_sig: list[int], cwd: str | Path | None = None) -
     layers, probed = layer_dirs(state, cwd)
     entries, _invalid = scan_layers(_trusted_layers(layers, state)[0])
     index = build_index(entries)
-    dirs = [[str(d), _sig(d)] for _, d in layers]
+    manifests = [root / profile_chain.BUNDLE_MANIFEST for _, root in profile_chain.bundle_roots(state)]
+    dirs = [(str(d), _sig(d)) for d in [*(d for _, d in layers), *manifests]]
     now_ns = time.time_ns()
     if parsed and not _fresh(state_sig, now_ns) and not any(_fresh(sig, now_ns) for _, sig in dirs):
         record = {
@@ -519,6 +522,7 @@ def merge(step: str, payload: dict, runs: list[tuple[dict, dict]]) -> StepResult
         label = entry["file"]
         code = run.get("returncode")
         if run.get("error") or code not in (0, 2):
+            gate_import.report(entry, run, payload)  # pyright: ignore[reportUnknownArgumentType]
             _failed(entry, run.get("error") or f"exit {code}: {(run.get('stderr') or '').strip()[:300]}", result)
             continue
         if code == 2:
@@ -615,15 +619,14 @@ def pre_effect(payload: dict) -> PreEffect | None:
         writers = ", ".join(result.input_writers)
         if not applies_input_rewrite():
             effect.contexts.append(f"[conditions] input rewrite by {writers} dropped: this harness cannot apply it")
-        elif decision is None and payload.get("permission_mode") != "bypassPermissions":
+        elif decision is None and payload.get("permission_mode") == "auto":
             effect.contexts.append(
-                f"[conditions] input rewrite by {writers} dropped: outside bypassPermissions "
+                f"[conditions] input rewrite by {writers} dropped: in auto mode "
                 'a rewriting condition must return "decision": "allow" or "ask"'
             )
         else:
             effect.rewrite = {**(payload.get("tool_input") or {}), **result.input_patch}
             effect.contexts.append(f"[conditions] tool input rewritten by {writers}")
-            decision = decision or "allow"
     effect.decision = decision
     effect.reason = reason
     return effect
@@ -763,6 +766,10 @@ _REDIRECT = re.compile(rf">>?\|?\s*({_WORD})")
 _PATH_TOKEN = re.compile(_WORD)
 _UNQUOTE = re.compile(r"""\\(.)|["']""")
 _CD_TARGET = re.compile(rf"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+({_WORD})")
+_PUBLISH_SYNTAX = re.compile(r"[;&|<>`$(){}*?\[\]~\n]")
+_PUBLISH_WRAPPER = ["-m", "scripts.github_app_cli", "exec"]
+_PUBLISH_VALUES = frozenset({"--message", "-m", "--via"})
+_PYTHON = re.compile(r"python[\d.]*")
 _CAT_HEREDOC = re.compile(
     r"((?:^|[;&|(])[ \t]*(?:cat|tee)\b[^\n;&|]*?)<<-?[ \t]*(['\"]?)(\w+)\2([^\n]*)\n.*?^[ \t]*\3[ \t]*$",
     re.DOTALL | re.MULTILINE,
@@ -772,7 +779,7 @@ _GATE_TTL_SEC = 3600
 GATE_MESSAGE = (
     "BLOCKED: conditions are created, changed or removed only when the operator asks: the operator's own prompt "
     "this turn (e.g. 'set a condition ...'), his comment on this agent's ledger task, or the master's "
-    "'agentihooks ledger relay' onto that task of words he typed in the master pane; either holds until that "
+    "'agentihooks api relay' onto that task of words he typed in the master pane; either holds until that "
     "task is done or cancelled. "
     "Never create one on your own initiative."
 )
@@ -909,7 +916,13 @@ def _ordinary_target(token: str, bases: list[str | None]) -> bool:
 
 
 def _staged_command(command: str, cwd: str | None) -> bool:
-    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged."""
+    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged.
+
+    A lone swarm publish naming a condition file is judged by its file names in the worktree publish commits in.
+    """
+    root, files = _publish_target(command, cwd)
+    if root is not None:
+        return _staged([root / name for name in files])
     bases = _bases(command, cwd)
     paths: list[Path] = []
     for word in _PATH_TOKEN.findall(command):
@@ -919,6 +932,72 @@ def _staged_command(command: str, cwd: str | None) -> bool:
                 return False
             paths += resolved
     return any("conditions" in p.resolve().parts for p in paths) and _staged(paths)
+
+
+def _publish_target(command: str, cwd: str | None) -> tuple[Path | None, list[str]]:
+    """The worktree a lone swarm publish naming a condition file commits in, with its file names."""
+    call = _publish_call(command)
+    if call is None or not any("conditions" in Path(name).parts for name in call[1]):
+        return None, []
+    return _publish_root(call[0], cwd), call[1]
+
+
+def _publish_call(command: str) -> tuple[str, list[str]] | None:
+    """The slug and file names of one lone swarm publish call, bare or behind the GitHub app wrapper.
+
+    Shell control, substitution, glob or brace syntax, an unknown option or another subcommand gives None.
+    """
+    if _PUBLISH_SYNTAX.search(command):
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if words and _PYTHON.fullmatch(Path(words[0]).name) and words[1:4] == _PUBLISH_WRAPPER:
+        words = words[5:] if words[4:5] == ["--"] else words[4:]
+    if words[:1] != ["agentihooks"]:
+        return None
+    return _publish_operands(words[1:])
+
+
+def _publish_operands(words: list[str]) -> tuple[str, list[str]] | None:
+    """The slug and file names in the words after agentihooks, when they are swarm SLUG publish and its options."""
+    rest = iter(words)
+    head: list[str] = []
+    for word in rest:
+        if word == "--as":
+            next(rest, None)
+        elif not word.startswith("--as="):
+            head.append(word)
+        if len(head) == 3:
+            break
+    if head[:1] != ["swarm"] or head[2:] != ["publish"]:
+        return None
+    files: list[str] = []
+    for word in rest:
+        if word == "--":
+            files += rest
+        elif word in _PUBLISH_VALUES:
+            next(rest, None)
+        elif not word.startswith("-"):
+            files.append(word)
+        elif word != "--direct" and not word.startswith(("--message=", "--via=")):
+            return None
+    return head[1], files
+
+
+def _publish_root(slug: str, cwd: str | None) -> Path | None:
+    """The root swarm publish selects for this session: its worktree, else the task's recorded worktree.
+
+    Another swarm, no session folder or any failure in the publisher's own lookup gives None.
+    """
+    if not cwd or os.environ.get("AGENTIHOOKS_SWARM") != slug:
+        return None
+    try:
+        from scripts.swarm import publish
+    except ImportError:
+        return None
+    return publish.session_root(slug, Path(cwd))
 
 
 def _read_only_shell(command: str, cwd: str | None = None) -> bool:
@@ -1062,17 +1141,21 @@ def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> 
     state = profile_chain.read_state()
     if scope == "global":
         bundle = profile_chain.bundle_path(state)
-        return ("bundle", bundle / ".claude" / "conditions") if bundle else ("runtime", runtime_dir())
+        return (
+            ("bundle", profile_chain.layer_root(bundle) / ".claude" / "conditions")
+            if bundle
+            else ("runtime", runtime_dir())
+        )
     if scope == "user":
         user = profile_chain.user_bundle_path(state)
         if user is None:
             raise ConditionError("scope 'user' needs a linked user bundle")
-        return "user-bundle", user / ".claude" / "conditions"
+        return "user-bundle", profile_chain.layer_root(user) / ".claude" / "conditions"
     if scope == "shared":
         shared = profile_chain.shared_bundle_path(state)
         if shared is None:
             raise ConditionError("scope 'shared' needs a linked shared bundle")
-        return "shared-bundle", shared / ".claude" / "conditions"
+        return "shared-bundle", profile_chain.layer_root(shared) / ".claude" / "conditions"
     if scope == "profile":
         chain = profile_chain.profile_dirs(
             profile_chain.bundle_path(state),

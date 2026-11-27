@@ -4,13 +4,14 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from scripts import ci_wiring, gate_protected
+from scripts import ci_frozen, ci_wiring, gate_protected
 from scripts.ci_lab import expressions
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -291,13 +292,18 @@ def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev(
     )
 
 
-def test_the_protected_grader_never_executes_the_head():
+def test_the_protected_grader_never_executes_the_head() -> None:
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "${{ github.base_ref }}"
     assert checkout["with"]["persist-credentials"] is False
     runs = "\n".join(step.get("run", "") for step in steps)
-    assert "pip install" not in runs.replace('python -m pip install "pyyaml>=6.0"', "")
+    for command in (
+        'python -m pip install "pyyaml>=6.0"',
+        "python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3",
+    ):
+        runs = runs.replace(command, "")
+    assert "pip install" not in runs
     assert 'python -m scripts.gate_protected --head "$HEAD_SHA"' in runs
     assert "git checkout" not in runs and "git worktree" not in runs
 
@@ -667,6 +673,34 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     for key in change.get("drop", ()):
         del outputs[key]
     outputs.update(change.get("set", {}))
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
+    assert problems == (["The head changes the durations provenance context outputs."] if red else [])
+
+
+@pytest.mark.parametrize(
+    ("base_outputs", "head_outputs", "red"),
+    [
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({"sonar": "${{ steps.select.outputs.sonar }}"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({}, {"ledger": "run"}, True),
+        ({"ledger": "run"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, True),
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}", "extra": "1"}, True),
+    ],
+)
+def test_protected_select_outputs_admit_adding_the_ledger_mark_only_while_the_base_has_none(
+    base_outputs: dict[str, str], head_outputs: dict[str, str], red: bool
+) -> None:
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {"legs": "${{ steps.select.outputs.legs }}", **base_outputs},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["outputs"].update(head_outputs)
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     assert problems == (["The head changes the durations provenance context outputs."] if red else [])
 
@@ -1102,6 +1136,218 @@ def test_a_hand_edited_lab_aggregation_is_red(edit: tuple[str, str]) -> None:
     ]
 
 
+def _repository_lab_form() -> tuple[dict[str, Any], dict[str, Any], ci_wiring.Wiring, dict[str, Any]]:
+    """Return the repository workflows, a head copy of them, the wiring config and the actors."""
+    from scripts import ci_runner_trust
+
+    workflows = ci_wiring.load(_ROOT)
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    return workflows, copy.deepcopy(workflows), config, actors
+
+
+def test_a_forged_lab_verdict_job_is_red() -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    head["test.yml"]["jobs"]["lab-verdict"] = {
+        "runs-on": "ubuntu-latest",
+        "outputs": {"authoritative": '{"lint": true}', "lab_lint": "success"},
+        "steps": [{"run": "true"}],
+    }
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+    ]
+
+
+def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    del head["test.yml"]["jobs"]["lab-verdict"]
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "edit"),
+    [
+        ("lint", lambda condition: condition.removesuffix(" }}") + " && false }}"),
+        ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
+        ("lint", lambda condition: condition.replace(f" && {gate_protected.LAB_CLAUSE_PREFIX}['lint'] != true", "")),
+        ("lint", lambda condition: condition.replace("['lint'] != true", "['docs'] != true")),
+        ("lint", lambda condition: condition.replace("github.event_name != 'push'", "github.event_name != 'schedule'")),
+        ("lint", lambda _: gate_protected.lab_clause("${{ github.event_name != 'pull_request' || false }}", "lint")),
+        ("select", lambda condition: gate_protected.lab_clause(condition, "select").replace("!= true", "!= false")),
+        (
+            "select",
+            lambda condition: condition.replace(
+                "${{ ", f"${{{{ {gate_protected.LAB_CLAUSE_PREFIX}['select'] != true && ", 1
+            ),
+        ),
+        (
+            "select",
+            lambda condition: gate_protected.lab_clause(condition.replace("!cancelled()", "always()"), "select"),
+        ),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && needs['lab-verdict'].result == 'success' }}"),
+        (
+            "select",
+            lambda condition: (
+                condition.removesuffix(" }}")
+                + " && fromJSON(needs[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}"
+            ),
+        ),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && !contains(toJSON(needs), 'lint') }}"),
+        (
+            "select",
+            lambda _: (
+                "${{ fromJSON(NEEDS[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}"
+            ),
+        ),
+        ("select", lambda _: "${{ NEEDS.LAB-VERDICT.outputs.authoritative != '' }}"),
+    ],
+)
+def test_a_gate_condition_off_its_base_plus_its_exact_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    job = head["test.yml"]["jobs"][gate]
+    job["if"] = edit(job["if"])
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
+        f"The head's {gate} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "edit"),
+    [
+        ("select", lambda condition: gate_protected.lab_clause(condition, "select")),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && always() }}"),
+    ],
+)
+def test_a_gate_without_a_base_lab_clause_grades_green_with_its_exact_clause_or_none(
+    gate: str, edit: Callable[[str], str]
+) -> None:
+    workflows, head, config, actors = _repository_lab_form()
+    jobs = head["test.yml"]["jobs"]
+    jobs[gate]["if"] = edit(jobs[gate]["if"])
+    assert gate_protected.grade(workflows, config, head, config, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("condition", "rendered"),
+    [
+        (None, "${{ fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true }}"),
+        (
+            "${{ !cancelled() }}",
+            "${{ !cancelled() && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true }}",
+        ),
+        (
+            "github.event_name != 'push'",
+            "github.event_name != 'push' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true",
+        ),
+        ("${{ always()", "${{ always() && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true"),
+        ("always() }}", "always() }} && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['lint'] != true"),
+    ],
+)
+def test_the_lab_clause_extends_the_base_condition(condition: str | None, rendered: str) -> None:
+    assert gate_protected.lab_clause(condition, "lint") == rendered
+
+
+@pytest.mark.parametrize(
+    ("condition", "free"),
+    [
+        ("${{ needs.select.result == 'success' }}", False),
+        ("${{ needs['select'].result == 'success' }}", False),
+        ("${{ needs [ 'select' ] .result == 'success' }}", False),
+        ("${{ needs . select.result == 'success' }}", False),
+        ("${{ contains(github.event.head_commit.message, 'needs') }}", False),
+        ("${{ contains(github.event.head_commit.message, 'it''s needs') }}", False),
+        ("${{ github.event.needs == 'x' && x-needs.y }}", False),
+        ("${{ fromJSON(needs[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}", True),
+        ("${{ needs[ 'select' ] && needs[vars.job].result }}", True),
+        ("${{ !contains(toJSON(needs), 'lint') }}", True),
+        ("${{ contains(needs.*.result, 'failure') }}", True),
+        ("${{ 'it''s' == needs }}", True),
+        ("${{ NEEDS['select'].result }}", False),
+        ("${{ Needs[format('x', 'y')] }}", True),
+    ],
+)
+def test_a_condition_reads_the_needs_context_freely_when_a_computed_read_remains(condition: str, free: bool) -> None:
+    assert gate_protected._reads_needs_freely(condition) is free
+
+
+def _lab_aggregators() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return a base and a head copy of a small workflow in the lab form, lint behind its lab clause and unit outside."""
+    from scripts import ci_reuse
+
+    base, _ = _aggregators()
+    jobs = base["jobs"]
+    jobs["lab-verdict"] = {"runs-on": "ubuntu-latest", "if": "github.event_name == 'pull_request'"}
+    jobs["lint"] = {
+        "runs-on": "ubuntu-latest",
+        "needs": ["lab-verdict"],
+        "if": gate_protected.lab_clause("${{ !cancelled() }}", "lint"),
+    }
+    jobs["unit"] = {"runs-on": "ubuntu-latest", "if": "${{ !cancelled() }}"}
+    jobs["gate-required"]["needs"] = [*jobs["gate-required"]["needs"], "lab-verdict"]
+    jobs["gate-required"]["steps"] = ci_reuse.lab_verdict(ci_reuse.gate_steps())
+    return base, copy.deepcopy(base)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda jobs: jobs.update(
+            {"lab-verdict": {"runs-on": "ubuntu-latest", "outputs": {"authoritative": '{"lint": true}'}}}
+        ),
+        lambda jobs: jobs.pop("lab-verdict"),
+    ],
+)
+def test_a_small_lab_form_refuses_a_forged_or_dropped_lab_verdict_job(edit: Callable[[dict[str, Any]], object]) -> None:
+    base, head = _lab_aggregators()
+    edit(head["jobs"])
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "edit"),
+    [
+        ("lint", lambda condition: condition.removesuffix(" }}") + " && false }}"),
+        ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
+        ("lint", lambda _: "${{ !cancelled() }}"),
+        ("lint", lambda condition: condition.replace("['lint']", "['unit']")),
+        ("lint", lambda _: gate_protected.lab_clause("${{ github.event_name != 'pull_request' || false }}", "lint")),
+        ("lint", lambda condition: condition.upper()),
+        ("lint", lambda _: None),
+        ("unit", lambda _: gate_protected.lab_clause("${{ always() }}", "unit")),
+        ("unit", lambda _: "${{ needs['lab-verdict'].result == 'success' }}"),
+        ("unit", lambda _: "${{ needs[format('lab-{0}', 'verdict')].result == 'success' }}"),
+        ("unit", lambda _: "${{ !contains(toJSON(needs), 'lint') }}"),
+        ("unit", lambda _: "${{ NEEDS.LAB-VERDICT.result == 'success' }}"),
+    ],
+)
+def test_a_small_lab_form_refuses_a_gate_condition_off_its_base_plus_its_exact_lab_clause(
+    gate: str, edit: Callable[[str], str | None]
+) -> None:
+    base, head = _lab_aggregators()
+    head["jobs"][gate]["if"] = edit(head["jobs"][gate]["if"])
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        f"The head's {gate} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["${{ !cancelled() }}", gate_protected.lab_clause("${{ !cancelled() }}", "unit"), "${{ always() }}", None],
+)
+def test_a_small_lab_form_lets_a_gate_without_a_base_lab_clause_change_or_take_its_exact_clause(
+    condition: str | None,
+) -> None:
+    base, head = _lab_aggregators()
+    head["jobs"]["unit"]["if"] = condition
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
@@ -1267,6 +1513,24 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
     assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, policy)
+    assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_tests_gate_may_require_ledger_load_when_selection_marks_a_ledger_server_change(weakened: bool) -> None:
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["select"]["outputs"]["ledger"] = "${{ steps.select.outputs.ledger }}"
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.ledger_required(gate["steps"])
+    assert '+ (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)' in gate["steps"][0]["run"]
+    if weakened:
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('["ledger-load"] else []', "[] else []")
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, policy)
@@ -1693,6 +1957,60 @@ def test_the_summary_download_pins_only_the_artifact_downloads() -> None:
         {**flakes, "uses": "actions/download-artifact@v9"},
         summarize,
     ]
+
+
+def _one_download_summary(uses: str, name: str, pattern: str) -> list[dict[str, Any]]:
+    from scripts import ci_reuse
+
+    checkout, durations, _flakes, summarize = ci_reuse.summary_steps()
+    reports = {**durations, "name": name, "uses": uses, "with": {"pattern": pattern, "path": "test-reports"}}
+    return [checkout, reports, summarize]
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize("uses", ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"])
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_accepts_one_download_of_every_report(uses: str, retried: bool, pipefail: bool) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = _one_download_summary(uses, "Download this run's test reports", "{durations,flakes}-3.*")
+    if retried:
+        steps = ci_reuse.retried_summary(steps)
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize(
+    ("name", "pattern"),
+    [
+        ("Download this run's test reports", "*"),
+        ("Download this run's test reports", "durations-3.*"),
+        ("Download this run's test durations", "{durations,flakes}-3.*"),
+    ],
+)
+def test_the_separate_summary_refuses_one_download_of_other_reports(name: str, pattern: str) -> None:
+    base, head = _aggregators()
+    config = _separate_summary(head, _one_download_summary("actions/download-artifact@v8.0.2", name, pattern))
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+def test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was() -> None:
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    reports = {
+        **durations,
+        "name": "Download this run's test reports",
+        "with": {"pattern": "{durations,flakes}-3.*", "path": "test-reports"},
+    }
+    assert gate_protected._one_download([checkout, durations, flakes, summarize]) == [checkout, reports, summarize]
 
 
 def test_the_retried_summary_waits_and_downloads_each_report_once_more():
@@ -2235,7 +2553,7 @@ _FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."
 
 
 def _without_forwarded_stats(run):
-    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS).removeprefix(_COLLECTED_STATS)
 
 
 def _with_forwarded_stats(run):
@@ -2558,9 +2876,57 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
     rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
     expected = {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
-    assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
+    assert set(registry) in (
+        expected,
+        expected | {"scripts/ci_reuse.py"},
+        expected | {"scripts/ci_reuse.py", ".github/workflows/writer-lock.yml"},
+    )
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
+
+
+def test_every_stored_frozen_candidate_is_its_own_announced_blob() -> None:
+    announced = {
+        blob for accepted in json.loads((_ROOT / gate_protected.FROZEN).read_text()).values() for blob in accepted
+    }
+    stored = sorted((_ROOT / ci_frozen.CANDIDATES).iterdir())
+    assert stored
+    for path in stored:
+        assert _git(_ROOT, "hash-object", "--no-filters", str(path)) == path.name, path.name
+        assert path.name in announced, path.name
+
+
+def test_the_ci_tool_pin_candidates_are_stored_for_admission() -> None:
+    registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
+    for frozen_path, blob in (
+        ("scripts/gate_protected.py", "086855f1d1e7a0ee44af2c05468b7bc33ee26856"),
+        (".github/workflows/gate-protected.yml", "ceb96c5d549c6766bc317390d4278f1d3644edd0"),
+    ):
+        stored = _ROOT / ci_frozen.CANDIDATES / blob
+        assert blob in registry[frozen_path], frozen_path
+        assert stored.is_file(), frozen_path
+        assert _git(_ROOT, "hash-object", "--no-filters", str(stored)) == blob, frozen_path
+
+
+@pytest.mark.feature("frozen-writer-lock-workflow")
+def test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job(repo: Path) -> None:
+    lock = ".github/workflows/writer-lock.yml"
+    text = (_ROOT / lock).read_text()
+    registry = (_ROOT / gate_protected.FROZEN).read_text()
+    base = _put(repo, {lock: text, gate_protected.FROZEN: registry}, "base")
+    clean = _put(repo, {"README.md": "clean\n"}, "clean")
+    assert gate_protected._frozen_problems(repo, base, base, clean) == []
+    refusal = (
+        f"The head changes the frozen gate file {lock} to content {gate_protected.FROZEN} on the base does not "
+        "accept; announce its blob there by its own pull request first."
+    )
+    workflow = yaml.safe_load(text)
+    assert workflow["jobs"]
+    for job in workflow["jobs"]:
+        _git(repo, "checkout", "-q", "--detach", base)
+        jobs = {name: body for name, body in workflow["jobs"].items() if name != job}
+        head = _put(repo, {lock: yaml.safe_dump({**workflow, "jobs": jobs})}, f"drop {job}")
+        assert gate_protected._frozen_problems(repo, base, base, head) == [refusal], job
 
 
 def test_the_repository_registry_leaves_the_delivery_config_unfrozen() -> None:

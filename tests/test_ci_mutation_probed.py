@@ -119,21 +119,21 @@ def test_a_large_remainder_spreads_until_no_shard_plans_past_six_minutes_with_it
 
 def test_a_remainder_past_one_wave_of_six_minute_jobs_takes_the_lowest_stage_wall_not_the_shard_ceiling() -> None:
     plan = _plan()
-    whole = {f"scripts.a.x_w{index}__mutmut_1": 600.0 for index in range(36)}
+    whole = {f"scripts.a.x_w{index}__mutmut_1": 600.0 for index in range(6)}
     plan["assignments"].update(dict.fromkeys(whole, 0))
     plan["costs"].update(whole)
     merged = probe.merge_probes(plan, _records(plan))
     replanned = probed.probed_plan(merged, 1080)
-    assert replanned["shards"] == measured.BATCH_RUNNERS == 12
-    assert max(replanned["shard_worker_seconds"]) == pytest.approx(1945.6)
-    assert measured.stage_wall(12, replanned["shard_worker_seconds"]) == pytest.approx(180 + 1945.6 / 3)
+    assert replanned["shards"] == measured.BATCH_RUNNERS == 6
+    assert max(replanned["shard_worker_seconds"]) == pytest.approx(745.6)
+    assert measured.stage_wall(6, replanned["shard_worker_seconds"]) == pytest.approx(180 + 745.6 / 3)
 
 
 def test_the_stage_wall_pays_a_job_setup_once_per_wave_of_the_batch_runner_pool() -> None:
     assert measured.stage_wall(1, [0.0]) == 180
-    assert measured.stage_wall(12, [900.0, 30.0]) == 480
-    assert measured.stage_wall(13, [900.0, 30.0]) == 960
-    assert measured.stage_wall(25, [900.0]) == 1440
+    assert measured.stage_wall(6, [900.0, 30.0]) == 480
+    assert measured.stage_wall(7, [900.0, 30.0]) == 960
+    assert measured.stage_wall(13, [900.0]) == 1440
 
 
 def test_the_quickest_count_is_the_fewest_shards_within_the_wall_else_the_lowest_stage_wall() -> None:
@@ -218,6 +218,20 @@ def test_the_cli_refuses_a_plan_the_remaining_budget_cannot_hold(tmp_path, monke
     assert capsys.readouterr().out.splitlines()[-1] == OVERRUN
 
 
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_the_cli_refusal_after_the_early_stage_names_the_functions_no_test_calls_in_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = _stats(tmp_path, {**_plan(), "untested": ["scripts.a.x_g"]})
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    monkeypatch.setattr("sys.argv", ["probed", "--stats", str(folder), "--budget", "237"])
+    assert probed.main() == 1
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"{OVERRUN} Functions no test calls in process hold 1 of the change's 5 mutants and 40 of its 281 worker"
+        " seconds: scripts.a.x_g."
+    )
+
+
 @pytest.mark.parametrize(("cost", "status"), [(2674.5, 1), (2673.0, 0)])
 def test_the_cli_grades_against_the_full_shard_budget_by_default(tmp_path, monkeypatch, cost, status):
     plan = _plan()
@@ -230,7 +244,7 @@ def test_the_cli_grades_against_the_full_shard_budget_by_default(tmp_path, monke
 
 @pytest.mark.parametrize(
     ("count", "head", "expected"),
-    [(20, 139.56, 11), (2000, 20.0, 12), (3, 1000.0, 3), (1, 0.0, 1)],
+    [(20, 59.56, 5), (2000, 20.0, 6), (3, 1000.0, 3), (1, 0.0, 1)],
 )
 def test_the_early_stage_is_sized_by_the_heads_it_runs(count, head, expected):
     names = {f"scripts.a.x_f__mutmut_{index}": [0, 1] for index in range(count)}

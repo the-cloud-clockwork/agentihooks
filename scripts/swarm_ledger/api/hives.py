@@ -73,11 +73,13 @@ def beaten(sessions: dict[str, Any]) -> int:
 
 
 def view(store: Any, now_ms: int) -> list[dict[str, Any]]:
-    loaded_hives = ports.hive().launch.loaded_hives
+    launch = ports.hive().launch
     leads = masters(store)
-    hives = [hive for hive in loaded_hives(store) if shown(hive, now_ms)]
+    refused: dict[str, str] = {}
+    hives = [hive for hive in launch.loaded_hives(store, launch.pending_reader(refused)) if shown(hive, now_ms)]
     for hive in hives:
         hive["live"] = registry.live(hive, now_ms)
+        hive["admission_unreadable"] = refused.get(hive["id"], "")
         sessions: dict[str, Any] = (
             json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}") if hive["live"] else {}
         )

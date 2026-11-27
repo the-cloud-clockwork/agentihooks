@@ -27,9 +27,6 @@
  "hooks/context/quota_policy.py::decide": {
   "PLR0913": 12
  },
- "hooks/context/voice_output.py::_speak_and_play": {
-  "PLR0912": 13
- },
  "hooks/hook_manager.py::main": {
   "C901": 15,
   "PLR0912": 16
@@ -45,7 +42,7 @@
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 77,
   "PLR0912": 82,
-  "function-lines": 483
+  "function-lines": 481
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
@@ -145,7 +142,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6769
+  "file-lines": 6765
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -162,8 +159,8 @@
   "C901": 13
  },
  "scripts/install.py::_collect_all_managed_mcp_servers": {
-  "C901": 16,
-  "PLR0912": 15
+  "C901": 15,
+  "PLR0912": 14
  },
  "scripts/install.py::_connector_inspect": {
   "C901": 18,
@@ -197,8 +194,8 @@
   "PLR0912": 25
  },
  "scripts/install.py::_reseed_managed_mcp_sources": {
-  "C901": 18,
-  "PLR0912": 17
+  "C901": 17,
+  "PLR0912": 16
  },
  "scripts/install.py::cmd_init_unified": {
   "C901": 25,

@@ -11,7 +11,7 @@ nats_image=mirror.gcr.io/library/nats:2.15.1-alpine
 backup="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 cleanup() {
   docker compose down --volumes >/dev/null 2>&1 || true
-  rm -rf "$backup"
+  rm -rf "$backup" || true
 }
 trap cleanup EXIT
 mark=$SECONDS
@@ -52,11 +52,12 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import exits, runner
-from scripts.swarm import freeze, readiness
+from scripts.swarm import capacity, freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
@@ -66,6 +67,7 @@ from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 TASKS = ("t1", "t2", "t3", "t4", "t5", "t6")
 HIVE = "recovery-hive"
 LAUNCHES = "/data/recovery-launches.jsonl"
+REPORTS = "/data/recovery-reports.jsonl"
 FETCH_MS = 100
 store, slug, ledger = connect(), os.environ["SLUG"], LedgerClient(service=True)
 
@@ -119,10 +121,18 @@ class Tasks:
     def reopen(self, event):
         return None
 
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        with open(REPORTS, "a") as sink:
+            sink.write(json.dumps([event.key, placed.harness]) + "\n")
+
 
 class StandIn:
     def spawn(self, request):
         return Outcome("spawn", Status.OK, "recovery", SimpleNamespace(pane_id=f"pane-{request.name}", harness="claude", account="", launched_at=0))
+
+
+def free_seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
+    return [capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6)]
 
 
 def launched():
@@ -132,17 +142,30 @@ def launched():
         return [json.loads(line) for line in launches if line.strip()]
 
 
-def take(count):
+def unreported() -> list[str]:
+    """The drill's tasks with fewer claude launch reports from the spoke than launches."""
+    reported = []
+    if os.path.exists(REPORTS):
+        with open(REPORTS) as found:
+            reported = [json.loads(line) for line in found if line.strip()]
+    launches = [launch["task"] for launch in launched()]
+    return [task for task in TASKS if reported.count([task, "claude"]) < launches.count(task)]
+
+
+def take(count: int) -> dict[str, list[str]]:
     before = len(launched())
     bus = open_bus(BusConfig.from_environ())
-    spoke = Spoke(SpokeConfig(store.config(slug), "eng", HIVE), bus, StandIn(), Tasks(),
+    spoke = Spoke(SpokeConfig(store.config(slug), "eng", HIVE, accounts=free_seat), bus, StandIn(), Tasks(),
                   measure=lambda: {"cpus": 8, "load5": 0.0}, view=view)
-    outcomes, empty = [], 0
-    while len(launched()) - before < count and empty < 5:
+    outcomes, idle = [], 0
+    while len(launched()) - before < count and idle < 5:
         outcomes.append(spoke.poll(1_000))
-        empty = empty + 1 if outcomes[-1] == "empty" else 0
+        idle = idle + 1 if outcomes[-1] in ("empty", "held") else 0
     bus.close()
-    return {"took": [launch["task"] for launch in launched()[before:]], "outcomes": outcomes}
+    took = [launch["task"] for launch in launched()[before:]]
+    if len(took) < count:
+        sys.exit(f"the hive took {took} of {count} offers before its polls went idle: {outcomes}")
+    return {"took": took, "outcomes": outcomes}
 
 
 def exit_report(agents):
@@ -194,7 +217,8 @@ def state():
         for task in TASKS
     }
     bus.close()
-    return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished")}
+    return {"tasks": found, "agents": sorted(agent.task for agent in store.agents(slug) if agent.state != "finished"),
+            "unreported": unreported()}
 
 
 class QuickPass(runner.HubRunner):
@@ -246,7 +270,8 @@ settle() {
 }
 
 printf 'offered before the backup: %s\n' "$(drill seed t1 t2 t3 t4 t5)"
-printf 'hive took before the backup: %s\n' "$(drill take 3)"
+took="$(drill take 3)"
+printf 'hive took before the backup: %s\n' "$took"
 lap 'first offers'
 
 docker compose stop nats >/dev/null
@@ -257,7 +282,8 @@ lap 'backup'
 
 printf 'done after the backup: %s\n' "$(drill done t1)"
 settle '"t1": {"ledger": "done"'
-printf 'hive took after the backup: %s\n' "$(drill take 2)"
+took="$(drill take 2)"
+printf 'hive took after the backup: %s\n' "$took"
 printf 'state before the restore: %s\n' "$(drill state)"
 lap 'work after the backup'
 
@@ -272,7 +298,8 @@ printf 'agents died after the restore: %s\n' "$(drill die t2 t4)"
 printf 'state after the first hub pass: %s\n' "$(drill pass)"
 settle '"t2": {"ledger": "open"' '"t4": {"ledger": "open"'
 lap 'reopen'
-printf 'hive took the open and reopened tasks: %s\n' "$(drill take 3)"
+took="$(drill take 3)"
+printf 'hive took the open and reopened tasks: %s\n' "$took"
 printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5 t6)"
 task() {
   printf '"%s": {"ledger": "done", "claim": null, "launches": %s, "jetstream": [%s]}' "$1" "$2" "$3"
@@ -284,7 +311,8 @@ settle \
   "$(task t4 2 '"exited", "exited"')" \
   "$(task t5 1 '"exited"')" \
   "$(task t6 1 '"exited"')" \
-  '"agents": []'
+  '"agents": []' \
+  '"unreported": []'
 printf 'ledger against the recorded state after reconcile: %s\n' "$found"
 lap 'final reconcile'
 

@@ -82,6 +82,9 @@ class ChaosTasks:
     def reopen(self, event: Envelope) -> None:
         self.journal.write("reopened", task=event.key)
 
+    def dead_lettered(self, event: Envelope) -> None:
+        self.journal.write("reopened", task=event.key)
+
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self.journal.write("failed", task=event.key, harness=harness)
 

@@ -7,7 +7,7 @@ import math
 import os
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from scripts import session_bands
@@ -25,7 +25,7 @@ HARNESSES = frozenset({"claude", "codex"})
 STATUSES = frozenset({"allowed", "allowed_warning", "rejected", "error"})
 REPORT_FIELDS = ("observed_ms", "provider_status", "five_used", "week_used", "five_reset", "week_reset")
 REQUIRED = frozenset({"observed_ms", "provider_status"})
-OBSERVED, UNKNOWN = "observed", "unknown"
+OBSERVED, UNKNOWN, EXPIRED = "observed", "unknown", "expired"
 ADMIT, WAIT, HANDOFF = "admit", "wait", "handoff"
 FRESH_SECONDS = session_bands.FRESH_SECONDS
 MIN_ROUTING_LEFT = 5.0
@@ -145,7 +145,7 @@ def _hive_reading(account: str, harness: str, reading: Any, now_ms: int) -> Obse
         _report({field: getattr(observed, field) for field in REPORT_FIELDS}, now_ms)
     except (KeyError, TypeError, ValueError, SwarmError):
         return None
-    return observed
+    return replace(observed, provider_status=EXPIRED) if reading.get("expired") else observed
 
 
 def hive_observation(redis: "Redis", account: str, harness: str, now_ms: int) -> Observation | None:
@@ -259,6 +259,8 @@ class QuotaObservations:
             return Reading(account, harness, UNKNOWN)
         now = self.clock()
         age = (now - observation.observed_ms) / 1000
+        if observation.provider_status == EXPIRED:
+            return Reading(account, harness, EXPIRED, age)
         five = session_bands.left(observation.five_used, observation.five_reset, now / 1000)
         week = session_bands.left(observation.week_used, observation.week_reset, now / 1000)
         if observation.provider_status == "error" or week is None or age > FRESH_SECONDS:

@@ -1,0 +1,13 @@
+{
+  "id": "hub-pull-first-look-opened",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2908",
+  "behaviour": "The hub pull tracker publishes opened on its first look at a tracked pull request in any state: a first look that finds it merged or closed publishes opened and then the terminal event to each tracking swarm with rising versions, so the review pass, which reads opened alone, queues its review.",
+  "seam": "scripts.hub.pulls.Pulls.observe",
+  "tests": [
+    "tests/hub/test_pulls.py::test_a_first_look_publishes_opened_before_any_terminal_event",
+    "tests/hub/test_pulls.py::test_first_observation_of_a_merged_pull_request_reports_the_merge",
+    "tests/hub/test_pulls.py::test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request",
+    "tests/hub/test_pulls.py::test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again"
+  ]
+}

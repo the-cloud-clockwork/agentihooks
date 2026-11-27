@@ -1,0 +1,20 @@
+rules:
+  - id: merge-queue-priority-unguarded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The merge queue operation ran its optional priority step bare after GitHub accepted the enqueue, so a ledger
+      read failing inside the priority raised out of swarm merge queue while the queue held the entry. Run the
+      priority step through merge_queue._prioritized, which reports a failure as priority_error and still returns
+      the queue outcome.
+    paths:
+      include:
+        - /scripts/swarm/merge_queue.py
+        - merge-queue-priority-unguarded.py
+    patterns:
+      - pattern: priority()
+      - pattern-not-inside: |
+          try:
+              ...
+          except Exception as $EXC:
+              ...

@@ -3,6 +3,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -91,14 +92,14 @@ class TestMatches:
 
 
 class TestDecide:
-    def test_the_twenty_first_watch_with_no_action_is_refused(self, gate):
+    def test_the_twenty_first_watch_with_no_action_is_refused(self, gate: WatchBudget) -> None:
         made(gate, watch=20)
         decision = decide(gate)
         assert not decision.allowed
         assert decision.reason == (
             "watch budget: 20 watch calls since your last action (limit 20) and 20 watch calls for 0 actions "
             "(limit 5 per action). Hand the waiting to the tick: agentihooks swarm sw wait <minutes> --reason "
-            '"<what you wait on>", or act first: commit, push or record progress on the ledger.'
+            '"<what you wait on>", or act first: commit, push or record progress through the swarm API.'
         )
 
     def test_the_twentieth_watch_passes(self, gate):
@@ -233,3 +234,11 @@ def test_the_ledger_dir_defaults_to_the_development_ledger(tmp_path):
 
 def test_the_activity_root_defaults_to_the_recorder_root():
     assert WatchBudget(environ={}).root == activity.default_root()
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "master", "review"])
+def test_worker_lanes_cannot_exceed_the_watch_budget(gate: Any, monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
+    monkeypatch.setattr("scripts.gates.watch.naming.lane_of", lambda name: lane)
+    made(gate, name=CI, watch=1000)
+    assert not decide(gate, name=CI).allowed

@@ -14,6 +14,7 @@ LEDGER = {
     "bin_ledger": "ledger_bin.delete",
     "workspace_tails": "workspace_tails",
     "stream_resources": "stream_resources",
+    "summary": "ledger_summary",
     "layout": "ledger_layout.read",
     "write_layout": "ledger_layout.write",
     "write_gate": "write_gate",
@@ -82,5 +83,6 @@ def serve_document(monkeypatch, repository: object, document: dict) -> None:
 
     entry = SimpleNamespace(generation=1, state=document, views={})
     monkeypatch.setattr(repository, "current", lambda slug: entry)
+    monkeypatch.setattr(repository, "read", lambda slug, *keys: document)
     monkeypatch.setattr(repository, "task_rows", task_rows(lambda: entry))
     monkeypatch.setattr(task_list, "HELD", {})

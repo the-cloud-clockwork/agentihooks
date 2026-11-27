@@ -1,5 +1,7 @@
 import importlib.util
+import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -9,6 +11,7 @@ import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -16,15 +19,18 @@ import pytest
 import yaml
 from coverage import CoverageData
 
+from scripts import ci_budget
+from tests.contracts.ci_tiers.test_workflow import enabled
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_sonar_uses_all_shards_without_running_tests_again():
+def test_sonar_uses_all_shards_without_running_tests_again() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan["needs"] == ["unit", "unit-selected", "select", "reuse", "admission", "lab-verdict"]
+    assert scan["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
@@ -40,6 +46,185 @@ def test_sonar_sets_up_before_merging_coverage():
     for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
         assert names.index(setup) < merge
     assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
+
+
+def _sonar_steps() -> tuple[list[dict], list[str | None]]:
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
+    return steps, [step.get("name") for step in steps]
+
+
+def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lands() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert not {"unit", "unit-selected"} & set(jobs["sonar"]["needs"])
+    steps, names = _sonar_steps()
+    arrivals = steps[names.index("Take each shard's coverage as it lands")]
+    assert arrivals["uses"] == "actions/github-script@v7"
+    assert arrivals["with"]["github-token"] == "none"
+    assert "process.env.ARRIVALS" in arrivals["with"]["script"]
+    assert arrivals["continue-on-error"] is True
+    assert arrivals["if"] == "needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'"
+    merge = steps[names.index("Merge shard coverage")]
+    assert arrivals["env"] == {
+        "SHARDS": merge["env"]["SHARDS"],
+        "SCOPE": merge["env"]["SCOPE"],
+        "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py",
+    }
+    order = [
+        "Install coverage",
+        "Carry the pull request runs' coverage of the reused tests",
+        "Take each shard's coverage as it lands",
+        "Take each selected leg's latest branch coverage",
+        "Merge shard coverage",
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    patterns = [str((step.get("with") or {}).get("pattern", "")) for step in steps]
+    assert not [pattern for pattern in patterns if "coverage-3.12" in pattern]
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_a_dev_push_analyses_sonar_only_after_every_unit_leg() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    sonar, after = jobs["sonar"], jobs["sonar-after-unit"]
+    assert after["needs"] == [*sonar["needs"], "unit"]
+    assert after["steps"] == sonar["steps"]
+    shared = ("runs-on", "timeout-minutes", "outputs", "permissions")
+    assert {key: after[key] for key in shared} == {key: sonar[key] for key in shared}
+    assert after["env"] == {key: value for key, value in sonar["env"].items() if key != "SONAR_HAND_OFF"}
+    assert "||" not in after["if"]
+    select = SimpleNamespace(result="success", outputs=SimpleNamespace(sonar="", scope="full"))
+    needs = {"select": select, "unit": SimpleNamespace(result="failure")}
+    events = ("push", "pull_request", "merge_group", "workflow_dispatch")
+    assert [event for event in events if enabled(after["if"], event, needs)] == ["push"]
+    assert after["name"] == (
+        "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar' || 'sonar-after-unit' }}"
+    )
+    assert sonar["name"] == (
+        "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar hand off' || 'sonar' }}"
+    )
+    assert ci_budget.BUDGETS["sonar-after-unit"] == ci_budget.BUDGETS["sonar"]
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_sonar_hands_a_dev_push_off_and_keeps_starting_beside_the_shards() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert not {"unit", "unit-selected"} & set(jobs["sonar"]["needs"])
+    assert (
+        jobs["sonar"]["env"]["SONAR_HAND_OFF"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
+    )
+    steps, names = _sonar_steps()
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[0]["if"] == "env.SONAR_HAND_OFF != 'true'"
+    upload = steps[names.index("Upload coverage and analysis evidence")]
+    assert upload["if"] == "always() && env.SONAR_HAND_OFF != 'true'"
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_promotion_reads_the_dev_push_analysis_after_the_unit_legs() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    for name in ("promotion-ready", "promote"):
+        job = jobs[name]
+        assert {"sonar", "sonar-after-unit"} <= set(job["needs"])
+        graded = {
+            need: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis="", promote="false"))
+            for need in job["needs"]
+        }
+        assert not enabled(job["if"], "push", graded)
+        graded["sonar-after-unit"].outputs.analysis = "A1"
+        assert enabled(job["if"], "push", graded)
+
+
+def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -> None:
+    spec = importlib.util.spec_from_file_location("sonar_arrivals", ROOT / ".github/coverage/arrivals.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    steps, names = _sonar_steps()
+    expr = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
+    matched = re.fullmatch(
+        r"\$\{\{ github\.event_name == 'push' && github\.ref == 'refs/heads/dev' && (\d+) \|\| (\d+) \}\}", expr
+    )
+    assert matched is not None
+    push_minutes, pull_minutes = (int(value) for value in matched.groups())
+    assert module.WAIT < pull_minutes * 60
+    assert module.WAIT < push_minutes * 60
+    sonar_matched = re.fullmatch(
+        r"\$\{\{ github\.event_name == 'push' && github\.ref == 'refs/heads/dev' && (\d+) \|\| (\d+) \}\}",
+        jobs["sonar"]["timeout-minutes"],
+    )
+    assert sonar_matched is not None
+    sonar_push, sonar_pull = (int(value) for value in sonar_matched.groups())
+    assert sonar_push - push_minutes >= 10
+    assert sonar_pull - pull_minutes >= 10
+
+
+@pytest.mark.feature("sonar-queue-watch-dev-push-bound-token")
+def test_the_queue_watch_token_stays_under_its_one_hour_lifetime() -> None:
+    spec = importlib.util.spec_from_file_location("queue_watch", ROOT / ".github/coverage/queue_watch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "actions" not in (jobs["sonar"].get("permissions") or {})
+    steps, names = _sonar_steps()
+    watch = steps[names.index("Watch whether this run's shard jobs have started")]
+    assert watch["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/dev' "
+        "&& needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'"
+    )
+    mint = steps[names.index("Mint the token that reads this run's job states")]
+    assert mint["if"] == watch["if"]
+    assert watch["env"]["GH_APP_TOKEN"] == "${{ steps.jobs-token.outputs.token }}"
+    assert module.BOUND < 60 * 60
+
+
+def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:
+    classes = json.loads((ROOT / ".github/runner-classes.json").read_text())
+    assert classes["test.yml/sonar"] == "standard"
+
+
+def test_a_shard_uploads_its_flake_report_after_its_coverage() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    unit = [step.get("name") for step in jobs["unit"]["steps"]]
+    assert unit.index("Upload coverage") < unit.index("Record flaky tests") < unit.index("Upload the flake report")
+    selected = [step.get("name") for step in jobs["unit-selected"]["steps"]]
+    assert (
+        selected.index("Upload this leg's branch coverage")
+        < selected.index("Upload coverage")
+        < selected.index("Upload selected test flakes")
+    )
+
+
+def test_combine_takes_each_report_flattened_as_it_landed(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    for folder in ("coverage-3.12-1", "coverage-3.12-2", "branch-5/1-2"):
+        (shards / folder).mkdir(parents=True)
+        (shards / folder / ".coverage").write_text("x")
+    (shards / "coverage-3.12-1/flat-.coverage").write_text("flat one")
+    (shards / "coverage-3.12-2/flat-.coverage").write_text("")
+    (shards / "branch-5/1-2/flat-.coverage").write_text("flat carried")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls.txt"
+    (bin_dir / "python").write_text(
+        f'#!/usr/bin/env bash\necho "$*" >> {calls}\n'
+        'if [[ "$3" == combine ]]; then for data in "${@:5}"; do cat "$data"; echo; done >> ' + f"{calls}; fi\n"
+    )
+    (bin_dir / "python").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = calls.read_text().splitlines()
+    flattened = [line.split()[1] for line in lines if "flatten.py" in line]
+    assert flattened == [".coverage-shards/coverage-3.12-2/.coverage"]
+    assert "flat one" in lines and "flat carried" in lines
+    assert sorted(shards.rglob("flat-*")) == [shards / "coverage-3.12-2/flat-.coverage"]
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -220,7 +405,9 @@ def meet(mine, theirs, failure):
 """
 
 
-def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
+def _stubbed_combine_tree(
+    tmp_path: Path, lcov_exit: int = 0, xml_exit: int = 0, lcov_late: int = 0, parts: int = 1
+) -> subprocess.CompletedProcess[str]:
     shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
     (tmp_path / ".github/coverage/flatten.py").write_text(
         "import shutil, sys\nshutil.copyfile(sys.argv[1], sys.argv[2])\n"
@@ -229,16 +416,31 @@ def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
         report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
         report.parent.mkdir(parents=True)
         report.write_text("data")
+    measured = CoverageData(basename=str(tmp_path / ".coverage"))
+    for folder in range(parts):
+        (tmp_path / f"folder{folder}").mkdir()
+        (tmp_path / f"folder{folder}/part.py").write_text("value = 1\n")
+        measured.add_lines({f"folder{folder}/part.py": [1]})
+    measured.write()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/ci_cpu_quota.py").write_text("print(4)\n")
     (tmp_path / "coverage").mkdir()
     (tmp_path / "coverage/__init__.py").write_text("")
     (tmp_path / "coverage/__main__.py").write_text(
         _RENDEZVOUS
         + f"""
 if sys.argv[1] == "xml":
+    out = Path(sys.argv[sys.argv.index("-o") + 1])
     meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    Path(f"{{out}}.part").touch()
+    deadline = time.monotonic() + 5
+    while len(list(out.parent.glob("*.part"))) < {parts}:
+        if time.monotonic() > deadline:
+            sys.exit("the XML parts never ran beside each other")
+        time.sleep(0.05)
     if {xml_exit}:
         sys.exit({xml_exit})
-    Path("coverage.xml").write_text("<coverage/>")
+    out.write_text('<coverage lines-valid="1" lines-covered="1" branches-valid="0" branches-covered="0"><packages/></coverage>')
 elif sys.argv[1] == "report":
     print("TOTAL")
 """
@@ -282,6 +484,100 @@ def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_pat
     assert not (tmp_path / "coverage.xml").exists()
     time.sleep(3)
     assert not (tmp_path / "lcov.info").exists()
+
+
+def test_the_python_coverage_xml_runs_in_parts_beside_each_other(tmp_path: Path) -> None:
+    result = _stubbed_combine_tree(tmp_path, parts=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "from 2 parts" in result.stdout
+    assert ET.parse(tmp_path / "coverage.xml").getroot().get("lines-valid") == "2"
+
+
+def test_a_failed_coverage_xml_part_fails_the_merge_with_its_code(tmp_path: Path) -> None:
+    result = _stubbed_combine_tree(tmp_path, xml_exit=5, parts=2)
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert not (tmp_path / "coverage.xml").exists()
+
+
+def _xml_shape(path: Path) -> tuple[dict[str, str], list[str | None], list[object]]:
+    root = ET.parse(path).getroot()
+    packages: list[object] = [
+        (
+            package.attrib,
+            [(node.attrib, [line.attrib for line in node.iter("line")]) for node in package.iter("class")],
+        )
+        for package in root.iter("package")
+    ]
+    head = {key: value for key, value in root.attrib.items() if key != "timestamp"}
+    return head, [source.text for source in root.iter("source")], packages
+
+
+def test_the_parallel_coverage_xml_equals_the_single_report_across_packages(tmp_path: Path) -> None:
+    sources = {
+        "hooks/__init__.py": "",
+        "hooks/pick.py": "def pick(flag):\n    if flag:\n        return 1\n    return 2\n",
+        "hooks/memory/__init__.py": "",
+        "hooks/memory/value.py": "value = 1\n",
+        "scripts/__init__.py": "",
+        "scripts/never.py": "def never():\n    return 3\n",
+        "scripts/swarm/__init__.py": "",
+        "scripts/swarm/loop.py": "for item in range(2):\n    value = item\n",
+    }
+    for name, text in sources.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    generator = """
+import runpy
+import sys
+from coverage import Coverage
+cov = Coverage(config_file=sys.argv[1])
+cov.start()
+runpy.run_path('hooks/pick.py')['pick'](True)
+runpy.run_path('hooks/memory/value.py')
+runpy.run_path('scripts/swarm/loop.py')
+cov.stop()
+cov.save()
+"""
+    config = str(ROOT / ".github/coverage/coverage.ini")
+    subprocess.run([sys.executable, "-c", generator, config], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "coverage", "xml", f"--rcfile={config}", "-o", "expected.xml"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / ".github/coverage/parallel_xml.py"), config, "3", "coverage.xml"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "from 3 parts" in result.stdout
+    joined, single = _xml_shape(tmp_path / "coverage.xml"), _xml_shape(tmp_path / "expected.xml")
+    assert len(single[2]) == 4
+    assert joined == single
+
+
+def test_the_xml_split_keeps_each_folder_whole_and_balances_the_parts_by_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = importlib.util.spec_from_file_location("sonar_parallel_xml", ROOT / ".github/coverage/parallel_xml.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sizes = {"big/a.py": 900, "mid/b.py": 500, "mid/c.py": 300, "small/d.py": 200, "small/e.py": 100, "tiny/f.py": 50}
+    for name, size in sizes.items():
+        (tmp_path / name).parent.mkdir(exist_ok=True)
+        (tmp_path / name).write_text("x" * size)
+    monkeypatch.chdir(tmp_path)
+    parts = module.split(sorted(sizes), 2)
+    assert sorted(name for part in parts for name in part) == sorted(sizes)
+    folders = [{Path(name).parent for name in part} for part in parts]
+    assert len(parts) == 2 and not folders[0] & folders[1]
+    assert sorted(sum(sizes[name] for name in part) for part in parts) == [950, 1100]
+    assert module.split([], 3) == [[]]
+    assert module.split(["gone/x.py"], 4) == [["gone/x.py"]]
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):

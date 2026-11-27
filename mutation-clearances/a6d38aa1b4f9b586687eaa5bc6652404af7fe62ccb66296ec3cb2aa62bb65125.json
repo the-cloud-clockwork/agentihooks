@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/writer_copy.py:scripts.swarm_ledger.repository.writer_copy.x_detached:02d2c2fd4280f9319228d33f8614729287053b7d51f18d525ad167ae2ddb50ac": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: typing.cast(typ, val) returns val unchanged and never reads typ, so replacing the type argument with None changes only the static type seen by the type checker, not any runtime value or branch. writer_copy.py:38 (detached, held): equivalent, held is the same object as value."
+  }
+}

@@ -93,7 +93,7 @@ jobs:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
-          uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
+          uv pip install --python "$HOME/venv/bin/python" --constraint .github/test-requirements.lock -e ".[all]"
 
       - name: Write and read a full size ledger from ten clients within the server budget
         if: ${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}
@@ -168,7 +168,7 @@ jobs:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
-          uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
+          uv pip install --python "$HOME/venv/bin/python" --constraint .github/test-requirements.lock -e ".[all]"
 
       - name: Prepare the same load harness for the base implementation
         run: |
@@ -215,7 +215,7 @@ jobs:
           name: compare-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log
-            load-evidence/*/server.log
+            load-evidence/**/*.log
           if-no-files-found: error
           retention-days: 7
 

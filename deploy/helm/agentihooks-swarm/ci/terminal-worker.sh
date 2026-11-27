@@ -24,7 +24,7 @@ EOF
 SWARM_TERMINAL_LAUNCH="$HOME/launch.json" /opt/swarm-node/ssh/start.sh &
 herdr_env=(env -i "HOME=$attempt/homes/codex" "XDG_RUNTIME_DIR=$attempt/run" "TMPDIR=$attempt/tmp" PATH=/usr/local/bin:/usr/bin:/bin TERM=dumb USER=worker)
 setsid "${herdr_env[@]}" herdr server > "$HOME/herdr-server.log" 2>&1 &
-for _ in $(seq 100); do
+for _ in {1..100}; do
   if "${herdr_env[@]}" herdr status server --json 2>/dev/null | grep -q '"running":true'; then
     printf 'terminal worker ready: herdr server running for %s\n' "$EXECUTION_ID"
     wait

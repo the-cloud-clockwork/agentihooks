@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:9afb1d1a9111fbd3ea49d9f2f3243400793b2416168ba906507e7e19e7b47908": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including table and column names, resolve case insensitively, so the uppercased delete removes the same rows."
+  }
+}

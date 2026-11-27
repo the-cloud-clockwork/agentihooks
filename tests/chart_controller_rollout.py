@@ -68,8 +68,8 @@ def surge_problems(chart: str, label: str, *extra: str) -> list[str]:
         found.append(f"{label} renders {spec['replicas']} controller replicas, expected 2")
     strategy = spec.get("strategy", {})
     rolling = strategy.get("rollingUpdate", {})
-    if strategy.get("type") != "RollingUpdate" or rolling.get("maxUnavailable") != 0 or rolling.get("maxSurge") != 1:
-        found.append(f"{label} can roll out with no ready controller: {strategy}")
+    if strategy.get("type") != "RollingUpdate" or rolling.get("maxUnavailable") != 1 or rolling.get("maxSurge") != 0:
+        found.append(f"{label} must replace one controller at a time without a surge pod: {strategy}")
     budget = docs.get("PodDisruptionBudget", {}).get("spec", {})
     if budget.get("minAvailable") != 1:
         found.append(f"{label} renders no disruption budget that keeps one controller up: {budget}")
@@ -90,6 +90,23 @@ def problems(chart: str) -> list[str]:
     if single.returncode:
         return [*found, f"one controller fails to render: {single.stderr.strip()}"]
     docs = controller_docs(single.stdout)
+    spec = docs["Deployment"]["spec"]["template"]["spec"]
+    current = container(docs)
+    volumes = {row["name"]: row for row in spec.get("volumes", [])}
+    mounts = {row["name"]: row.get("mountPath") for row in current.get("volumeMounts", [])}
+    env = {row["name"]: row.get("value") for row in current.get("env", [])}
+    if volumes.get("cache", {}).get("emptyDir") != {"medium": "Memory", "sizeLimit": "512Mi"}:
+        found.append("the controller tick view is not on a bounded memory volume")
+    if mounts.get("cache") != "/home/swarm/.cache":
+        found.append("the controller cache volume does not cover its scheduler runtime folder")
+    if (
+        volumes.get("home", {}).get("emptyDir", {}).get("medium") != "Memory"
+        or mounts.get("home") != "/run/agentihooks"
+        or env.get("AGENTIHOOKS_HOME") != "/run/agentihooks"
+    ):
+        found.append("the controller no longer keeps its existing memory home")
+    if env.get("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES") != "0":
+        found.append("the controller takes automatic swarm snapshots into its container layer")
     if docs["Deployment"]["spec"].get("strategy", {}).get("type") != "Recreate":
         found.append("one controller replica no longer rolls out by Recreate")
     if "PodDisruptionBudget" in docs:

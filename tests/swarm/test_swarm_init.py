@@ -6,11 +6,13 @@ import os
 import subprocess
 import sys
 import urllib.request
+from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from scripts.swarm import cli, naming, stack_env, stack_init, swarm_init
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_creator, new_ledger
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_create_gate import as_lane
@@ -239,6 +241,25 @@ def test_a_swarm_ledger_left_without_its_swarm_is_free_and_init_finishes_it(scra
     assert init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path))[0] == 0
     assert scratch.slugs() == ["demo-swarm"]
     assert new_ledger.storage.default().get_document("demo-swarm")["title"] == "Earlier"
+
+
+def test_init_the_store_refuses_makes_no_ledger(
+    scratch: RedisStore, plan: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    scratch.redis.hset(scratch.key("demo-swarm", "config"), "slug", "demo-swarm")
+    code, out = init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path))
+    assert code == 1 and out.endswith("Swarm not created: the stack refused it: no output.\n")
+    assert "swarm: swarm demo-swarm already exists\n" in capsys.readouterr().err
+    assert not new_ledger.storage.default().exists("demo-swarm")
+
+
+def test_init_a_create_refuses_names_the_refusal_and_makes_no_ledger(
+    scratch: RedisStore, plan: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    code, _ = init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path), "--template", "nope")
+    assert code == 1 and scratch.slugs() == []
+    assert "swarm: no swarm template nope; agentihooks swarm templates lists them\n" in capsys.readouterr().err
+    assert not new_ledger.storage.default().exists("demo-swarm")
 
 
 def test_a_typed_create_is_refused_and_names_swarm_init(monkeypatch, capsys):

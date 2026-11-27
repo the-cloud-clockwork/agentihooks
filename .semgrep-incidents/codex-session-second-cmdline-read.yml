@@ -1,0 +1,20 @@
+rules:
+  - id: codex-session-second-cmdline-read
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A Codex check already read this process's command line, and this reads it again and indexes the second read.
+      A process that exits between the two reads answers an empty list, and the index raises out of the hive daemon
+      beat, which ends the daemon with every agent on the hive. Read the command line once and judge that list.
+    paths:
+      include:
+        - /hooks/context/account_sessions.py
+        - codex-session-second-cmdline-read.py
+    patterns:
+      - pattern-inside: |
+          if <... _is_codex($PID, $PROC) ...>:
+              ...
+          ...
+          $ARGV = _cmdline($PID, $PROC)
+          ...
+      - pattern: $ARGV[$INDEX]

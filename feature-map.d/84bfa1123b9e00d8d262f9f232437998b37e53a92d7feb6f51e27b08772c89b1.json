@@ -1,0 +1,33 @@
+{
+  "id": "thin-enhancement-phase-backfill",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-phaseless-enhance-backfill",
+  "behaviour": "Previously queued claimable enhancement plans without phases and their targets get a shared manual phase, preserving frozen and held work, existing scope and metadata. Preview reports the eligible count, writes are paced and bounded, a slow write stops the pass, and repeated passes perform no writes. A run from a seat writes as that seat, and a service run as swarm.",
+  "seam": "scripts.swarm.thin_task.backfill and its explicit module command",
+  "tests": [
+    "tests/swarm/test_thin_task_backfill.py::test_an_existing_enhancement_target_is_already_skipped_by_the_thin_pass",
+    "tests/swarm/test_thin_task_backfill.py::test_legacy_pairs_get_separate_manual_phases_and_a_second_pass_writes_nothing",
+    "tests/swarm/test_thin_task_backfill.py::test_an_existing_own_phase_is_reused",
+    "tests/swarm/test_thin_task_backfill.py::test_a_scoped_target_keeps_its_phase_and_only_its_orphan_plan_moves",
+    "tests/swarm/test_thin_task_backfill.py::test_unrelated_finished_and_scoped_plan_tasks_are_unchanged",
+    "tests/swarm/test_thin_task_backfill.py::test_target_state_and_completion_metadata_are_preserved",
+    "tests/swarm/test_thin_task_backfill.py::test_a_missing_target_refuses_the_pass_before_any_writes",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_reads_bounded_targets_and_reports_verified_before_and_after_counts",
+    "tests/swarm/test_thin_task_backfill.py::test_a_refused_api_write_is_visible_and_never_reports_zero_remaining",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_fails_if_readback_still_finds_an_unphased_plan",
+    "tests/swarm/test_thin_task_backfill.py::test_a_plan_missing_from_the_claimable_set_is_unchanged",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_leaves_frozen_and_held_pairs_untouched",
+    "tests/swarm/test_thin_task_backfill.py::test_preview_reports_the_eligible_count_without_writes",
+    "tests/swarm/test_thin_task_backfill.py::test_a_write_over_two_seconds_stops_the_pass_before_another_batch",
+    "tests/swarm/test_thin_task_backfill.py::test_an_unavailable_claim_verdict_prevents_every_write",
+    "tests/swarm/test_thin_task_backfill.py::test_a_later_batch_rechecks_concurrent_scope_and_hold_changes",
+    "tests/swarm/test_thin_task_backfill.py::test_a_phase_change_after_the_batch_read_refuses_the_stale_moves",
+    "tests/swarm/test_thin_task_backfill.py::test_the_native_command_reads_its_arguments_from_the_process",
+    "tests/swarm/test_thin_task_backfill.py::test_command_usage_describes_the_repair_and_requires_an_explicit_swarm",
+    "tests/swarm/test_thin_task_backfill.py::test_an_ineligible_pair_does_not_hide_a_later_eligible_pair",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_reuses_an_existing_phase_from_the_api",
+    "tests/swarm/test_thin_task_backfill.py::test_the_completion_flag_is_kept_in_the_api_projection",
+    "tests/swarm/test_thin_task_backfill.py::test_a_newly_held_batch_does_not_stop_a_later_claimable_batch",
+    "tests/swarm/test_thin_task_backfill.py::test_a_seat_run_moves_a_pair_writing_as_that_seat"
+  ]
+}
