@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import urllib.error
+from email.message import Message
 from types import SimpleNamespace
 
 import pytest
@@ -615,7 +616,7 @@ def task_rows(monkeypatch, plans=()):
             return list(plans)
         found = next((t for t in core.sync(slug)[0]["tasks"] if f"tasks/{t['id']}" == path), None)
         if found is None:
-            raise urllib.error.HTTPError(path, 404, "missing", None, None)
+            raise urllib.error.HTTPError(path, 404, "missing", Message(), None)
         return found
 
     monkeypatch.setattr(ledger, "resource", resource)
@@ -727,7 +728,7 @@ def test_publish_plan_refuses_an_unknown_or_phased_task_before_publishing(plan_l
 
 def test_publish_plan_passes_on_a_task_read_failure_other_than_a_missing_task(tmp_path, monkeypatch):
     def unavailable(slug, path, collection=False):
-        raise urllib.error.HTTPError(path, 503, "unavailable", None, None)
+        raise urllib.error.HTTPError(path, 503, "unavailable", Message(), None)
 
     monkeypatch.setattr(ledger, "resource", unavailable)
     monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
