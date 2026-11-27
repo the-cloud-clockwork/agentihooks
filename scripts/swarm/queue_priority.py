@@ -12,6 +12,8 @@ from scripts.swarm import freeze, lab_control, merge_queue, queue_record, ready,
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_ledger.repository.live_rows import ancestry, covers
 
+ALERT_SOURCE = "merge-priority-requeue"
+
 DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
 ACTIVE_S = 3600
@@ -141,7 +143,7 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
                 actions.append(f"requeued {url} left out of the merge queue by an interrupted priority")
         except (SwarmError, InboxError) as exc:
             if ledger is not None:
-                ledger.raise_alert(slug, f"merge-priority-requeue:{url}", f"Could not requeue {url}: {exc}")
+                ledger.raise_alert(slug, f"{ALERT_SOURCE}:{url}", f"Could not requeue {url}: {exc}")
             actions.append(f"could not requeue {url} after an interrupted priority: {exc}")
             retrying(store, tasks, displaced, pull, str(exc))
     return actions

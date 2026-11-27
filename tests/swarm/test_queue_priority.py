@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm import cli, commands, ledger_events, merge_queue, queue_priority, queue_record
 from scripts.swarm.store import SwarmError
+from tests.swarm.test_alert_sources import CheckedLedger
 from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
 from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue, Killed
@@ -372,6 +373,35 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head
     assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + "2"]
     assert alerts == [
         ("sw", f"merge-priority-requeue:{URL[:-1]}2", f"Could not requeue {URL[:-1]}2: GitHub unavailable")
+    ]
+
+
+@pytest.mark.feature("swarm-alert-sources-accepted")
+def test_a_refused_requeue_alerts_the_ledger_and_still_marks_the_pull_retrying(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = priority
+
+    def graphql(query, variables, run):
+        if "enqueuePullRequest" in query:
+            raise SwarmError("GitHub unavailable")
+        return GRAPHQL(query, variables, p.queue.run)
+
+    sent = []
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    monkeypatch.setattr(
+        queue_priority, "InboxStore", lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append(args))
+    )
+    p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] != "P2"]
+    queue_priority.Displaced(p.store, "sw").add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": "head2"})
+    ledger = CheckedLedger()
+    assert queue_priority.refresh(p.store, "sw", p.tasks, ledger) == [
+        f"could not requeue {URL[:-1]}2 after an interrupted priority: GitHub unavailable"
+    ]
+    assert ledger.alerts == [("sw", queue_priority.ALERT_SOURCE, f"Could not requeue {URL[:-1]}2: GitHub unavailable")]
+    assert [c for _, c, _ in sent] == ["ci@owner"]
+    assert [(pull["url"], pull["notified"]) for pull in queue_priority.Displaced(p.store, "sw").pulls()] == [
+        (URL[:-1] + "2", True)
     ]
 
 
