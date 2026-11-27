@@ -253,6 +253,8 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "docs",
         ".github",
         ".semgrep",
+        ".semgrep-incidents",
+        "feature-map.d",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -295,6 +297,8 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docs/",
             ".github/",
             ".semgrep/",
+            ".semgrep-incidents/",
+            "feature-map.d/",
             "evidence/",
             "observability/",
             "docker/swarm-node/",
@@ -336,9 +340,7 @@ def mutate_files(
     first: tuple[str, ...] = (),
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
-    clock = time.monotonic()
     prepare_workspace(root, work, list(selected), tests)
-    print(f"Mutation stats timing: workspace {time.monotonic() - clock:.1f}s", flush=True)
     selection = work / "changed-lines.json"
     direct_path = root / ".mutation-direct.json"
     direct = json.loads(direct_path.read_text()) if direct_path.is_file() else {}
@@ -370,14 +372,12 @@ def mutate_files(
                 return {}, reason
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
-    clock = time.monotonic()
     status = run_process(
         [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection), *shard_args, *stats_args],
         work,
         deadline - time.monotonic(),
         log,
     )
-    print(f"Mutation stats timing: selection subprocess {time.monotonic() - clock:.1f}s", flush=True)
     if status is None:
         return {}, "over budget"
     if status != 0:
