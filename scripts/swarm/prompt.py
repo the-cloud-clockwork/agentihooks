@@ -65,6 +65,7 @@ RECON_FIRST = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+RECAPS_TOTAL = "recaps_total"
 SEAT_BRIEF = (
     "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
     "learned notes from the store that keeps them."
@@ -467,9 +468,22 @@ def priming_lines(task: dict[str, Any]) -> list[str]:
     lines.append("5. Older recaps, newest first:")
     for recap in older[:OLDER_RECAPS]:
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
-    if len(older) > OLDER_RECAPS:
-        lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
+    hidden = task.get(RECAPS_TOTAL, len(recaps)) - 1 - OLDER_RECAPS
+    if hidden > 0:
+        lines.append(f"{hidden} older recaps are kept on the seat and not shown.")
     return [*lines, SEAT_BRIEF]
+
+
+def carried(task: dict[str, Any]) -> dict[str, Any]:
+    """The task with only the recaps its prompt shows, the seat's whole recap count, and its learned notes less the
+    withheld ones, so an admission carries what the hive renders and counts instead of every recap the seat holds."""
+    recaps = task.get("recaps") or []
+    return {
+        **task,
+        "recaps": recaps[: 1 + OLDER_RECAPS],
+        RECAPS_TOTAL: task.get(RECAPS_TOTAL, len(recaps)),
+        "learned": [note for note in task.get("learned") or [] if not note.get("withheld")],
+    }
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:

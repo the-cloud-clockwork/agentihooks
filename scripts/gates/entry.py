@@ -57,6 +57,7 @@ class GateRegistry(MutableMapping[str, Gate]):
 
 GATES = GateRegistry(
     {
+        "first-read": lambda: import_module("scripts.gates.first_read").FirstRead(),
         "identity": lambda: import_module("scripts.gates.identity").PinnedIdentity(),
         "watch": lambda: import_module("scripts.gates.watch").WatchBudget(),
         "subagents": lambda: import_module("scripts.gates.subagents").SubagentBudget(),

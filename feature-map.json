@@ -13379,13 +13379,13 @@
       "id": "lab-scheduler-grade",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",
-      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss makes the grade red; a unit that cannot run makes the grade red and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
+      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss leaves the grade neutral, without a verdict; a unit that cannot run leaves the grade neutral and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.scheduler.fold against the recorded cases in tests/fixtures/ci_lab/gate_required.json",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_fully_cached_head_enqueues_nothing_and_completes_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_newer_head_drops_pending_units_and_reuses_carried_verdicts",
-        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
-        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
+        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_leaves_the_grade_without_a_verdict",
+        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_leaves_the_grade_without_a_verdict_and_stores_none",
         "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
       ]
     },
@@ -13418,12 +13418,12 @@
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
-      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it leaves the grade neutral, without a verdict.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.expand_tests.unlisted_units, scripts.ci_lab.run_tests.outside, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
         "tests/ci_lab/test_queue.py::test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt",
-        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_leaves_the_grade_without_a_verdict",
         "tests/ci_lab/test_scheduler.py::test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored",
         "tests/ci_lab/test_scheduler.py::test_a_pull_request_or_hotfix_head_expands_no_test_units",
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate",

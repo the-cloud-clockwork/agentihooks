@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm.prompt import OLDER_RECAPS
+from scripts.swarm.prompt import OLDER_RECAPS, RECAPS_TOTAL
 
 
 def path(home: Path, slug: str, name: str) -> Path:
@@ -28,7 +28,7 @@ def rows(slug: str, task: dict[str, Any]) -> list[dict[str, Any]]:
     ]
     recaps = task.get("recaps") or []
     for shown, recap in enumerate(recaps[: 1 + OLDER_RECAPS]):
-        number = len(recaps) - shown
+        number = task.get(RECAPS_TOTAL, len(recaps)) - shown
         found.append(_row("recap", f"recap:{seat}#{number}", {"seat": seat, "recap": number}, recap["text"]))
     for number, note in enumerate(task.get("learned") or [], 1):
         if note["maturity"] != "data" and not note.get("withheld"):
