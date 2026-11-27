@@ -18,6 +18,8 @@
     "tests/test_op_context_typed_check.py::test_a_module_with_no_function_that_takes_the_context_fails",
     "tests/test_op_context_typed_check.py::test_the_lines_come_in_module_name_order_and_end_with_the_concrete_context",
     "tests/test_op_context_typed_check.py::test_a_context_that_lacks_one_member_of_the_protocol_fails",
+    "tests/test_op_context_typed_check.py::test_takers_keeps_two_functions_of_one_name_in_the_order_the_module_holds_them",
+    "tests/test_op_context_typed_check.py::test_main_builds_the_concrete_context_of_a_blank_sync",
     "tests/test_op_context_typed_check.py::test_the_check_prints_every_line_and_fails_on_one_fault",
     "tests/test_op_context_typed_check.py::test_the_check_passes_when_no_line_fails",
     "tests/test_op_context_typed_check.py::test_every_registered_op_module_takes_the_context_by_the_protocol",
