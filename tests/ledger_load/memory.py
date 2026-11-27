@@ -15,15 +15,15 @@ def main() -> int:
         print(json.dumps({"server_peak_rss_kib": peak}), flush=True)
         return stop(process)
 
-    def memory_run(folder):
+    def memory_run(folder: Path) -> tuple[list[str], float | None]:
         folder.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir="/dev/shm", prefix="ledger-load-") as directory:
             scratch = Path(directory)
             try:
                 return run(scratch)
             finally:
-                if (log := scratch / "server.log").exists():
-                    shutil.copyfile(log, folder / "server.log")
+                for log in scratch.glob("*.log"):
+                    shutil.copyfile(log, folder / log.name)
 
     gate.stop_server = measured_stop
     gate.run = memory_run
