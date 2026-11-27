@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "load-gate-stops-started-servers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-load-gate-stops-started",
+      "behaviour": "When the paired load gate read server fails to start, the already started API service is stopped before the original startup failure propagates.",
+      "seam": "tests.ledger_load.gate.start_servers",
+      "tests": [
+        "tests/ledger_load/test_gate.py::test_a_failed_read_server_start_stops_the_started_api_service"
+      ]
+    },
+    {
       "id": "balance-master-route",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",

@@ -440,6 +440,7 @@ def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
     assert not ledger_load.RELAYS
 
 
+@pytest.mark.feature("load-gate-stops-started-servers")
 @pytest.mark.parametrize(
     "failure",
     [
