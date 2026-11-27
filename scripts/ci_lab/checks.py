@@ -47,6 +47,7 @@ __all__ = [
     "Budget",
     "Checks",
     "Dispatches",
+    "MoveRefused",
     "Output",
     "PostRefused",
     "Token",
@@ -87,6 +88,10 @@ Key = tuple[str, str, str]
 
 class PostRefused(RuntimeError):
     """GitHub refused a check run request with no rate limit wait left to retry it."""
+
+
+class MoveRefused(ValueError):
+    """A check run move that is not forward; `Scheduler._fail` reads this as its post already landed this pass."""
 
 
 class Token(Protocol):

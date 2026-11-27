@@ -1,15 +1,36 @@
 import json
+import subprocess
 from collections.abc import Callable
 
 import pytest
+import requests
 
-from scripts.ci_lab import control, manifests, scheduler
+from scripts.ci_lab import checks, control, manifests, scheduler
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.retry import Policy
-from tests.ci_lab.test_scheduler import Run, plan, unit
+from tests.ci_lab.test_scheduler import (
+    CHECK_RUNS,
+    HEAD_A,
+    HEAD_B,
+    SLUG,
+    FixtureToken,
+    Run,
+    github,
+    plan,
+    pull_plan,
+    unit,
+)
 from tests.ci_lab.test_scheduler import lab as _lab
+from tests.ci_lab.test_scheduler_uncarried import REASON, reaching
 
 lab = _lab
+GIT_FAILURE = subprocess.CalledProcessError(128, ["git", "ls-remote"])
+
+
+def _unreachable(repo: str, head: str) -> bool:
+    raise GIT_FAILURE
+
+
 EVENTS = {
     "backfill": "backfill",
     "promotion": "push",
@@ -326,3 +347,69 @@ def test_a_cut_short_refusal_counts_toward_the_pass_s_starts_cap_so_a_later_head
     run.tick(1600)
     assert len(run.lab.expander.seen) == 7
     assert run.lab.client.hlen(scheduler.WAITING) == 1
+
+
+def _real_checks(run: Run) -> tuple[checks.Checks, Run]:
+    poster = checks.Checks(SLUG, FixtureToken())
+    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _repo: poster, run.lab.hotfixes, run.lab.kube)
+    engine = scheduler.Scheduler(run.lab.client, run.lab.objects, ports, run.engine.settings)
+    return poster, Run(run.lab, engine)
+
+
+@pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
+def test_a_head_refused_from_two_waiting_entries_in_one_pass_posts_its_failed_check_once(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(calls))
+    monkeypatch.setattr(run.lab.expander, "reachable", _unreachable)
+    poster, real = _real_checks(run)
+    real.push(HEAD_A, lane="own-sha")
+    real.push(HEAD_A, lane="engineer-branch")
+    real.push(HEAD_B, lane="other")
+    actions = real.tick(1000)
+    assert actions.count(f"cannot expand {HEAD_A}: {GIT_FAILURE}") == 2
+    assert f"cannot expand {HEAD_B}: {GIT_FAILURE}" in actions
+    assert poster.status((HEAD_A, checks.name(scheduler.REQUIRED, True), "unexpanded-1000")) == "completed"
+    assert calls.count(("POST", CHECK_RUNS)) == 2
+    assert real.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
+def test_a_pull_request_head_retired_from_two_waiting_entries_in_one_pass_posts_its_failed_check_once(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(calls))
+    reaching(run, monkeypatch, HEAD_A)
+    poster, real = _real_checks(run)
+    real.push(HEAD_A, event="pull_request", action="synchronize", lane="own-sha")
+    real.push(HEAD_A, event="pull_request", action="synchronize", lane="engineer-branch")
+    actions = real.tick(1000)
+    retiring = f"retiring {HEAD_A}: {REASON}"
+    skipped = f"the failed {scheduler.REQUIRED} check of {HEAD_A} was already posted in this pass"
+    assert [action for action in actions if action.startswith("retiring")] == [retiring, f"{retiring}; {skipped}"]
+    assert calls.count(("POST", CHECK_RUNS)) == 1
+    assert real.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
+def test_a_head_refused_in_two_different_passes_still_posts_a_failed_check_in_each(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(calls))
+    monkeypatch.setattr(run.lab.expander, "reachable", _unreachable)
+    poster, real = _real_checks(run)
+    real.push(HEAD_A, lane="first")
+    first = real.tick(1000)
+    real.push(HEAD_A, lane="first")
+    second = real.tick(2000)
+    assert first == [f"received {HEAD_A} on first", f"cannot expand {HEAD_A}: {GIT_FAILURE}"]
+    assert second == [f"received {HEAD_A} on first", f"cannot expand {HEAD_A}: {GIT_FAILURE}"]
+    assert calls.count(("POST", CHECK_RUNS)) == 2
+    assert poster.status((HEAD_A, checks.name(scheduler.REQUIRED, True), "unexpanded-1000")) == "completed"
+    assert poster.status((HEAD_A, checks.name(scheduler.REQUIRED, True), "unexpanded-2000")) == "completed"
