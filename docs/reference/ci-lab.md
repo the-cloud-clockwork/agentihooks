@@ -151,6 +151,36 @@ pass prints its scheduler and relay actions to standard output. The CLI has no h
 options: it binds all interfaces on 8800, 8801 and 9108. The chart or container network controls
 which clients can reach them.
 
+### Bound a persistent scheduler cache
+
+The optional cache policy requires all three settings: `CI_LAB_CACHE_ROOT`,
+`CI_LAB_CACHE_LIMIT_BYTES` and `CI_LAB_CACHE_POD_UID`. The root must be an existing,
+absolute directory owned by the scheduler user, with no group or world write permission.
+It must be empty or already owned by this policy. The limit is a positive decimal byte count;
+the Pod UID comes from Kubernetes `metadata.uid`.
+
+Run the scheduler as PID one in its private PID namespace and pass `--require-cache-policy`
+when deployment storage depends on these controls. Missing or partial settings then refuse
+startup. Older images reject the flag before constructing the service. With no policy settings
+and no required flag, existing paths and startup behavior remain unchanged.
+
+The policy derives `CI_LAB_GIT_MIRROR` and `CI_LAB_MIRROR_STORE` under a Pod-specific
+generation in the root. An exclusive root lock protects ownership. A container restart in
+the same Pod retains healthy cache data; a replacement Pod starts a fresh generation and
+removes stale generations marked as owned. Foreign directories and symlink targets are
+preserved. A force-deleted Pod's generation is reclaimed when its successor starts.
+
+Allocated blocks are scanned every ten seconds plus scan time, without following symlinks
+or counting hardlinks twice. This is an asynchronous threshold, so usage can overshoot the
+limit. Excess usage or a measurement error marks the generation invalid and exits PID one
+nonzero, ending all private-namespace children, including detached Git processes. The next
+start resets the invalid generation before constructing cache consumers. Healthy service
+exit stops the scanner before releasing ownership.
+
+Release runtime support before deploying a chart that requires the policy. An availability
+rollback restores the former bounded `emptyDir` chart through Git before runtime support
+is removed. The required flag makes a runtime-only rollback refuse startup.
+
 ### Verify the running service
 
 Run these requests from a client that can reach the scheduler. Replace `lab` with its service

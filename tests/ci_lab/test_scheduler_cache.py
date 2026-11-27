@@ -246,7 +246,7 @@ def test_over_budget_cache_is_invalidated_and_reset_on_same_pod_restart(
         statuses.append(status)
         exited.set()
 
-    monkeypatch.setattr(cache, "_exit", exit_process)
+    monkeypatch.setattr(cache, "_terminate", exit_process)
 
     def exceed(found: Mapping[str, str]) -> int:
         store = Path(found["CI_LAB_MIRROR_STORE"])
@@ -296,3 +296,124 @@ def test_main_required_policy_refuses_before_runtime_construction(
     environ[contract.RUNTIME_CONFIG] = str(tmp_path / "not-read")
     assert scheduler.main(["--require-cache-policy"], environ) == 1
     assert cache.ROOT in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_scan_failure_invalidates_the_generation_before_fatal_exit(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exited = Event()
+    started = Event()
+    statuses: list[int] = []
+    original = cache.allocated_bytes
+    monkeypatch.setattr(cache, "SCAN_SECONDS", 0.01)
+
+    def measure(root: Path) -> int:
+        if started.is_set():
+            raise PermissionError("cache cannot be measured")
+        return original(root)
+
+    def terminate(status: int) -> None:
+        statuses.append(status)
+        exited.set()
+
+    def consume(found: Mapping[str, str]) -> int:
+        started.set()
+        assert exited.wait(10)
+        assert (Path(found["CI_LAB_MIRROR_STORE"]).parent / ".invalid").is_file()
+        return 0
+
+    monkeypatch.setattr(cache, "allocated_bytes", measure)
+    monkeypatch.setattr(cache, "_terminate", terminate)
+    cache.run(consume, policy)
+    assert statuses == [1]
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_owned_root_cleanup_preserves_foreign_directories_and_symlink_targets(
+    policy: dict[str, str], tmp_path: Path
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    foreign = root / "foreign"
+    foreign.mkdir()
+    retained = foreign / "kept"
+    retained.write_text("foreign")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "kept").write_text("outside")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    cache.run(lambda _found: 0, policy | {cache.POD_UID: SECOND_POD})
+    assert retained.read_text() == "foreign"
+    assert (outside / "kept").read_text() == "outside"
+    assert (root / "linked").is_symlink()
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_consumer_exception_releases_the_lock_and_retains_healthy_cache(policy: dict[str, str]) -> None:
+    failure = RuntimeError("consumer failed")
+
+    def fail(found: Mapping[str, str]) -> int:
+        (Path(found["CI_LAB_MIRROR_STORE"]) / "retained").write_text("healthy")
+        raise failure
+
+    def restart(found: Mapping[str, str]) -> int:
+        assert (Path(found["CI_LAB_MIRROR_STORE"]) / "retained").read_text() == "healthy"
+        return 29
+
+    with pytest.raises(RuntimeError) as raised:
+        cache.run(fail, policy)
+    assert raised.value is failure
+    assert cache.run(restart, policy) == 29
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_allocated_bytes_tolerates_a_file_renamed_during_the_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "measure"
+    root.mkdir()
+    vanished = root / "vanished"
+    vanished.write_bytes(b"x" * 8192)
+    original = cache.os.stat
+
+    def race(
+        path: str | Path | int, *, dir_fd: int | None = None, follow_symlinks: bool = True
+    ) -> cache.os.stat_result:
+        if path == "vanished" and dir_fd is not None:
+            vanished.unlink(missing_ok=True)
+            raise FileNotFoundError("renamed during scan")
+        return original(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(cache.os, "stat", race)
+    assert cache.allocated_bytes(root) == root.lstat().st_blocks * 512
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("kind", ["lock-link", "lock-file", "generation-link", "generation-foreign", "store-link"])
+def test_unsafe_owned_entries_refuse_without_following_symlinks(
+    policy: dict[str, str], tmp_path: Path, kind: str
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    generation = root / FIRST_POD
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    retained = outside / "retained"
+    retained.write_text("foreign")
+    if kind == "lock-link":
+        (root / ".lock").unlink()
+        (root / ".lock").symlink_to(retained)
+    elif kind == "lock-file":
+        (root / ".lock").chmod(0o666)
+    elif kind == "generation-link":
+        policy[cache.POD_UID] = SECOND_POD
+        (root / SECOND_POD).symlink_to(outside, target_is_directory=True)
+    elif kind == "generation-foreign":
+        (generation / ".owner").unlink()
+    else:
+        (generation / "store").rmdir()
+        (generation / "store").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(cache.PolicyError):
+        cache.run(lambda _found: 0, policy)
+    assert retained.read_text() == "foreign"

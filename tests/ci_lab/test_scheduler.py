@@ -2655,12 +2655,14 @@ def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
 
 
 @pytest.mark.feature("lab-scheduler-service")
+@pytest.mark.parametrize("with_policy", [False, True])
 def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_policy: bool
 ) -> None:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
+    from scripts.ci_lab import cache
     from scripts.events import config, factory
 
     calls: dict[str, Any] = {"served": 0}
@@ -2748,13 +2750,32 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.contract.CONTROL_TOKEN: "tok",
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
     } | APP_SETTINGS
+    if with_policy:
+        root = tmp_path / "cache"
+        root.mkdir(mode=0o750)
+        environ |= {
+            cache.ROOT: str(root),
+            cache.LIMIT: str(1024 * 1024),
+            cache.POD_UID: "11111111-1111-4111-8111-111111111111",
+        }
+        monkeypatch.setattr(cache, "_pid", lambda: 1)
+    requested = environ
+    if with_policy:
+        generation = Path(environ[cache.ROOT]) / environ[cache.POD_UID]
+        environ = environ | {
+            scheduler.contract.GIT_MIRROR: str(generation / "node"),
+            "CI_LAB_MIRROR_STORE": str(generation / "store"),
+        }
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
     bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
-    monkeypatch.setattr(
-        config.BusConfig, "from_environ", classmethod(lambda cls, found: provisioning if found is environ else None)
-    )
+
+    def bus_from_environ(_cls: type[config.BusConfig], found: Any) -> config.BusConfig | None:
+        calls["bus_environ"] = found
+        return provisioning if found == environ else None
+
+    monkeypatch.setattr(config.BusConfig, "from_environ", classmethod(bus_from_environ))
     monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == bound else None)
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
@@ -2762,7 +2783,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     monkeypatch.setattr(scheduler, "time", Clock)
     monkeypatch.setattr(scheduler, "serve", serve)
     monkeypatch.setattr(relay, "build", builds)
-    assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
+    assert scheduler.main(["--interval", "0.5", "--passes", "3"], requested) == 7
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     name, options = calls["s3"]
     signing = options.pop("config")
@@ -2783,7 +2804,9 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     relayed_from, relayed, relay_consumer = builds.builds[0]
     assert (relayed_from, relayed.queue.client, relay_consumer) == (environ, client, "ci-lab-relay consumer")
     found, leases, routes, spending, clock, ports, mirror = calls["listen"]
-    assert mirror == tmp_path / "node"
+    assert mirror == Path(environ[scheduler.contract.GIT_MIRROR])
+    assert built_from is relayed_from is calls["bus_environ"]
+    assert (built_from is requested) is (not with_policy)
     assert found.queue.client is client and leases.queue is found.queue
     assert leases.pods is found.ports.pods
     assert isinstance(leases.manifests, partial)
@@ -2801,9 +2824,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     found, relaying, interval, passes, clock, sleep = calls["serve"]
     assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
-    assert scheduler.main([], environ) == 7
+    assert scheduler.main([], requested) == 7
     assert calls["serve"][2:4] == (scheduler.INTERVAL_S, 0)
-    del environ[scheduler.contract.CONTROL_TOKEN]
+    del requested[scheduler.contract.CONTROL_TOKEN]
+    environ.pop(scheduler.contract.CONTROL_TOKEN, None)
     assert scheduler.main([], environ) == 7
     assert calls["listen"][2].token == ""
     calls.clear()
