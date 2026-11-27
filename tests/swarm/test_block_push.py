@@ -8,7 +8,7 @@ import pytest
 
 from scripts.swarm import cli, publish, stack
 from scripts.swarm.store import AgentRecord, RedisStore
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_comments, ledger_workspace
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env
 
@@ -109,12 +109,13 @@ def _held(worktree, capsys, base: str) -> Path:
     head = _git(top, "rev-parse", "HEAD")
     capsys.readouterr()
     assert block() == 0
-    patch = ledger_workspace.folder("sw", "t1") / f"repo-{BRANCH}.patch"
+    patch = ledger_workspace.folder("sw", "t1") / "repo.patch"
     assert json.loads(capsys.readouterr().out)["held_patch"] == [
         {"repository": str(primary), "branch": BRANCH, "head": head, "base": base, "commits": 1, "patch": str(patch)}
     ]
     assert ledger.rows["t1"]["state"] == "blocked"
     assert ("t1", HELD_NOTE, AGENT) in ledger.comments
+    assert ledger_comments.check(HELD_NOTE, "comment") is None
     assert "the ready fix" in patch.read_text()
     return patch
 
@@ -140,6 +141,7 @@ def test_block_under_panic_saves_only_the_commits_after_the_last_push(env, workt
     _git(top, "push", "-u", "origin", BRANCH)
     pushed = _git(top, "rev-parse", "HEAD")
     _task_commit(top)
+    ledger_workspace.folder("sw", "t1").mkdir(parents=True)
     patch = _held(worktree, capsys, pushed)
     assert _git(primary, "ls-remote", "origin", f"refs/heads/{BRANCH}") == f"{pushed}\trefs/heads/{BRANCH}"
     assert "earlier.txt" not in patch.read_text()
