@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Callable
 from typing import Any
 
@@ -75,6 +76,28 @@ def test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_
     }
 
 
+@pytest.mark.feature("protected-grader-admits-floating-and-pinned-provenance")
+def test_the_floating_tool_form_restores_each_pinned_parser_install_and_keeps_every_other_value() -> None:
+    value = {
+        True: {"push": None},
+        PINNED: PINNED,
+        "steps": [
+            {"run": f"python -m {PINNED} && python -m {PINNED}", "timeout-minutes": 5, "if": None},
+            {"run": f'"$RUNNER_TEMP/python" -I -m {DOUBLE}\necho done\n', "continue-on-error": False},
+            {"with": {"sparse-checkout": PINNED_SPARSE, "fetch-depth": 1}},
+        ],
+    }
+    assert gate_protected._floating_tool_form(value) == {
+        True: {"push": None},
+        PINNED: SINGLE,
+        "steps": [
+            {"run": f"python -m {SINGLE} && python -m {SINGLE}", "timeout-minutes": 5, "if": None},
+            {"run": f'"$RUNNER_TEMP/python" -I -m {DOUBLE}\necho done\n', "continue-on-error": False},
+            {"with": {"sparse-checkout": PINNED_SPARSE, "fetch-depth": 1}},
+        ],
+    }
+
+
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
 @pytest.mark.parametrize("factory", [ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job])
 @pytest.mark.parametrize("install", [DOUBLE, PINNED, *NEAR_MISSES])
@@ -99,6 +122,36 @@ def test_the_protected_durations_provenance_admits_its_parser_install_floating_o
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     admitted = install in {SINGLE, PINNED}
     assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.feature("protected-grader-admits-floating-and-pinned-provenance")
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("install", [SINGLE, PINNED, *NEAR_MISSES])
+def test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_exact_pin_only(
+    monkeypatch: pytest.MonkeyPatch, retried: bool, bounded: bool, install: str
+) -> None:
+    base = _durations(False, False, SINGLE)
+    head = _durations(retried, bounded, install)
+    pinned = _durations(False, False, PINNED)["jobs"]["select"]["steps"]
+    monkeypatch.setattr(ci_reuse, "duration_provenance_steps", lambda: copy.deepcopy(pinned))
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
+    admitted = install in {SINGLE, PINNED}
+    assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.feature("protected-grader-admits-floating-and-pinned-provenance")
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("bounded", [False, True])
+def test_the_protected_durations_provenance_admits_its_own_template_when_it_mixes_both_install_forms(
+    monkeypatch: pytest.MonkeyPatch, retried: bool, bounded: bool
+) -> None:
+    mixed = f"{SINGLE} && {PINNED}"
+    base = _durations(False, False, SINGLE)
+    head = _durations(retried, bounded, mixed)
+    template = _durations(False, False, mixed)["jobs"]["select"]["steps"]
+    monkeypatch.setattr(ci_reuse, "duration_provenance_steps", lambda: copy.deepcopy(template))
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == []
 
 
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
