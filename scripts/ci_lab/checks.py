@@ -313,6 +313,7 @@ class Checks:
 
     def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
         """Drop what is remembered of one check run, so its next post creates it again from any status."""
+        self.runs.pop((head, name(gate, shadow), run), None)
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create the check run on its first transition, else advance it in place; return its id."""

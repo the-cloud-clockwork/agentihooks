@@ -404,6 +404,10 @@ class Poster(Protocol):
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         ...
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of a check run the grade holds no id of, so its next post creates it."""
+        ...
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
         ...
@@ -1480,7 +1484,9 @@ class Scheduler:
     def _post(self, state: State, now_ms: int) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
-        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
+        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. One the grade
+        holds no id of is forgotten by the poster first, so a grade started again under the run name of a grade the
+        scheduler forgot opens new check runs instead of meeting the statuses of the forgotten one. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
         head before the relay pushes it. A post the App token or the network refuses holds every post of the
         repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
@@ -1500,6 +1506,8 @@ class Scheduler:
             shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
+            else:
+                poster.forget(state.head, check, state.run, shadow)
             output = self._output(state, check, status)
             try:
                 state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
