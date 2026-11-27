@@ -16,6 +16,12 @@ CONDITION = re.compile(
 CANARY_EXIT = ast.dump(ast.parse("sys.exit(main(sys.argv[2]))").body[0])
 SHELL_META = "$`<>(){}|;&\n"
 NAME_SAFE = "._-"
+LITERAL = re.compile(r"""(?:[A-Za-z0-9_@%+=:,./-]| |'[^']*'|"'")*""")
+EXEC_FIELD = r'\s*"?(?:cmd"?\s*:\s*"(?:[^"\\]|\\.)*"|(?:max_output_tokens|yield_time_ms)"?\s*:\s*\d+)\s*'
+EXEC_CALL = rf"(?:await\s+)?tools\.exec_command\(\s*\{{{EXEC_FIELD}(?:,{EXEC_FIELD})*,?\s*\}}\s*\)"
+EXEC_PROGRAM = re.compile(
+    rf"\s*(?:(?:const\s+\w+\s*=\s*)?{EXEC_CALL}\s*;?(?:\s*text\(\w+\)\s*;?)?|text\(\s*{EXEC_CALL}\s*\)\s*;?)\s*"
+)
 
 
 def marker_path(session: str) -> Path:
@@ -86,7 +92,18 @@ def _canary_statement(statement: ast.stmt) -> bool:
     )
 
 
+def _literal(text: str) -> bool:
+    return LITERAL.fullmatch(text) is not None
+
+
+def _sole_command(command: str, text: str) -> bool:
+    return text == command or EXEC_PROGRAM.fullmatch(command) is not None
+
+
 def _canary(command: str) -> bool:
+    text = _command(command)
+    if text is None or not _literal(text) or not _sole_command(command, text):
+        return False
     words = _words(command)
     if len(words) != 5 or not re.fullmatch(r"python[0-9.]*", Path(words[0]).name):
         return False
