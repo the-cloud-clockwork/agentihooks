@@ -56,6 +56,7 @@ def test_the_compose_task_smoke_spoke_reads_a_seat_that_fits_its_offer() -> None
     assert_seat_fits(function(body, "free_seat"))
 
 
+@pytest.mark.feature("compose-smoke-launch-report")
 def test_the_compose_task_smoke_stand_in_takes_the_launch_report_of_its_one_launch() -> None:
     script = smoke()
     protocol = list(inspect.signature(spoke.Tasks.launched).parameters)

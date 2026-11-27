@@ -159,6 +159,7 @@ def test_the_recovery_drill_spoke_reads_a_seat_that_fits_its_offers() -> None:
     assert_seat_fits(function(body, "free_seat"))
 
 
+@pytest.mark.feature("compose-smoke-launch-report")
 def test_the_recovery_drill_stand_in_takes_the_launch_report_of_every_launch() -> None:
     script = drill()
     body = heredoc(script, DRILL)
