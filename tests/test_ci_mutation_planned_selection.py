@@ -313,7 +313,7 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
 def _line_project(tmp_path, monkeypatch, mode):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
@@ -529,7 +529,7 @@ def test_a_changed_file_without_recorded_direct_tests_names_the_test_modules_imp
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -566,7 +566,7 @@ def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path,
 def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -620,7 +620,7 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
 ):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -817,7 +817,7 @@ TABLE_SOURCE = (
 def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path, monkeypatch, mode, mention, expected):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     (tmp_path / "scripts/core.py").write_text(TABLE_SOURCE)
@@ -899,7 +899,7 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     manifest = _recorded_project(tmp_path, monkeypatch)
     edits = {
         "helper": ("tests/conftest.py", "X = 1\n"),
-        "dependency": ("uv.lock", "version = 1\n"),
+        "dependency": (".github/test-requirements.lock", "pytest==8.4.2\n"),
         "root module": ("setup.py", "X = 1\n"),
         "workflow": (".github/workflows/test.yml", "env:\n  FLAG: 1\n"),
         "edited test": ("tests/test_core.py", "\n# edited\n"),
@@ -920,6 +920,19 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {10} if cause == "new function" else {6}}, selection, manifest)
     assert selection == {"scripts/core.py": WHOLE}
+
+
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_record_drift_treats_a_test_requirements_lock_change_as_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    assert plan.record_drift(tmp_path, manifest) is not None
+    lock = tmp_path / ".github/test-requirements.lock"
+    lock.parent.mkdir()
+    lock.write_text("pytest==8.4.2\n")
+    _commit(tmp_path, "lock")
+    assert plan.record_drift(tmp_path, manifest) is None
 
 
 def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, monkeypatch):

@@ -240,7 +240,8 @@ def test_priority_journals_one_record_with_every_mutation_step():
                     ["queue", URL],
                     ["restore", other + "2"],
                     ["restore", other + "3"],
-                ]
+                ],
+                "lab": None,
             },
         )
     ]
@@ -257,7 +258,9 @@ def test_priority_journals_its_steps_when_an_unexpected_error_escapes():
 
     with pytest.raises(RuntimeError):
         merge_queue.prioritize(URL, run=run, journal=book)
-    assert book.records == [("priority", URL, "head9", "1", "2", [], {"steps": [["dequeue", URL[:-1] + "3"]]})]
+    assert book.records == [
+        ("priority", URL, "head9", "1", "2", [], {"steps": [["dequeue", URL[:-1] + "3"]], "lab": None})
+    ]
 
 
 def test_priority_journals_the_errors_it_returns():

@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm_ledger import ledger_agent_ops, ledger_tasks
@@ -23,4 +25,4 @@ def test_a_done_task_names_every_missing_proof_field():
 def test_an_update_parked_on_an_unknown_task_is_dropped():
     doc = {"tasks": [{"id": "t1"}]}
     op = {"item": "tasks/t1", "fields": {"parked_on": ["t9"]}}
-    assert ledger_tasks._gated(doc, op, None, doc["tasks"][0]) is False
+    assert ledger_tasks._gated(doc, op, cast(Any, None), doc["tasks"][0]) is False

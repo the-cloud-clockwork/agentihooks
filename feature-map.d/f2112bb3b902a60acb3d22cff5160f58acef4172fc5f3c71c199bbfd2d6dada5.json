@@ -1,0 +1,10 @@
+{
+  "id": "event-offer-api-seats",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-smoke-seat-hold-hang",
+  "behaviour": "An event offer fits the account seat hold on a host whose only Claude credential is an API key, or a gateway base URL with a token, and that has no subscription token account, while the same offer stays held on a host with no credential at all.",
+  "seam": "offer_quota.Fit with its default reader over capacity.accounts and the Claude API source",
+  "tests": [
+    "tests/swarm/test_offer_quota.py::test_an_api_key_or_gateway_host_fits_offers_with_no_token_account"
+  ]
+}

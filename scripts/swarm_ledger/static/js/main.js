@@ -1,8 +1,10 @@
 import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadMetadata, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
+import { flush, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
+import { seed } from "./seed.js";
 import { showArtifacts } from "./artifacts.js";
-import { render, renderStats } from "./render.js";
+import { render } from "./render.js";
+import { renderStats } from "./stats.js";
 import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
 import { completeList, foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
@@ -10,7 +12,7 @@ import { closeComplete, collapsible, commentBoxes, groupOpen, markToggles, remem
 import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
-import { connectEvents } from "./events.js";
+import { connectEvents, loadSwarm } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
 import { keepSession, loadTips } from "./api.js";
 import { tips } from "./state.js";
@@ -79,7 +81,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render(null, true);
+    if (ev.target.open) render(null, true, true, ev.target.closest("section").dataset.outline);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {
@@ -90,7 +92,8 @@ function start() {
   wireRail();
   wireStatsDrawer();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
-  loadMetadata();
+  seed().catch(() => null);
+  loadSwarm().catch(() => null);
   loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
   loaded.then(() => {

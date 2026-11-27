@@ -1,6 +1,11 @@
+import contextvars
 import json
 import subprocess
+import threading
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -38,12 +43,13 @@ def test_distinct_pull_requests_share_a_bounded_graphql_request():
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        count = 20 if len(calls) == 1 else 1
+        count = command[-1].count("resource(url:")
         return SimpleNamespace(
             returncode=0, stdout=json.dumps({"data": {f"p{i}": resource(f"h{i}") for i in range(count)}})
         )
 
     found = views(urls + urls, run)
+    calls.sort(key=lambda call: -call[0][-1].count("resource(url:"))
     assert len(calls) == 2
     assert len(found) == 21
     assert found[urls[1]].head == "h1"
@@ -715,3 +721,281 @@ def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
         False,
         True,
     )
+
+
+def answering(answers: dict[str, dict[str, Any]], queries: list[str]) -> Callable[..., SimpleNamespace]:
+    """Answer each batched read with the pull requests of ``answers`` its query names, in query order, and log the
+    query."""
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        query = command[-1]
+        queries.append(query)
+        named = [url for url in answers if json.dumps(url) in query]
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"data": {f"p{i}": answers[url] for i, url in enumerate(named)}})
+        )
+
+    return run
+
+
+def landed(head: str) -> dict[str, Any]:
+    """Return a pull request GitHub answers merged in full at ``head``."""
+    return {**resource(head, "MERGED"), "mergedAt": "2026-10-21T10:00:00Z"}
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_a_new_process_reads_only_the_pull_requests_not_kept_merged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), merged: landed("h2")}, queries)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "first"))
+    first = views([opened, merged], run, cache)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "second"))
+    second = views([opened, merged], run, cache)
+
+    assert len(queries) == 2
+    assert json.dumps(opened) in queries[1]
+    assert json.dumps(merged) not in queries[1]
+    assert second == first
+    assert second[merged].merged_at == 1_792_576_800_000
+    assert cache.ttl(f"{PREFIX}:merged-pull-view:{merged}") == 2 * 24 * 3600
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_open_and_closed_pull_requests_are_read_again_by_a_new_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    opened, closed = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/3"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), closed: resource("h3", "CLOSED")}, queries)
+    for home in ("first", "second"):
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / home))
+        views([opened, closed], run, cache)
+
+    assert [[json.dumps(url) in query for url in (opened, closed)] for query in queries] == [[True, True]] * 2
+    assert cache.keys(f"{PREFIX}:merged-pull-view:*") == []
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_a_kept_entry_with_other_fields_is_read_again_and_replaced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    merged = "https://github.com/o/r/pull/2"
+    key = f"{PREFIX}:merged-pull-view:{merged}"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    cache.set(key, json.dumps({"state": "MERGED", "retired": True}))
+    queries: list[str] = []
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+
+    found = views([merged], answering({merged: landed("h2")}, queries), cache)
+
+    assert len(queries) == 1
+    assert found[merged].head == "h2"
+    assert json.loads(str(cache.get(key)))["head"] == "h2"
+
+
+def pull_view_lines(err: str) -> list[dict[str, Any]]:
+    """Return the pull view count lines a view wrote to the controller log ``err``."""
+    return [json.loads(line) for line in err.splitlines() if '"swarm_pull_views"' in line]
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox, stack, timing
+    from scripts.swarm.store import RedisStore
+    from tests.swarm.graph_port import RunPort, read_views
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    doc = {
+        "tasks": [{"id": "active", "state": "pr", "pr_url": opened}, {"id": "done", "state": "done", "pr_url": merged}],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": int(time.time() * 1000)}]},
+    }
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), merged: landed("h2")}, queries)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "fresh-pod-history.sqlite")
+    monkeypatch.setattr(stack, "login_source_control", lambda: RunPort(run))
+    monkeypatch.setattr(ledger_events, "views", read_views)
+    views([merged], run, store.redis)
+    queries.clear()
+    with timing.tick("sw"):
+        token = timing.PASS.set({"pass_id": "pass-1"})
+        first = ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+        timing.PASS.reset(token)
+        ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc, first)
+        ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+
+    assert queries and all(json.dumps(opened) in query and json.dumps(merged) not in query for query in queries)
+    assert pull_view_lines(capsys.readouterr().err) == [
+        {"event": "swarm_pull_views", "slug": "sw", "pass_id": "pass-1", "pulls": 2, "kept_merged": 1, "read": 1},
+        {"event": "swarm_pull_views", "slug": "sw", "pass_id": None, "pulls": 2, "kept_merged": 1, "read": 1},
+    ]
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_pull_request_read_that_is_no_tick_view_logs_no_counts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import fakeredis
+
+    from scripts.swarm import timing
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    run = answering({opened: resource("h1"), merged: landed("h2")}, [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    views([opened, merged], run, cache)
+    with timing.tick("sw"):
+        views([opened, merged], run, cache)
+
+    assert pull_view_lines(capsys.readouterr().err) == []
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_tick_view_read_that_raises_leaves_later_reads_uncounted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import ledger_events
+
+    def refused(urls: list[str], cache: object = None, ttl: float = 0.0) -> dict[str, Any]:
+        assert ledger_events.TICK_VIEW_READ.get() is True
+        raise OSError("read refused")
+
+    monkeypatch.setattr(ledger_events, "views", refused)
+
+    with pytest.raises(OSError, match="read refused"):
+        ledger_events._counted_views(["https://github.com/o/r/pull/1"], None, 180)
+    assert ledger_events.TICK_VIEW_READ.get() is False
+
+
+def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
+    refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
+
+    assert views([], lambda *a, **k: pytest.fail("empty request"), refusing) == {}
+
+
+def batch_reply(command: list[str], **kwargs: Any) -> SimpleNamespace:
+    """Answer a batch document with an open pull request for each of its resources."""
+    count = command[-1].count("resource(url:")
+    return SimpleNamespace(
+        returncode=0, stdout=json.dumps({"data": {f"p{i}": resource(f"h{i}") for i in range(count)}})
+    )
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_a_views_call_reads_its_batch_documents_at_the_same_time() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(45)]
+    meeting = threading.Barrier(3, timeout=5)
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        queries.append(command[-1])
+        meeting.wait()
+        return batch_reply(command)
+
+    found = views(urls, run)
+
+    assert sorted(query.count("resource(url:") for query in queries) == [5, 20, 20]
+    assert all(found[url] is not None for url in urls)
+    assert found[urls[44]].head == "h4"
+
+
+def gated_pull(head: str, tree: str) -> dict[str, Any]:
+    """Return an open pull request whose head commit holds workflow tree ``tree`` and passed the gate."""
+    pr = resource(head)
+    commit = pr["commits"]["nodes"][0]["commit"]
+    commit["file"] = {"object": {"id": tree}}
+    commit["statusCheckRollup"] = {"contexts": {"nodes": [{"name": GATE, "conclusion": "SUCCESS"}], "pageInfo": {}}}
+    return pr
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+@pytest.mark.parametrize(
+    ("shared", "cached", "tree_reads"), [(True, True, 1), (True, False, 2), (False, True, 2), (False, False, 2)]
+)
+def test_batches_make_the_sequential_github_calls_for_their_workflow_trees(
+    shared: bool, cached: bool, tree_reads: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    cache = fakeredis.FakeRedis(decode_responses=True) if cached else None
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        query = command[-1]
+        queries.append(query)
+        if "nodes(ids:" in query:
+            trees = [tree for tree in ("tree1", "tree2") if f'"{tree}"' in query]
+            answer: dict[str, Any] = {
+                "nodes": [
+                    {"id": tree, "entries": [{"object": {"text": f"  gate:\n    name: {GATE}"}}]} for tree in trees
+                ]
+            }
+        else:
+            tree = "tree1" if shared or json.dumps(urls[0]) in query else "tree2"
+            answer = {f"p{i}": gated_pull(f"h{i}", tree) for i in range(query.count("resource(url:"))}
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": answer}))
+
+    found = views(urls, run, cache)
+
+    assert len(queries) == 2 + tree_reads
+    assert sum("nodes(ids:" in query for query in queries) == tree_reads
+    assert all(found[url] is not None and found[url].gate_passed for url in urls)
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_a_failed_batch_read_leaves_the_other_batch_read_once() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        queries.append(command[-1])
+        if json.dumps(urls[0]) in command[-1]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        return batch_reply(command)
+
+    found = views(urls, run)
+
+    assert len(queries) == 2
+    assert [found[url] for url in urls[:20]] == [None] * 20
+    assert all(found[url] is not None for url in urls[20:])
+
+
+READER: contextvars.ContextVar[str] = contextvars.ContextVar("reader", default="none")
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_each_views_batch_reads_in_the_callers_context() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    readers: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        readers.append(READER.get())
+        return batch_reply(command)
+
+    token = READER.set("tick")
+    try:
+        views(urls, run)
+    finally:
+        READER.reset(token)
+
+    assert readers == ["tick", "tick"]

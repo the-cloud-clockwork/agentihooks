@@ -4,15 +4,16 @@ import re
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import hierarchy, refresh
+from . import hierarchy, host_entries, refresh
 from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
@@ -290,9 +291,10 @@ def pool(address: str) -> Pool:
 class Connection:
     """A pooled Postgres connection answering the sqlite3 calls the ledger repository makes."""
 
-    def __init__(self, address: str):
+    def __init__(self, address: str) -> None:
         self.pool = pool(address)
         self.raw = self.pool.take()
+        self._after_commit: list[Callable[[], None]] = []
 
     def execute(self, sql: str, parameters: tuple | Mapping = ()) -> object:
         if sql.startswith(UNFENCEABLE):
@@ -351,15 +353,23 @@ class Connection:
         for statement in ddl(script):
             self.execute(statement)
 
+    def on_commit(self, operation: Callable[[], None]) -> None:
+        self._after_commit.append(operation)
+
     def commit(self) -> None:
+        pending, self._after_commit = self._after_commit, []
         with mapped():
             self.raw.commit()
+        for operation in pending:
+            operation()
 
     def rollback(self) -> None:
+        self._after_commit.clear()
         with mapped():
             self.raw.rollback()
 
     def close(self) -> None:
+        self._after_commit.clear()
         self.pool.give(self.raw)
 
     def __enter__(self):
@@ -389,16 +399,25 @@ class Database:
 class PostgresLedgerRepository(SQLiteLedgerRepository):
     adopts = False
 
-    def __init__(self, address: str, domain=None):
+    def __init__(self, address: str, domain: Any = None, copies: host_entries.Copies | None = None) -> None:
         super().__init__(None, domain)
         self.address = address
+        self.copies = copies
 
-    def bound(self, domain) -> "PostgresLedgerRepository":
+    def bound(self, domain: Any) -> "PostgresLedgerRepository":
         if domain is self.domain:
             return self
-        twin = PostgresLedgerRepository(self.address, domain)
+        twin = PostgresLedgerRepository(self.address, domain, self.copies)
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
+
+    def _keep(self, connection: Any, slug: str, entry: Entry, whole: bool) -> None:
+        if self.copies is not None:
+            connection.on_commit(partial(self.copies.keep, slug, entry, whole))
+
+    def _drop(self, connection: Any, slug: str) -> None:
+        if self.copies is not None:
+            connection.on_commit(partial(self.copies.drop, slug))
 
     def _key(self, slug):
         return self.address, slug
@@ -442,7 +461,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+    def admit(self, connection: sqlite3.Connection, state: dict[str, Any]) -> None:
         stored = connection.execute(FLOOR).fetchone()
         required = REQUIRED if stored is None else stored[0]
         if required > VERSION:
@@ -453,10 +472,14 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             from scripts.swarm_ledger import ledger_alerts
 
             before = [alert["text"] for alert in state.setdefault("alerts", [])]
-            raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms())
+            rev: int = state["_meta"]["rev"]
+            at: int = self.domain.now_ms()
             for address, version, floor in refused:
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
-                ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
+                ledger_alerts.warning_raised(state, rev, at, (ledger_alerts.WRITER, text), before)
+
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        self.admit(connection, state)
         return super()._write(connection, slug, entry, state, events)
 
     @contextmanager

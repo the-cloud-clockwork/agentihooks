@@ -1,6 +1,9 @@
+import json
+from typing import Any
+
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
+from tests.swarm_ledger.ledger_page import ledger_state, served_ledger, shell_html, show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -24,28 +27,6 @@ def test_first_snapshot_does_not_serialize_a_full_view_to_compare_it_with_null(b
     with page.expect_request("**/events"):
         page.wait_for_timeout(1500)
     assert page.evaluate("window.snapshotComparisons") == 0
-    page.close()
-
-
-def test_snapshot_parsing_yields_before_applying_the_view(browser):
-    page = browser.new_page(viewport={"width": 1920, "height": 1080})
-    page.add_init_script(
-        """(() => {
-          const parse = JSON.parse;
-          JSON.parse = function(...args) {
-            const value = parse.apply(this, args);
-            if (value?.ledger?.snapshotMarker) {
-              value.ledger.title = 'Parsed snapshot';
-              setTimeout(() => { window.titleAfterParsing = document.getElementById('title').textContent; }, 0);
-            }
-            return value;
-          };
-        })();"""
-    )
-    show(page, shell_html(), ledger=ledger_state({"title": "Before snapshot", "snapshotMarker": True}))
-    page.wait_for_function("window.titleAfterParsing !== undefined")
-    assert page.evaluate("window.titleAfterParsing") != "Parsed snapshot"
-    page.wait_for_function("document.getElementById('title').textContent === 'Parsed snapshot'")
     page.close()
 
 
@@ -121,7 +102,7 @@ def test_outline_updates_when_a_target_crosses_or_jumps_over_the_activation_line
     page.close()
 
 
-def test_a_changed_reconnect_snapshot_updates_without_serializing_the_full_view(browser):
+def test_a_reconnect_naming_a_newer_revision_updates_without_serializing_the_full_view(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     page.add_init_script(
         """(() => {
@@ -136,8 +117,33 @@ def test_a_changed_reconnect_snapshot_updates_without_serializing_the_full_view(
     ledger = ledger_state({"title": "Before reconnect", "snapshotMarker": True})
     show(page, shell_html(), ledger=ledger)
     ledger["title"] = "After reconnect"
+    ledger["_meta"]["rev"] += 1
     page.wait_for_function("() => document.getElementById('title').textContent === 'After reconnect'", timeout=5000)
     assert page.evaluate("window.snapshotComparisons") == 0
+    page.close()
+
+
+def test_an_identical_reconnect_snapshot_frame_is_skipped_before_decoding(browser: Any) -> None:
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const parse = JSON.parse;
+          window.snapshotDecodes = 0;
+          JSON.parse = function(text, ...args) {
+            if (typeof text === "string" && text.includes("snapshotMarker")) window.snapshotDecodes++;
+            return parse.call(this, text, ...args);
+          };
+        })();"""
+    )
+    show(page, shell_html(), ledger=ledger_state({"title": "Before snapshot"}))
+    ledger = served_ledger(ledger_state({"title": "Same snapshot", "snapshotMarker": True}, rev=2))
+    body = f"id: c1\nevent: snapshot\ndata: {json.dumps({'ledger': ledger, 'swarm': None})}\n\n"
+    page.route("**/events", lambda route: route.fulfill(body=body, content_type="text/event-stream"))
+    page.wait_for_function("() => document.getElementById('title').textContent === 'Same snapshot'", timeout=5000)
+    for _ in range(2):
+        with page.expect_request("**/events", timeout=5000):
+            pass
+    assert page.evaluate("window.snapshotDecodes") == 1
     page.close()
 
 

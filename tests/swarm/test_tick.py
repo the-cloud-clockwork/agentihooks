@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm.commands import hive_id
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 from tests.helpers.seat import Launched, seat_launched, seat_owner
@@ -89,9 +90,20 @@ class FakeLedger(LedgerItems):
             row.update(fields)
         return dict(row)
 
+    def _call(self, slug: str, ops: list[dict[str, object]] | None = None) -> dict[str, object]:
+        """Refuse an operation batch from the ledger port's mutate, as a ledger refuses a write this fake does not
+        model, so a step that writes through mutate reports the refusal and the pass goes on."""
+        raise LedgerRefused(f"ledger {slug} refused: the tick test ledger takes no operation batches")
+
     def notify(self, slug, text):
         assert slug == "sw"
         self.notes.append(text)
+
+    def raise_alert(self, slug: str, source: str, text: str, item: str | None = None) -> None:
+        """Record each ledger alert the night watch raises, as its source and text; no alert names an item."""
+        assert item is None
+        assert slug == "sw"
+        self.alerts = [*getattr(self, "alerts", []), (source, text)]
 
     def mark_swarm(self, slug):
         self.swarm_sized.append(slug)
@@ -992,6 +1004,7 @@ def _told(inbox, item):
 
 def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_the_new_master(store):
     from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_refusals
     from scripts.swarm.tick import DOWN_TOLD, REDELIVERED
 
     inbox = InboxStore(store.redis)
@@ -1015,10 +1028,14 @@ def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_
     assert ledger.notes.count(MASTER_DOWN) == 1
     later = inbox.send("operator", "master@sw", "still nobody?")
     tick("sw", store, ledger, runtime, down + 2)
-    assert ledger.notes.count(MASTER_DOWN) == 2
+    slot_wait = master_refusals.notice(store, "sw", MASTER_DOWN, down + 2)
+    assert slot_wait.startswith(f"{MASTER_DOWN} The master placement was last refused 0 minutes ago, at ")
+    assert slot_wait.endswith(": no session slot for the master, waiting.")
+    assert ledger.notes.count(MASTER_DOWN) == 1 and ledger.notes.count(slot_wait) == 1
     runtime.full = False
     actions = tick("sw", store, ledger, runtime, down + 3)
-    assert "spawned master master@a1b2c3-0002" in actions and ledger.notes.count(MASTER_DOWN) == 2
+    assert "spawned master master@a1b2c3-0002" in actions
+    assert ledger.notes.count(MASTER_DOWN) == 1 and ledger.notes.count(slot_wait) == 1
     mail = inbox.pending_mail("master@a1b2c3-0002")
     assert {i.id for i in mail if i.sender == "operator"} == {taken.id, unaddressed.id, later.id}
 

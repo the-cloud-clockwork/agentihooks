@@ -1,0 +1,6 @@
+{
+  "scripts/routing/native_default.py:scripts.routing.native_default.x__rename_trust_key:1b0b5716ebab9eada450408dab720b252c387febe88c6d709996b9c3bb99f889": {
+    "reader": "standards-reader",
+    "reason": "Python decodes \\x7f and \\x7F to the identical U+007F character. Both literals therefore contain the same apostrophe and DEL characters, so membership, branch selection and every output are identical for all inputs."
+  }
+}

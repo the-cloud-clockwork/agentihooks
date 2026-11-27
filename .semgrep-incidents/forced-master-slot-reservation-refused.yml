@@ -1,0 +1,23 @@
+rules:
+  - id: forced-master-slot-reservation-refused
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive launch order must not refuse a forced front door master at a rejected launch slot reservation, because a
+      forced start takes a token slot the hive caps at zero or whose seats are all held, and the master seat then stays
+      empty. Refuse the rejected reservation only when the request task is not forced; the hive acknowledgement writes
+      the slot's live row.
+    paths:
+      include:
+        - /scripts/hive/
+        - forced-master-slot-reservation-refused.py
+    patterns:
+      - pattern-inside: |
+          def send_order(...):
+              ...
+      - pattern-inside: |
+          $READING = $SLOTS.reserve_reading(...)
+          ...
+      - pattern: |
+          if not $READING.accepted:
+              ...

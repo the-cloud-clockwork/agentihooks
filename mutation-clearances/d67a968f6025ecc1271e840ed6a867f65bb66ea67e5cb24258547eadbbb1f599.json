@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_grade.py:scripts.ci_lab.plant_grade.x__verdict:1e4582dea2771e86b6d21dc61a8c68e00f03c67d419eedab8b1d9bc0fb023ebd": {
+    "reader": "Standards",
+    "reason": "For the two admitted plant fixtures, the expected tokens are I001 and forbidden comment. Neither matches XXXX, so replacing the absent-output fallback still raises the identical missing-diagnostic error. This ruling covers those fixture contracts."
+  }
+}

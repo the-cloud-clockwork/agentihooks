@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.swarm import timing
+from scripts.swarm import tick_activity
 from scripts.swarm.health.findings import Finding
 from scripts.swarm_v2.herdr import deliveries
 from scripts.swarm_v2.herdr.endpoints import EndpointRefused
@@ -23,7 +23,7 @@ def observe(store, slug: str, now: int, path: Path | None = None) -> list[int]:
     if samples and samples[-1] == pending:
         return samples
     samples = [*samples, pending][-(RISES + 1) :]
-    timing.keep()
+    tick_activity.renew_now()
     store.redis.set(store.key(slug, "prompt-backlog"), json.dumps(samples))
     return samples
 

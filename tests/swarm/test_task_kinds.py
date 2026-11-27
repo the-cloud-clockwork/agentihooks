@@ -1,6 +1,7 @@
 import pytest
 
-from scripts.swarm import cli, prompt
+from scripts.swarm import cli, prompt, templates
+from scripts.swarm_ledger import ledger_kinds
 from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -14,6 +15,13 @@ def build(**task):
 def test_a_task_without_a_kind_gets_the_code_prompt():
     assert build() == build(kind="code")
     assert "agentihooks swarm sw ready <handoff doc>" in build()
+
+
+def test_the_prompt_names_the_api_command_in_the_stop_hook_warning():
+    assert (
+        "A hook blocks your stop while operator events are unhandled or you have gone many "
+        "tool calls without an api command."
+    ) in build()
 
 
 def test_each_kind_gets_its_own_prompt():
@@ -31,7 +39,7 @@ def test_each_kind_gets_its_own_prompt():
     assert "--finding <link>" in texts["research"]
     for kind, text in texts.items():
         close = "agentihooks swarm sw ready" if kind in ("code", "ci") else "agentihooks swarm sw done"
-        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
+        assert text.index("agentihooks api --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
 
 
 def test_the_prompt_carries_the_proof_contract():
@@ -45,6 +53,43 @@ def test_the_prompt_names_post_merge_command_proof():
         "Proof contract. After merge, record --command and --output before swarm done."
     ]
     assert "After merge, record" not in build(contract={"after": "no"})
+
+
+def _review_prompt() -> list[str]:
+    task = {"id": "r1", "title": "Review pull request 7 of repo", "lane": "review", "kind": "review"}
+    return prompt.build("sw", "/repo", "review", "reviewer@a1b2c3-0001", task).splitlines()
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_a_review_task_gets_the_reviewer_launch_steps() -> None:
+    lines = _review_prompt()
+    steps = [
+        "Work it end to end with the swarm-reviewer skill, then stop. You edit, commit and push nothing:",
+        "1. Read the change request your task names with agentihooks forge read <number> --remote <repository url>: "
+        "its body, the whole diff, the feature map entries it touches and the code it reaches.",
+        "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
+        "its evidence and the smallest fix.",
+        "3. Post them on the change request with agentihooks review post <change request url> --slug sw "
+        '--finding "<finding>", one --finding per finding; a forge post records nothing for done.',
+        "4. Leave the crew with agentihooks api --slug sw --as reviewer@a1b2c3-0001 leave, then close the task: "
+        "agentihooks swarm sw done --finding <change request url>. The ledger refuses done until review post has "
+        "recorded a finding. The swarm then closes this session; stop working.",
+    ]
+    start = lines.index(steps[0])
+    assert lines[start : start + len(steps)] == steps
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_a_reviewer_that_cannot_finish_blocks_without_a_branch() -> None:
+    lines = _review_prompt()
+    assert 'If you cannot finish: agentihooks swarm sw block "<plain words naming the blocker>" and stop.' in lines
+    assert not any("open a draft pull request" in line for line in lines)
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_every_lane_template_kind_has_launch_steps() -> None:
+    assignable = {*ledger_kinds.KINDS, *templates.DEFAULT_KINDS.values()} - {"workflow"}
+    assert assignable <= set(prompt.STEPS)
 
 
 def _start(env, kind):  # noqa: F811
@@ -135,7 +180,7 @@ def test_code_kinds_activate_serena_on_the_worktree(kind):
 def test_a_ci_agent_proposes_a_further_bottleneck_as_a_follow_up_and_never_queues_a_task(kind):
     text = prompt.build("sw", "/repo", "ci", "ci@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
     assert (
-        "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as ci@a1b2c3-0001 followup add"
+        "Propose a further bottleneck as a follow up: agentihooks api --slug sw --as ci@a1b2c3-0001 followup add"
         in text
     )
     assert "task add" not in text

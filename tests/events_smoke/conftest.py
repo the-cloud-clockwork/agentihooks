@@ -26,10 +26,11 @@ from scripts.events.envelope import Envelope
 from scripts.hive import buckets, lanes
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import admission, exits, slots
-from scripts.swarm import readiness
+from scripts.swarm import capacity, offer_quota, readiness
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests.events import nats_server
+from tests.helpers import narrow_ledger
 from tests.swarm.test_readiness import doc, task
 
 ENABLED = "AGENTIHOOKS_EVENTS_SMOKE"
@@ -56,6 +57,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def reading() -> dict[str, int]:
     """A headroom sample with room for every launch."""
     return {"cpus": 32, "load5": 0, "available_mb": 60000, "total_mb": 64000}
+
+
+def free_seats(environ: dict[str, str], now: float, refresh: bool = False, redis: Any = None) -> list[capacity.Account]:
+    """One free Claude and one free Codex seat, the account rows the hub and spoke seat checks read here."""
+    return [
+        capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6),
+        capacity.Account("codex", "codex-free", "OPEN", 0, None, 90, 6),
+    ]
 
 
 def connect(url: str, provision: bool = True) -> Any:
@@ -96,6 +105,15 @@ class Ledger:
     def state(self, slug: str) -> dict[str, Any]:
         """The ledger document with every row as it stands now."""
         return doc([dict(row) for row in self.rows.values()])
+
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
+        """Every row as it stands now, as the tick reads them."""
+        return [dict(row) for row in self.rows.values()]
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
+        """One row as it stands now, or None when the ledger holds no such task."""
+        row = self.rows.get(task_id)
+        return None if row is None else dict(row)
 
     def update_task(
         self,
@@ -166,7 +184,7 @@ class Smoke:
                 generation,
                 1,
                 "readiness",
-                {"lane": row["lane"], "generation": generation},
+                {"lane": row["lane"], "generation": generation, "quota": offer_quota.restrictions(row)},
             )
         )
 
@@ -183,6 +201,7 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    monkeypatch.setattr(offer_quota, "accounts", free_seats)
     gh_log = trap_gh(tmp_path, monkeypatch)
     client = redis.Redis.from_url(url, decode_responses=True)
     client.flushdb()
@@ -199,7 +218,8 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
         }
     )
     served: Any = ledger
-    admitter = admission.Admission(store, served, readiness.Source(store, served))
+    reads: Any = narrow_ledger.Reads(served)
+    admitter = admission.Admission(store, reads, readiness.Source(store, served))
     with nats_server.running(tmp_path / "nats") as nats_url:
         bus = connect(nats_url)
         opened = [bus]

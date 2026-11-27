@@ -1,0 +1,25 @@
+rules:
+  - id: reply-fences-pooled-item-sender
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A reply path runs the master fence on the item's sender without first asking the inbox whether the item reached
+      the replier through the master pool. A backend master that took a claimant's item from the pool was refused
+      every answer to it, because a task with no phase belongs to the front door, and each such item cost a handoff
+      and a masters channel relay. Run master_fence.check_send in a reply only when the inbox's reached_through_pool
+      says the item did not reach the replier through the pool; new messages keep the fence everywhere.
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - reply-fences-pooled-item-sender.py
+    patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+              ...
+              $STORE.reply(...)
+              ...
+      - pattern: master_fence.check_send(...)
+      - pattern-not-inside: |
+          if not $INBOX.reached_through_pool(...):
+              ...

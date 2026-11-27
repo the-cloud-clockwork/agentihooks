@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.ci_mutation.scope import is_test_file
+
 CONTEXT = "context.sha"
 SHARED = ".shared"
 # A restored cache of about 1 GB compressed held 3 GB of records and outran the planner's five minute job.
@@ -46,7 +48,8 @@ def measured_dependencies(
 
     data = CoverageData(basename=str(coverage_file))
     data.read()
-    shared, found = set(), {}
+    shared: set[str] = set()
+    found: dict[str, set[str]] = {}
     for module in list(sys.modules.values()):
         filename = getattr(module, "__file__", None)
         if isinstance(filename, str) and (path := source_path(filename, work, root, tracked)):
@@ -59,9 +62,10 @@ def measured_dependencies(
             shared.add(path)
         for context in filter(None, contexts):
             found.setdefault(context.rpartition("|")[0], set()).add(path)
-    if not all(node in found for node in nodeids):
+    if not any(node in found for node in nodeids):
         return {}
-    return {node: sorted(found[node] | shared) for node in nodeids}
+    test_modules = {path for path in shared if path.startswith("tests/") and is_test_file(path)}
+    return {node: sorted(found.get(node, set()) | (shared - test_modules)) for node in nodeids}
 
 
 def digest(value: dict | list) -> str:
@@ -127,7 +131,18 @@ class StoredStats:
         for record_file in self.folder.glob("*.json"):
             self.read(record_file)
 
-    def load(self, path: str, check: Callable[[dict, bool, str], bool] | None = None) -> dict | None:
+    def current_digest(self, name: str, digests: dict[str, str | None]) -> str | None:
+        if name not in digests:
+            file = self.root / name
+            digests[name] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
+        return digests[name]
+
+    def load(
+        self,
+        path: str,
+        check: Callable[[dict, bool, str], bool] | None = None,
+        digests: dict[str, str | None] | None = None,
+    ) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
             self.misses["no pointer"] += 1
@@ -154,11 +169,11 @@ class StoredStats:
         if not inputs.keys() <= set(self.context["inventory"]) or self.scope(inputs) not in ({}, scope):
             self.misses["scope"] += 1
             return None
+        digests = {} if digests is None else digests
         changed = [
             name
             for name, fingerprint in inputs.items()
-            if not (self.root / name).is_file()
-            or hashlib.sha256((self.root / name).read_bytes()).hexdigest() != fingerprint
+            if (current := self.current_digest(name, digests)) is None or current != fingerprint
         ]
         if changed:
             self.misses["inputs"] += 1

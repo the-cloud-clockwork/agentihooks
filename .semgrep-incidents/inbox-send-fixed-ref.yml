@@ -4,12 +4,15 @@ rules:
     severity: ERROR
     message: >-
       An inbox item is sent with a ref that repeats from one send to the next: a string literal, a module constant,
-      or a formatted string built only from constants, the swarm slug or the recipient's name and seat. The seen
-      marks record every ref a recipient was shown, so each later item with the same ref is closed as already shown
-      through the ledger the moment it is delivered. Automated agent collection sent every activity question with
-      one ref, the master backstop one ref per master and the master retire ask one constant ref, and each later item
-      closed on delivery. Give each item its own ref: the notice name followed by what makes this item distinct,
-      such as its send time.
+      or a formatted string built only from constants, the swarm slug, the recipient's name and seat, or the task,
+      ledger target, item or waiting task it is about. The seen marks record every ref a recipient was shown, so each
+      later item with the same ref is closed as already shown through the ledger the moment it is delivered.
+      Automated agent collection sent every activity question with one ref, the master backstop one ref per master
+      and the master retire ask one constant ref; the stall watch sent every alert on a task, the overrun watch every
+      agent's report on a task, preemption every ask for a waiting task and the ledger event notices every event on a
+      target with one ref per task or target, and each later item closed on delivery. Give each item its own ref: the
+      notice name followed by what makes this item distinct, such as its send time, its ledger revision or the start
+      of what it reports.
     paths:
       include:
         - /scripts/
@@ -20,4 +23,4 @@ rules:
       - metavariable-regex:
           metavariable: $REF
           regex: >-
-            ^(?:"[^"]+"|'[^']+'|(?:\w+\.)*[A-Z][A-Z0-9_]*|f"(?:[^"{}]|\{(?:(?:\w+\.)*[A-Z][A-Z0-9_]*|(?:\w+\.)*(?:slug|name|seat|address|master))\})+")$
+            ^(?:"[^"]+"|'[^']+'|(?:\w+\.)*[A-Z][A-Z0-9_]*|f"(?:[^"{}]|\{(?:(?:\w+\.)*[A-Z][A-Z0-9_]*|(?:\w+\.)*(?:slug|name|seat|address|master|tid|task|task_id|waiting|target|item)|\w+\[(?:"(?:target|task)"|'(?:target|task)')\])\})+")$

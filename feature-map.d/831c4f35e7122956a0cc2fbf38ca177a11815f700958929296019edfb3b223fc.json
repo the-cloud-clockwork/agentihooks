@@ -1,0 +1,18 @@
+{
+  "id": "dev-push-sonar-analyses-after-every-unit-leg",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45890810721-0",
+  "rules": [
+    "sonar-coverage-wait-without-unit-need"
+  ],
+  "behaviour": "A dev push runs its Sonar analysis in sonar-after-unit, which needs unit and so asks for a runner only after every unit leg, numbered or the single copy leg, has finished; its coverage wait then takes all twenty legs on its first poll and the merge combines each of them. The sonar job keeps its condition and needs, hands a dev push off in seconds without a checkout or an evidence upload, and still starts beside the unit shards on a pull request. On a push the analysis carries the check name sonar and the hand off the name sonar hand off, and promotion ready and promote read the analysis from sonar-after-unit.",
+  "seam": "The Tests workflow sonar and sonar-after-unit jobs with the shared sonar step list, the source decision step under SONAR_HAND_OFF, promotion ready and promote, .github/coverage/arrivals.arrive over a full first listing, and .github/coverage/combine.sh over the legs scripts.ci_unit_copy layout and upload leave",
+  "tests": [
+    "tests/test_sonar_coverage.py::test_a_dev_push_analyses_sonar_only_after_every_unit_leg",
+    "tests/test_sonar_coverage.py::test_sonar_hands_a_dev_push_off_and_keeps_starting_beside_the_shards",
+    "tests/test_sonar_coverage.py::test_promotion_reads_the_dev_push_analysis_after_the_unit_legs",
+    "tests/test_sonar_arrivals.py::test_every_shard_listed_on_the_first_poll_arrives_without_a_pause",
+    "tests/test_ci_dev_reuse.py::test_the_twenty_legs_the_copy_job_uploads_are_the_twenty_the_coverage_merge_combines",
+    "tests/test_ci_sonar_test_only.py::test_a_handed_off_push_decides_test_only_without_a_checkout"
+  ]
+}

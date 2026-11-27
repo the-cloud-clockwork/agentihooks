@@ -1,9 +1,15 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import compress, islice
+from operator import is_not
+from typing import Any, cast
 
 import orjson
 
 from .rows import encode
+from .tracked import held
+
+RECORD_MAPS = frozenset({"members", "api_operations"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +48,9 @@ def members(parts: dict) -> bytes:
 def leaf(value: object, previous: Fragment | None = None) -> Fragment:
     if previous is not None and value is previous.value:
         return previous
+    kept = held(value)
+    if kept is not None:
+        return kept
     try:
         signature = hash(orjson.dumps(value))
     except orjson.JSONEncodeError:
@@ -79,11 +88,47 @@ def stamp(key: str, value: object, previous: Fragment | None) -> Fragment:
     return leaf(value, previous)
 
 
+def replaced(new: dict[Any, Any], old: dict[Any, Any]) -> list[Any] | None:
+    """The keys of new whose value is not the object old holds at that key, then the keys new adds after old's, in
+    order; None when new does not start with old's keys in old's order. The scan runs in C."""
+    if list(islice(new, len(old))) != list(old):
+        return None
+    return [*compress(old, map(is_not, new.values(), old.values())), *islice(new, len(old), None)]
+
+
+def stamps(value: dict[Any, Any], previous: Fragment | None) -> Fragment:
+    """The stamps mapping as ``mapping`` with ``stamp`` builds it, encoding only the records a write replaced or added
+    when the stored keys keep their order."""
+    if previous is None:
+        return mapping(value, previous, stamp)
+    held: object = previous.parts  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    kept: object = previous.value
+    if not isinstance(held, dict) or not isinstance(kept, dict):
+        return mapping(value, previous, stamp)
+    old, stored = cast(dict[str, Fragment], held), cast(dict[str, object], kept)
+    changed = replaced(value, stored)
+    if changed is None:
+        return mapping(value, previous, stamp)
+    parts, values, fresh = dict(old), dict(stored), False
+    for key in changed:
+        part = leaf(value[key], old.get(key))
+        fresh = fresh or part is not old.get(key)
+        parts[key], values[key] = part, part.value
+    return Fragment(values, parts) if fresh else previous
+
+
+def record(key: str, value: object, previous: Fragment | None) -> Fragment:
+    """One record of a metadata map a write changes a record at a time, encoded alone so the write copies only it."""
+    return leaf(value, previous)
+
+
 def meta_part(key: str, value: object, previous: Fragment | None) -> Fragment:
     if key == "events" and isinstance(value, list):
         return sequence(value, previous)
     if key == "stamps" and isinstance(value, dict):
-        return mapping(value, previous, stamp)
+        return stamps(cast(dict[str, object], value), previous)
+    if key in RECORD_MAPS and isinstance(value, dict):
+        return mapping(cast(dict[str, object], value), previous, record)
     return leaf(value, previous)
 
 

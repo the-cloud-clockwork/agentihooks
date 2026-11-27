@@ -1,0 +1,21 @@
+rules:
+  - id: lab-scheduler-built-without-served-repositories
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab service's scheduler built without its set of served repositories takes the heads of every repository
+      its GitHub App hears, lists the branches of repositories it holds no credential for and posts a failed check on
+      their commits. Pass served, read from the environment, where build makes the Settings.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-scheduler-built-without-served-repositories.py
+    patterns:
+      - pattern-inside: |
+          def build(...):
+              ...
+      - pattern-either:
+          - patterns:
+              - pattern: Settings(...)
+              - pattern-not: Settings(..., served=$SERVED, ...)
+          - pattern: Settings(..., served=None, ...)

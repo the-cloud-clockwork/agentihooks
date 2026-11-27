@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_forked_children:64f20d0ff4dedf5ed08aad781d9f400d7f1e44c058b64ea21e0881bb96802aba": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: zip pairs values and keys from the same retries dictionary. Their lengths are identical, so replacing strict=True with strict=False cannot change the resulting mapping or signal target."
+  }
+}

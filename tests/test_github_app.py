@@ -3,6 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 
+OUTSIDE = "GitHub answered 201 with a token outside that scope"
+
 
 def app(monkeypatch):
     from scripts import github_app
@@ -142,19 +144,46 @@ def test_project_tokens_request_and_verify_only_contents_write_on_that_repositor
         ({"contents": "write"}, []),
     ],
 )
-def test_project_tokens_outside_the_requested_scope_are_refused(monkeypatch, permissions, repositories):
+def test_project_tokens_outside_the_requested_scope_are_refused(
+    monkeypatch: pytest.MonkeyPatch, permissions: dict[str, str], repositories: list[str]
+) -> None:
     module, _ = scoped(monkeypatch, permissions, repositories)
     with pytest.raises(module.GitAuthRefused) as refused:
         module.GitHubAppAuth("github.com/example/private").get_token()
-    assert str(refused.value) == module.REFUSED
+    assert str(refused.value) == f"GitHub App cannot supply scoped contents write credentials: {OUTSIDE}"
+    assert refused.value.status_code is None
 
 
-def test_rejected_exchange_reports_only_the_fixed_refusal(monkeypatch):
+def test_rejected_exchange_reports_only_the_requested_scope_and_the_answer_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, _, _, post = app(monkeypatch)
     post.return_value.status_code = 403
     with pytest.raises(module.GitAuthRefused) as refused:
         module.GitHubAppAuth().get_token()
-    assert str(refused.value) == module.REFUSED
+    assert str(refused.value) == "GitHub App cannot supply installation credentials: GitHub answered 403"
+
+
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.parametrize("status", [403, 499, 500, 599])
+def test_rejected_exchange_preserves_the_http_status_and_names_it_in_its_message(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = status
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth().get_token()
+    assert refused.value.status_code == status
+    assert str(refused.value) == f"GitHub App cannot supply installation credentials: GitHub answered {status}"
+
+
+@pytest.mark.feature("lab-token-mint-status")
+def test_a_refusal_without_an_http_status_keeps_its_message() -> None:
+    from scripts.github_app import REFUSED, GitAuthRefused
+
+    refused = GitAuthRefused(REFUSED)
+    assert refused.status_code is None
+    assert str(refused) == REFUSED
 
 
 def test_permission_tokens_request_only_those_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,4 +211,28 @@ def test_permission_tokens_without_the_requested_grant_are_refused(
     module, _ = scoped(monkeypatch, permissions, [])
     with pytest.raises(module.GitAuthRefused) as refused:
         module.GitHubAppAuth(permissions={"checks": "write"}).get_token()
-    assert str(refused.value) == module.REFUSED
+    assert str(refused.value) == f"GitHub App cannot supply scoped checks write credentials: {OUTSIDE}"
+    assert refused.value.status_code is None
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_checks_token_names_checks_write_and_the_answer_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = 422
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth("github.com/example/private", permissions={"checks": "write"}).get_token()
+    assert refused.value.status_code == 422
+    assert str(refused.value) == "GitHub App cannot supply scoped checks write credentials: GitHub answered 422"
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_push_token_names_contents_write_and_workflows_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = 422
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth(
+            "github.com/example/private", permissions={"contents": "write", "workflows": "write"}
+        ).get_token()
+    assert str(refused.value) == (
+        "GitHub App cannot supply scoped contents write and workflows write credentials: GitHub answered 422"
+    )

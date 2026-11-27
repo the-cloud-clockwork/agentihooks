@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 
 __all__ = ["Grade", "Priority", "Unit", "priority_of"]
@@ -18,6 +18,8 @@ class Unit:
     kind: str
     key: str
     members: tuple[str, ...]
+    manifest: str = field(default="", compare=False, repr=False)
+    manifest_digest: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

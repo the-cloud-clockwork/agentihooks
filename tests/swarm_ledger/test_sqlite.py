@@ -2,6 +2,10 @@ import copy
 import json
 import sqlite3
 import threading
+from contextlib import closing
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -451,6 +455,67 @@ def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatc
         thread.join(5)
     assert errors == []
     assert len(setups) == 1
+
+
+@pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
+def test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "ledgers.sqlite3"
+    holder = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        holder.execute("ROLLBACK")
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause), raising=False)
+    assert SQLiteLedgerRepository(path).summaries() == []
+    holder.close()
+    assert pauses == [0.05]
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+@pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
+def test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "ledgers.sqlite3"
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    clock = iter([0.0, 29.9, 30.0])
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        assert len(pauses) == 1
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pause))
+    with closing(sqlite3.connect(path)) as connection:
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            sqlite.WalSwitch(connection).turn()
+    holder.close()
+    assert pauses == [0.05]
+
+
+@pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
+def test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    executed: list[str] = []
+
+    class Failing:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+            raise sqlite3.OperationalError("disk I/O error")
+
+    def pause(seconds: float) -> None:
+        raise AssertionError(f"paused {seconds} s on an error that is not a held lock")
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause))
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        sqlite.WalSwitch(cast(sqlite3.Connection, Failing())).turn()
+    assert executed == [sqlite.WAL]
 
 
 def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):

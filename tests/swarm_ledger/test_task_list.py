@@ -22,7 +22,12 @@ def test_closed_task_queries_read_the_stored_entry(query):
 
     doc = ledger(9, "Open")
     entry = SimpleNamespace(state=doc, views={})
-    host = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    host = SimpleNamespace(
+        repository=SimpleNamespace(
+            current=lambda slug: entry,
+            task_rows=lambda slug, since=None: (1, doc["_meta"], doc["tasks"]),
+        )
+    )
     try:
         expected = resources.read(doc, "tasks", query)
     except resources.APIError as error:

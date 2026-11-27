@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.xǁMirrorExpanderǁ_group:fe1263b80a2d68a162aae053542bd7f0885fb53498707b401581b626abc68f8c": {
+    "reader": "standards_reader",
+    "reason": "The pyproject flag is read only by ci_select.needs_full_suite when pyproject.toml is among the group's changes; any such change also appears in an entry, and dep_manifest.global_input treats pyproject.toml as global for every manifest version, so invalidated returns every manifest test and _tests keeps every batch, the same units FULL gives."
+  }
+}

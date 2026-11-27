@@ -1,0 +1,17 @@
+rules:
+  - id: controller-folder-host-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Controller workspace reads must fall back from the explicit host to the admitted hive.
+      Hub admitted executions have no runtime target, so host alone reads the controller folder.
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_workspace.py
+        - controller-folder-host-only.py
+    patterns:
+      - pattern-inside: |
+          def _synced(...):
+              ...
+      - pattern: $REPORTS.host($AGENT)
+      - pattern-not-inside: $REPORTS.host($AGENT) or $REPORTS.admitted($AGENT)

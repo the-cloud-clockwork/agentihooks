@@ -1,0 +1,21 @@
+rules:
+  - id: claude-router-cache-lock-without-read-only-fallback
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The Claude router cache lock opens its lock file outside a try that re-raises every OSError
+      except errno.EROFS. A read only agentihooks home, such as a Codex planner sandbox, then fails
+      every router cache read instead of reading it without the lock.
+    paths:
+      include:
+        - /scripts/claude_quota_balancer.py
+        - claude-router-cache-lock-without-read-only-fallback.py
+    patterns:
+      - pattern: $LOCK.open("a+", ...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError as $ERROR:
+              if $ERROR.errno != errno.EROFS:
+                  raise
+              ...

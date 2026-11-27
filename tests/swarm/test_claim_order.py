@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import claim_order
@@ -7,8 +9,22 @@ def rows(*tasks):
     return {t["id"]: {"state": "open", **t} for t in tasks}
 
 
-def ordered(ledger):
-    return [task["id"] for task in sorted(ledger.values(), key=claim_order.key(ledger))]
+def ordered(ledger: dict[str, dict[str, Any]], fix_phase: str = "") -> list[str]:
+    return [task["id"] for task in sorted(ledger.values(), key=claim_order.key(ledger, fix_phase))]
+
+
+@pytest.mark.feature("swarm-claim-order")
+def test_a_task_of_the_fix_phase_claims_ahead_of_every_rank() -> None:
+    ledger = rows(
+        {"id": "urgent", "rank": "urgent", "phase": "p1"},
+        {"id": "high", "rank": "high", "phase": "p1"},
+        {"id": "fix-low", "rank": "low", "phase": "fixes"},
+        {"id": "fix-high", "rank": "high", "phase": "fixes"},
+        {"id": "loose", "rank": "low"},
+    )
+    assert ordered(ledger, "fixes") == ["fix-high", "fix-low", "urgent", "high", "loose"]
+    assert ordered(ledger) == ["urgent", "high", "fix-high", "fix-low", "loose"]
+    assert ordered(rows({"id": "high", "rank": "high"}, {"id": "loose", "rank": "low"}), "") == ["high", "loose"]
 
 
 def test_depth_is_the_longest_chain_of_open_tasks_waiting_on_each():
@@ -75,10 +91,10 @@ def test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth(
         {"id": "b", "depends_on": ["a"], "phase": "p1"},
         {"id": "c", "rank": "low", "difficulty": "M", "phase": "p2"},
     )
-    key = claim_order.key(ledger)
-    assert key(ledger["a"]) == (1, True, False, -1)
-    assert key(ledger["b"]) == (2, True, True, 0)
-    assert key(ledger["c"]) == (3, True, True, 0)
+    key = claim_order.key(ledger, "p2")
+    assert key(ledger["a"]) == (True, 1, True, False, -1)
+    assert key(ledger["b"]) == (True, 2, True, True, 0)
+    assert key(ledger["c"]) == (False, 3, True, True, 0)
 
 
 @pytest.mark.parametrize(

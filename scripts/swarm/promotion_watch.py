@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
@@ -27,6 +27,8 @@ from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 if TYPE_CHECKING:
+    from redis import Redis
+
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -71,6 +73,7 @@ REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
 TASK_PREFIX = "promo-"
+COVERS = "covers_job"
 UNNAMED = "Promotion red: a dev job"
 NOT_DUPLICATE = (
     "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
@@ -279,12 +282,13 @@ def _alerted(doc: dict, run_id: int) -> bool:
     )
 
 
-def _held_causes(redis, slug: str, doc: dict) -> set[str]:
+def _held_causes(redis: Redis, slug: str, doc: dict[str, Any]) -> set[str]:
     filed = redis.hgetall(key(slug, "jobs"))
     live = {t["id"] for t in _promotion_tasks(doc) if t.get("state") != "done"}
     if gone := [task_id for task_id in filed if task_id not in live]:
         redis.hdel(key(slug, "jobs"), *gone)
-    return {why for task_id, why in filed.items() if task_id in live}
+    covering = {t[COVERS] for t in doc.get("tasks", []) if t.get(COVERS) and t.get("state") != "done"}
+    return {why for task_id, why in filed.items() if task_id in live} | covering
 
 
 def _red(slug, store, ledger, doc, last, causes, repo):
@@ -416,6 +420,7 @@ def _refresh(
         actions = [HELD.format(run_id=last["id"])]
     else:
         actions = _recover(slug, redis, ledger, doc, last, config.repo)
+        actions += release_wait.announce(Mail(InboxStore(redis), store, slug), config, last["id"], last["html_url"])
     redis.set(key(slug, "seen"), last["id"])
     return actions
 

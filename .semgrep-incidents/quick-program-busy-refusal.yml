@@ -1,0 +1,24 @@
+rules:
+  - id: quick-program-busy-refusal
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A quick seat that runs a plain local program has no agent behind its pane, so text the tick types there runs as
+      program input. tick._busy must refuse a program seat after the bare shell check and before it reads the agent
+      status, because every room notice, nudge and signed out restart passes through it.
+    paths:
+      include:
+        - /scripts/quick/tick.py
+        - quick-program-busy-refusal.py
+    patterns:
+      - pattern: |
+          def _busy($SEAT, $HERDR):
+            ...
+      - pattern-not: |
+          def _busy($SEAT, $HERDR):
+            ...
+            if recipe.kind($SEAT) == recipe.PROGRAM:
+              return ...
+            ...
+            $STATUS = $HERDR.status(...)
+            ...

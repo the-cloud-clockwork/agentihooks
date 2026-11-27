@@ -61,9 +61,10 @@ def test_only_the_master_can_use_reserved_room(tmp_path, lane, five_left, week_l
     assert runtime._quota_accounts[0].cap == 0
 
 
+@pytest.mark.feature("local-master-native-login-without-front-gate")
 @pytest.mark.parametrize("login", [True, False])
 @pytest.mark.parametrize("handoff", [True, False])
-def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login, handoff):
+def test_a_backend_master_takes_its_token_route_with_or_without_a_valid_login(tmp_path, login, handoff):
     from scripts.routing import native_login
     from scripts.swarm.capacity import Account
     from scripts.swarm.runtime import HerdrRuntime
@@ -96,8 +97,8 @@ def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login
         }
     placed = runtime.spawn(config, "master", "agent", task)
     passed = seen[0][seen[0].index("--") + 1 :]
-    assert passed[:2] == ["--route", "interactive" if login else "token"]
-    assert placed.route_kind == ("interactive" if login else "subscription")
+    assert passed[:2] == ["--route", "token"]
+    assert placed.route_kind == "subscription"
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api", "interactive"])
@@ -356,34 +357,21 @@ def test_a_master_after_a_codex_predecessor_keeps_codex(tmp_path, monkeypatch, o
     assert (placed.harness, placed.route_kind) == ("codex", ordered or "subscription")
 
 
-def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path):
+def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path, monkeypatch):
+    from scripts import master_claude_login
     from scripts.routing import envs, native_login
     from scripts.swarm.runtime import HerdrRuntime
-    from tests.swarm.profile_fixture import validated
 
     probes = []
 
     def run(argv, **kwargs):
-        if argv[1:] == list(native_login.COMMAND):
-            probes.append(kwargs["env"])
-            return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+        assert argv[1:] == list(native_login.COMMAND)
+        probes.append(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
 
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
-    config = SimpleNamespace(
-        slug="proof",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"master": {"agent": "claude"}},
-        autonomy="delegate",
-    )
-    assert (
-        runtime.spawn(
-            config, "master", "agent", {"id": "master", "title": "proof", "seat": "master-2@proof"}
-        ).route_kind
-        == "interactive"
-    )
+    monkeypatch.setattr(master_claude_login, "enabled", lambda *_: False)
+    runtime = HerdrRuntime(home=tmp_path, run=run)
+    assert runtime._route_kind("master", "claude", {"id": "master", "seat": "master@proof"}, "proof") == "interactive"
     assert probes and probes[0].get(f"{envs.INTERACTIVE_PREFIX}native") == "1"
 
 

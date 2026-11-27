@@ -1,0 +1,42 @@
+rules:
+  - id: lab-fingerprints-hash-file-per-test
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tree file is hashed again for every manifest test that opens it. On 26 November that one line held 70
+      percent of the lab scheduler's pass thread and a pass that started heads took eleven minutes. Hash the path
+      once through the digest table kept for the length of the call and read the cached value back; create that
+      table once, before the walk over the manifest tests.
+    paths:
+      include:
+        - /scripts/ci_lab/expand_tests.py
+        - lab-fingerprints-hash-file-per-test.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              for $TEST, $RECORD in $MANIFEST["tests"].items():
+                  ...
+          - pattern-inside: |
+              {$KEY: $VALUE for $TEST, $RECORD in $MANIFEST["tests"].items()}
+          - pattern-inside: |
+              [$ITEM for $TEST, $RECORD in $MANIFEST["tests"].items()]
+          - pattern-inside: |
+              {$ITEM for $TEST, $RECORD in $MANIFEST["tests"].items()}
+      - pattern-either:
+          - pattern: _blob(...)
+          - pattern: hashlib.sha256(...)
+          - pattern: _cached_blob($TREE, $PATH, {})
+          - pattern: _cached_blob($TREE, $PATH, $MAKE(...))
+          - patterns:
+              - pattern: _cached_blob($TREE, $PATH, $CACHE)
+              - pattern-either:
+                  - pattern-inside: |
+                      for $TEST, $RECORD in $MANIFEST["tests"].items():
+                          ...
+                          $CACHE = ...
+                          ...
+                  - pattern-inside: |
+                      for $TEST, $RECORD in $MANIFEST["tests"].items():
+                          ...
+                          $CACHE: $TYPE = ...
+                          ...

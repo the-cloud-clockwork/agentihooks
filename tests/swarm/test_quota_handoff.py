@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -97,6 +98,37 @@ def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
     latest = storage.redis.hget(storage.key("sw", "quota-warnings"), "same")
     assert latest != first.id
     assert latest in {item.id for item in messages}
+
+
+@pytest.mark.feature("hive-front-door-master-floor")
+@pytest.mark.parametrize(
+    ("lane", "seat", "five", "week", "warned"),
+    [
+        ("master", "master", 10, 93, False),
+        ("master", "master", 97, 50, False),
+        ("master", "", 10, 93, False),
+        ("master", "master", 10, 98, True),
+        ("master", "master", 99, 50, True),
+        ("master", "master-2", 10, 93, True),
+        ("eng", "", 10, 93, True),
+    ],
+)
+def test_a_front_door_master_is_warned_only_at_its_master_floor(
+    monkeypatch: pytest.MonkeyPatch, lane: str, seat: str, five: int, week: int, warned: bool
+) -> None:
+    import fakeredis
+
+    from scripts.inbox.seats import seat_address
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = seat_address("sw", seat) if seat else ""
+    storage.put_agent("sw", AgentRecord("agent", lane, "task", harness="claude", account="login", seat=held))
+    rows = [account("login", five=five, week=week).__dict__]
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": rows}))
+    expected = ["early quota handoff warning sent to agent"] if warned else []
+    assert quota_handoff.warn("sw", storage, {}) == expected
 
 
 @pytest.mark.parametrize(
@@ -453,7 +485,9 @@ def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path,
     assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
 
 
-def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(tmp_path, monkeypatch):
+def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
     seen = []
@@ -471,7 +505,7 @@ def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_ran
         "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
     }
     rt.spawn(config, "master", "master@a1b2c3-0002", task)
-    assert 'model_reasoning_effort="high"' in seen[0][seen[0].index("--") + 1 :]
+    assert 'model_reasoning_effort="xhigh"' in seen[0][seen[0].index("--") + 1 :]
 
 
 def test_a_lane_quota_transfer_to_codex_outside_the_range_is_refused(tmp_path, monkeypatch):
@@ -624,6 +658,29 @@ def test_a_refusal_with_no_observed_accounts_says_so():
     assert quota_handoff.refusal(("codex", "default"), ("claude",), [], str) == (
         "no claude account can take the quota handoff from codex account default: no accounts were observed"
     )
+
+
+@pytest.mark.feature("master-quota-login-guidance")
+@pytest.mark.parametrize("lane", ["master", "eng", "ci", "plan"])
+@pytest.mark.parametrize("observed", [False, True])
+def test_quota_handoff_refusal_adds_login_guidance_only_for_a_master(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, observed: bool
+) -> None:
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "old"))
+    rt._quota_accounts = [account("old")] if observed else []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    detail = "claude old is the account handing off" if observed else "no accounts were observed"
+    expected = f"no claude account can take the quota handoff from claude account old: {detail}"
+    if lane == "master":
+        expected += "; ask through the inbox for a master login slot added with agentihooks claude login --master"
+    with pytest.raises(runtime.SpawnError) as caught:
+        rt._quota_transfer(LAUNCH, "engineer", {}, lane, "claude")
+    assert str(caught.value) == expected
+    rt._quota_handoffs = {(lane, 0): ("claude", "old")}
+    rt._quota_ready_ids = {lane: ["task"]}
+    rt._quota_held = {}
+    assert rt._quota_successor_accounts({lane: [("claude",)]}) == {lane: {0: set()}}
+    assert rt._quota_held == {"task": expected}
 
 
 def test_a_relaunch_without_a_quota_handoff_keeps_its_own_account(tmp_path, monkeypatch):
@@ -836,3 +893,75 @@ def test_codex_successor_prefers_week_remaining_and_requires_a_week():
     missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
     assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
     assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better
+
+
+def _spoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: list[list[capacity.Account]]
+) -> tuple[runtime.HerdrRuntime, SwarmConfig, list[list[str]], list[bool]]:
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    seen: list[list[str]] = []
+    reads: list[bool] = []
+
+    def read(environ: dict[str, str], now: float, *, refresh: bool) -> list[capacity.Account]:
+        reads.append(refresh)
+        return list(rows[-1])
+
+    monkeypatch.setattr(capacity, "accounts", read)
+    monkeypatch.setattr(capacity, "calculate", lambda *_args, **_kwargs: {"allocation": {}, "placements": {}})
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "claude", "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", scaling="manual")
+    return rt, config, seen, reads
+
+
+def _stale_spoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[runtime.HerdrRuntime, SwarmConfig, list[list[str]]]:
+    rows = [[account("old", state="DRAIN"), account("best", five=10, week=20, sessions=2)]]
+    rt, config, seen, _reads = _spoke(tmp_path, monkeypatch, rows)
+    handoff = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": LAUNCH},
+    }
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", handoff)
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("old", 1), ("best", 3)]
+    rows.append([account("old", state="DRAIN"), account("best", five=10, week=20, sessions=0)])
+    return rt, config, seen
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spawn_keeps_the_quota_rows_its_tick_pass_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [[account("best", five=10, week=20, sessions=0)]]
+    rt, config, seen, reads = _spoke(tmp_path, monkeypatch, rows)
+    rt.quota_capacity(config, [], 5.0, {"eng": 2})
+    rows.append([account("best", five=10, week=20, sessions=3)])
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", {"id": "t1", "title": "x"})
+    rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t2", "title": "x"})
+    assert reads == [False]
+    assert [_option(argv, "--route") for argv in seen] == ["best", "best"]
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("best", 2)]
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt, config, seen = _stale_spoke(tmp_path, monkeypatch)
+    placed = rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t1", "title": "x"})
+    assert placed.harness == "claude"
+    assert _option(seen[-1], "--route") == "best"
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt, config, _seen = _stale_spoke(tmp_path, monkeypatch)
+    rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t1", "title": "x"})
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("old", 1), ("best", 1)]

@@ -1,0 +1,11 @@
+{
+  "gate": "test-count/hold-the-base-revision-s-test-count",
+  "reason": "fewer tests than the base floor",
+  "edits": [
+    {
+      "path": "tests/fixtures/phase_lifecycle.json",
+      "before": ",\n {\"phases\": [{\"id\": \"p0\", \"title\": \"Inbox\", \"done\": true}, {\"id\": \"p1\", \"title\": \"Seats\"}, {\"title\": \"Release\", \"id\": \"p2\"}], \"tasks\": [], \"phase\": \"p2\", \"state\": \"building\", \"label\": \"Building\"}\n]\n",
+      "after": "\n]\n"
+    }
+  ]
+}

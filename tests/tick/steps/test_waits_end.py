@@ -1,11 +1,11 @@
 from copy import copy
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, idle, tick, timing, waits
+from scripts.swarm import cli, idle, pr_wait, tick, timing, waits
 from scripts.swarm.store import AgentRecord
 from scripts.tick import engine, pool
 from scripts.tick.deadline import Deadline
@@ -122,3 +122,67 @@ def test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read(
             outcomes.append(records[0].outcome)
     assert outcomes == [engine.OK, engine.OK, engine.OK]
     assert agents._holding_wait(store, "sw", checked, int(clock[0] * 1000)) is None
+
+
+@pytest.mark.feature("tick-waits-end-isolates-agent-failures")
+@pytest.mark.parametrize("failure", ["read", "resolve", "push"])
+def test_a_raising_wait_does_not_stop_other_agents_or_pass_completion(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str
+) -> None:
+    store = merging.store
+    bad, done, pending = (f"engineer@a1b2c3-000{index}" for index in range(1, 4))
+    records = [AgentRecord(name, "eng", "t2", state="working") for name in (bad, done, pending)]
+    for agent, target in zip(records, ("bad", "done", "pending"), strict=True):
+        store.put_agent("sw", agent)
+        idle.declare_wait(store.redis, "sw", agent.name, NOW + 60_000, "", NOW, waits.on("task", target))
+    monkeypatch.setattr(store, "agents", lambda slug: records)
+    read_wait = idle.wait
+    resolve_wait = waits.resolution
+    bad_wait = read_wait(store.redis, "sw", bad)
+    pending_wait = read_wait(store.redis, "sw", pending)
+    if failure == "push":
+        pr_wait.mark(store.redis, "sw", bad, NOW, "the-cloud-clockwork/agentihooks", "bad", "head")
+        merging.rows["t2"]["pr_url"] = URL
+
+    def read(redis: Any, slug: str, name: str) -> Any:
+        if name == bad and failure in {"read", "push"}:
+            raise ValueError("broken wait record")
+        return read_wait(redis, slug, name)
+
+    def resolve(held: dict[str, Any], *args: Any) -> str:
+        if held["target"] == "bad" and failure == "resolve":
+            raise ValueError("broken wait record")
+        return resolve_wait(held, *args)
+
+    monkeypatch.setattr(idle, "wait", read)
+    monkeypatch.setattr(waits, "resolution", resolve)
+    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
+    inbox = InboxStore(store.redis)
+    state = {
+        "store": store,
+        "slug": "sw",
+        "rows": {**merging.rows, "done": {"id": "done", "state": "done"}, "pending": {"state": "claimed"}},
+        "inbox": inbox,
+        "view": merging.pulls.get,
+    }
+    step = copy(next(step for step in report.STEPS if step.name == WAITS_END))
+    step.interval_s = 0.0
+    waits.mark_ended(store, "sw", NOW - 2 * tick.IDLE_KILL_MS)
+    with pool.running(critical_s=0.0, slow_s=1.0):
+        runs = engine.run_graph((step,), Context(_GraphView(state, {}), Deadline.after(5.0)))
+
+    assert runs[0].outcome == engine.OK
+    assert read_wait(store.redis, "sw", done) is None
+    assert read_wait(store.redis, "sw", bad) == bad_wait
+    assert read_wait(store.redis, "sw", pending) == pending_wait
+    assert waits.ended_at(store, "sw") == NOW
+    assert agents._holding_wait(store, "sw", pending_wait, NOW) == pending_wait
+    notices = inbox.inbox(done)
+    assert len(notices) == 1
+    assert "Your wait on task done, now done has ended." in notices[0].text
+    assert inbox.inbox(bad) == []
+    assert inbox.inbox(pending) == []
+    errors = capsys.readouterr().err
+    assert f"wait of {bad} failed: broken wait record" in errors
+    if failure == "push":
+        assert f"push wait of {bad} failed: broken wait record" in errors

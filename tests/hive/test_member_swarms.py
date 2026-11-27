@@ -164,16 +164,20 @@ def test_hive_remove_after_create_unlists_the_hive_and_a_second_hive_remove_stil
     for name in ("drain", "revoke", "unregister", "unmanifest", "unbank"):
         monkeypatch.setattr(remove, name, lambda *args: [])
     monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
+    monkeypatch.setattr(remove.machine, "targets", lambda run: {})
     fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
     bao = _bao(fake)
     member_swarms.assign(bao, SIGNER, ["m1"], ("rig",))
     store = cast("RedisStore", SimpleNamespace(redis=None))
+    host = "host: herdr holds no machine anton-9, so there is no SSH route to stop its services on"
     assert remove.remove(store, bao, _unlisting(), remove.Host()) == [
-        f"signer: unlisted m1 from the hub signer record {SIGNER}"
+        host,
+        f"signer: unlisted m1 from the hub signer record {SIGNER}",
     ]
     assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}
     assert remove.remove(store, bao, _unlisting(), remove.Host()) == [
-        f"signer: the hub signer record {SIGNER} lists no member swarms for m1"
+        host,
+        f"signer: the hub signer record {SIGNER} lists no member swarms for m1",
     ]
     assert fake.written == [SIGNER, SIGNER]
 
@@ -216,6 +220,7 @@ def test_the_remove_command_unlists_the_hub_signer_record_create_lists(
 def test_remove_unlists_the_signer_record_right_after_it_revokes_the_member():
     assert [title for title, _ in remove.STEPS] == [
         "drain",
+        "host",
         "member",
         "signer",
         "herdr",

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/relay.py:scripts.ci_lab.relay.x\u01c1BusNotices\u01c1pending:249b34b817d4248e51407cd8194333c0b437dfdc10ff703c38e9334b94e462f4": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its value unchanged at runtime; only the static type differs and the cast stays for basedpyright"
+  }
+}

@@ -1,0 +1,33 @@
+rules:
+  - id: master-closed-at-worker-drain-floor
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A master selection must not take its closed accounts from the capacity row state alone, because the fleet rows
+      close an account at the worker drain floor. Close a Claude login for a master only at the master floor, the
+      primary login reserve, or for a closure the worker drain floor does not explain.
+    paths:
+      include:
+        - /scripts/hive/
+        - master-closed-at-worker-drain-floor.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def $SELECTION(...):
+                  ...
+          - metavariable-regex:
+              metavariable: $SELECTION
+              regex: ^_master_selection
+          - pattern-either:
+              - pattern: $ROW.state == CLOSED
+              - pattern: $ROW.state == "CLOSED"
+      - patterns:
+          - pattern-inside: |
+              def $CLOSED(...):
+                  ...
+          - metavariable-regex:
+              metavariable: $CLOSED
+              regex: ^_master_closed
+          - pattern-either:
+              - pattern: return $ROW.state == CLOSED
+              - pattern: return $ROW.state == "CLOSED"

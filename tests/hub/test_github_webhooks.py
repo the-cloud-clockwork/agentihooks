@@ -2,13 +2,17 @@ import hashlib
 import hmac
 import io
 import json
+import signal
+from typing import Any, cast
 
 import pytest
 
 from scripts.ci_lab.webhooks import LabIntake
+from scripts.events.bus import Bus, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
+from scripts.events.subjects import subject
 from scripts.hub import github_webhooks, pulls
 from scripts.hub.github_webhooks import Ingress
 from scripts.hub.pulls import Observation, Pulls
@@ -24,10 +28,15 @@ def sign(body: bytes, secret: bytes = SECRET) -> str:
     return "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
-def pull_request(action="opened", state="open", merged=False, head="a1"):
+def pull_request(action: str = "opened", state: str = "open", merged: bool = False, head: str = "a1") -> dict[str, Any]:
     return {
         "action": action,
-        "pull_request": {"html_url": URL, "state": state, "merged": merged, "head": {"sha": head}},
+        "pull_request": {
+            "html_url": URL,
+            "state": state,
+            "merged": merged,
+            "head": {"sha": head, "ref": "feature", "label": "acme:feature"},
+        },
     }
 
 
@@ -351,6 +360,52 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
     assert served[1] == ("init", ("127.0.0.1", 8790), "Webhook")
 
 
+@pytest.mark.feature("hub-and-webhook-stop-cleanly-on-interrupt")
+def test_sigint_while_serving_ends_the_receiver_with_0_after_closing_server_and_bus(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", "s")
+    monkeypatch.delenv(github_webhooks.NOTICE_SECRET_ENV, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    served: list[str] = []
+
+    class Bus:
+        def __init__(self, config: BusConfig) -> None:
+            served.append("bus")
+
+        def close(self) -> None:
+            served.append("bus closed")
+
+    class Server:
+        def __init__(self, address: tuple[str, int], handler: type) -> None:
+            served.append("init")
+
+        def serve_forever(self) -> None:
+            served.append("serve")
+            signal.raise_signal(signal.SIGINT)
+
+        def server_close(self) -> None:
+            served.append("close")
+
+    monkeypatch.setattr(github_webhooks, "open_bus", Bus)
+    monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        try:
+            code: object = github_webhooks.main(["--port", "9001"])
+        except SystemExit as exited:
+            code = exited.code
+        except KeyboardInterrupt:
+            code = "KeyboardInterrupt escaped the webhook command"
+        interrupted = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert code == 0
+    assert served == ["bus", "init", "serve", "close", "bus closed"]
+    assert "Traceback" not in capsys.readouterr().err
+    assert interrupted is signal.default_int_handler
+
+
 def test_the_cli_delegates_github_webhook_to_this_module():
     from scripts.cli_delegates import DELEGATED_CLIS
 
@@ -380,15 +435,20 @@ def merge_group(action="checks_requested"):
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": "github-merge-queue[bot]"},
-        "merge_group": {"head_sha": "a1", "base_sha": "b0"},
+        "merge_group": {
+            "head_sha": "a1",
+            "base_sha": "b0",
+            "head_ref": "refs/heads/gh-readonly-queue/dev/pr-7-c3",
+            "base_ref": "refs/heads/dev",
+        },
     }
 
 
-def lab_pull_request(action="opened", head="a1"):
+def lab_pull_request(action: str = "opened", head: str = "a1") -> dict[str, Any]:
     payload = pull_request(action, head=head)
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}
-    payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["base"] = {"sha": "b0", "label": "acme:dev"}
     payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
     return payload
 
@@ -401,7 +461,7 @@ def send_notice(ingress, payload, signature=None):
 def test_a_merge_group_asking_for_checks_is_published_as_a_lab_head():
     ingress, swarm, lab = lab_setup()
     assert deliver(ingress, "merge_group", merge_group()) == 200
-    assert drain(swarm) == []
+    assert [(e.swarm, e.type) for e in drain(swarm)] == [("crew", "merge_group.requested")]
     assert [(e.type, e.data["head"], e.data["base"], e.author) for e in drain(lab)] == [
         ("ci.lab.head.merge_group", "a1", "b0", "github-merge-queue[bot]")
     ]
@@ -427,6 +487,43 @@ def test_a_wired_lab_keeps_the_check_suite_events_and_publishes_no_head_for_them
     assert deliver(ingress, "check_suite", check_suite()) == 200
     assert [e.type for e in drain(swarm)] == ["checks.completed"]
     assert drain(lab) == []
+
+
+def check_run_delivery(
+    action: str = "rerequested", name: str = "lab-shadow/lint", conclusion: str | None = None
+) -> dict[str, Any]:
+    return {
+        "action": action,
+        "repository": {"html_url": REPO},
+        "sender": {"login": "nestorcolt"},
+        "check_run": {
+            "id": 11,
+            "name": name,
+            "head_sha": "a1",
+            "conclusion": conclusion,
+            "app": {"slug": "github-actions"},
+            "output": {"title": None, "summary": None},
+            "pull_requests": [{"number": 7, "base": {"sha": "b0"}}],
+        },
+    }
+
+
+def test_a_wired_lab_publishes_a_rerequested_lab_check_run_as_a_head() -> None:
+    ingress, _, lab = lab_setup()
+    assert deliver(ingress, "check_run", check_run_delivery()) == 200
+    assert [(e.type, e.key, e.author, e.data["base"], e.data["action"]) for e in drain(lab)] == [
+        ("ci.lab.head.check_run", f"{REPO}@a1", "nestorcolt", "b0", "rerequested")
+    ]
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_wired_lab_publishes_a_completed_check_run_on_its_own_subject_for_the_shadow_comparison() -> None:
+    ingress, _, lab = lab_setup()
+    assert deliver(ingress, "check_run", check_run_delivery("completed", "lint", "success")) == 200
+    run = {"name": "lint", "head_sha": "a1", "conclusion": "success", "app": {"slug": "github-actions"}}
+    assert [(e.type, e.key, e.author, e.data["check_run"]) for e in drain(lab)] == [
+        ("ci.lab.head.check_completed", f"{REPO}@a1", "nestorcolt", {**run, "output": {"summary": None}})
+    ]
 
 
 def test_a_wired_lab_answers_400_for_a_head_payload_it_cannot_read():
@@ -543,3 +640,155 @@ def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatc
     assert [subject for subject, _ in buses[0].lab_heads.entries] == []
     assert [subject for subject, _ in buses[1].lab_heads.entries] == ["ci.lab.head.notice"]
     assert [subject for subject, _ in buses[1].events.entries] == []
+
+
+@pytest.mark.feature("github-webhook-scoped-receiver")
+def test_a_scoped_receiver_without_provision_publishes_a_merge_group_on_the_swarm_scoped_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", SECRET.decode())
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.setenv("AGENTIHOOKS_BUS_SCOPED", "1")
+    monkeypatch.delenv(github_webhooks.NOTICE_SECRET_ENV, raising=False)
+    scoped = open_bus(BusConfig(scoped=True))
+    root = open_bus(BusConfig())
+    Pulls(cast(Bus, root), clock=lambda: 1000).track("crew", URL)
+    opened: list[tuple[str, bool, bool]] = []
+    answers: list[object] = []
+
+    class ReceiverBus:
+        def __init__(self, config: BusConfig) -> None:
+            opened.append(("open", config.scoped, config.provision))
+            self.config = config
+            self.events = (scoped if config.scoped else root).events
+
+        def state(self, bucket: str) -> StateStore:
+            if self.config.scoped and not self.config.provision:
+                raise PermissionError("select a swarm before opening scoped state")
+            return root.state(bucket)
+
+        def close(self) -> None:
+            opened.append(("closed", self.config.scoped, self.config.provision))
+
+    class Server:
+        def __init__(self, address: tuple[str, int], handler: type) -> None:
+            body = json.dumps(merge_group()).encode()
+            headers = {"X-GitHub-Event": "merge_group", "X-Hub-Signature-256": sign(body)}
+            answers.extend(request(None, body=body, cls=handler, headers=headers)[:1])
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            pass
+
+    review = scoped.for_swarm("crew").events.consumer("review", subject("crew", "merge_group", "requested"))
+    legacy = root.events.consumer("legacy", "swarm.>")
+    monkeypatch.setattr(github_webhooks, "open_bus", ReceiverBus)
+    monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
+    with pytest.raises(KeyboardInterrupt):
+        github_webhooks.main([])
+    assert answers == [("status", 200)]
+    assert [(event.swarm, event.type, event.key) for event in drain(review)] == [
+        ("crew", "merge_group.requested", "a1")
+    ]
+    assert drain(legacy) == []
+    assert opened == [
+        ("open", True, False),
+        ("open", False, False),
+        ("closed", True, False),
+        ("closed", False, False),
+    ]
+
+
+def release(action="published", tag="v1.2.3"):
+    return {
+        "action": action,
+        "repository": {"html_url": REPO},
+        "release": {"tag_name": tag, "html_url": f"{REPO}/releases/tag/{tag}"},
+    }
+
+
+def untracked(payload):
+    payload["repository"] = {"html_url": "https://github.com/acme/gadgets"}
+    return payload
+
+
+def test_a_merge_group_for_an_untracked_repository_still_reaches_the_lab_and_publishes_no_swarm_event():
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "merge_group", untracked(merge_group())) == 200
+    assert drain(swarm) == []
+    assert [e.type for e in drain(lab)] == ["ci.lab.head.merge_group"]
+
+
+def test_a_release_for_an_untracked_repository_answers_ok_and_publishes_nothing():
+    _, ingress, swarm = setup()
+    assert deliver(ingress, "release", untracked(release())) == 200
+    assert drain(swarm) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_repository_events_from_recorded_payloads():
+    assert github_webhooks.repository_events("merge_group", merge_group()) == [
+        (
+            REPO,
+            "merge_group.requested",
+            "a1",
+            {"head": "a1", "base": "b0", "head_ref": "refs/heads/gh-readonly-queue/dev/pr-7-c3", "number": 7},
+        )
+    ]
+    assert github_webhooks.repository_events("release", release()) == [
+        (REPO, "release.published", "v1.2.3", {"tag": "v1.2.3", "url": f"{REPO}/releases/tag/v1.2.3"})
+    ]
+    assert github_webhooks.repository_events("merge_group", merge_group("destroyed")) == []
+    assert github_webhooks.repository_events("release", release("created")) == []
+    assert github_webhooks.repository_events("pull_request", pull_request()) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_without_a_head_ref_names_no_pull_request() -> None:
+    payload = merge_group()
+    del payload["merge_group"]["head_ref"]
+    [(_, _, _, data)] = github_webhooks.repository_events("merge_group", payload)
+    assert (data["head_ref"], data["number"]) == ("", None)
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm() -> None:
+    bus, _, _ = setup()
+    consumer = bus.events.consumer("release", "swarm.crew.release.published")
+    github_webhooks.LazyPulls(cast(Bus, bus)).announce(REPO, "release.published", "v1", {"tag": "v1"})
+    [event] = drain(consumer)
+    assert (event.swarm, event.type, event.key, event.data) == (
+        "crew",
+        "release.published",
+        "v1",
+        {"repository": REPO, "tag": "v1"},
+    )
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository():
+    _, ingress, swarm = setup()
+    assert deliver(ingress, "merge_group", merge_group()) == 200
+    assert deliver(ingress, "release", release()) == 200
+    events = drain(swarm)
+    assert [(e.swarm, e.type, e.key) for e in events] == [
+        ("crew", "merge_group.requested", "a1"),
+        ("crew", "release.published", "v1.2.3"),
+    ]
+    assert (events[0].data["number"], events[1].data["repository"]) == (7, REPO)
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published(monkeypatch, capsys):
+    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.lab_heads, NOTICE_SECRET))
+    lab = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+
+    def refuse(*args):
+        raise RuntimeError("broker refused")
+
+    monkeypatch.setattr(Pulls, "announce", refuse)
+    assert deliver(ingress, "merge_group", merge_group()) == 503
+    assert [e.type for e in drain(lab)] == ["ci.lab.head.merge_group"]
+    assert drain(swarm) == []

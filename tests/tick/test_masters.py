@@ -20,7 +20,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, actions, masters, tasks
+from scripts.tick.steps import PASS, actions, masters, placed, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +55,7 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
 
     return SimpleNamespace(
         PLACING=nullcontext(),
-        panic=SimpleNamespace(state=lambda store: None),
+        panic=SimpleNamespace(state=lambda store, slug: None),
         skip_refused=skip_refused,
         _master_down="master down",
         _night_watch="night watch",
@@ -197,7 +197,9 @@ def test_seat_steps_hold_the_host_placement_lock_and_master_steps_do_not() -> No
         tick = _tick([])
         tick.PLACING = Lock()
         state = _pass()
-        _step(name).call(tick, state.get)
+        step = _step(name)
+        with placed(tick, step.placing):
+            step.call(tick, state.get)
         assert masters.RAISED not in state["box"]
         return list(held)
 

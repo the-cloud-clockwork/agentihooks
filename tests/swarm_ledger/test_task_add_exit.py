@@ -1,6 +1,7 @@
 import json
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ def serve(monkeypatch, doc, reply=None):
         sent.extend(ops)
         if reply is not None:
             return reply
-        ctx = SimpleNamespace(refused=[], record=lambda *a, **k: None)
+        ctx: Any = SimpleNamespace(refused=[], record=lambda *a, **k: None)
         accepted = ledger_tasks.apply(doc, dict(ops[0]), ctx)
         ids = [ops[0]["id"]]
         return {

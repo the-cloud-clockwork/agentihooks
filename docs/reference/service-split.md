@@ -27,7 +27,9 @@ The inventory below was mapped from `dev` at `65249ec02` by reading the code nam
 A first ledger API service, `scripts/swarm_ledger/api_service.py` (`python -m scripts.swarm_ledger.api_service
 --serve`, port 8766), runs as its own process and deployment and takes every write the page sends: `do_POST`,
 `do_PUT`, `do_PATCH` and its own `POST /healthz` probe. The public host routes a request to it by method (POST,
-PUT, PATCH, DELETE); `GET` stays with the ledger server. It migrates the shared schema at start and runs the write
+PUT, PATCH, DELETE, OPTIONS; it defines no `DELETE` handler, since no ledger write uses that method); `GET` stays
+with the ledger server. Its routes, settings and deployment are in [Ledger write path](ledger-write-path.md). It
+migrates the shared schema at start and runs the write
 side upkeep this record lists under the ledger server today: bin purge, binning closed ledgers without a swarm,
 alert expiry, the inbox relay replay and the outbox relay to the bus.
 
@@ -121,7 +123,9 @@ creates the schema; only this service's `migrate()` does, at start.
 
 ## Route map
 
-Today every route below is served by one process, `ledger_server.Handler`, on port 8765, behind the single ingress.
+The route groups below were mapped while one process, `ledger_server.Handler` on port 8765, served them all behind
+the single ingress. The write rows are now served by `api_service.WriteHandler` on port 8766, behind a method route
+on the same host; the ledger server answers only the read, stream and `OPTIONS` rows.
 
 | Route group (today) | Handler today | Kind | Target |
 |---|---|---|---|
@@ -146,8 +150,8 @@ Today every route below is served by one process, `ledger_server.Handler`, on po
 
 ## Rule map
 
-Every rule below runs today inside the ledger server write path, and most of them inside the database write
-transaction: `repository.apply_ops` takes the gate chain and calls `repository.mutation.apply`, which imports
+Every rule below runs inside the ledger API route code's write path, in the ledger API service for a page write
+and in the writer's own process for every other write, and most of them inside the database write transaction: `repository.apply_ops` takes the gate chain and calls `repository.mutation.apply`, which imports
 `ledger_alerts`, `ledger_plans`, `ledger_priorities` and `ledger_notifications`. That is why the API cannot be split
 off by moving routes alone; the chain has to leave the transaction first.
 

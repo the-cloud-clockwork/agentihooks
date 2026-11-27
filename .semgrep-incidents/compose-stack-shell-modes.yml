@@ -1,0 +1,14 @@
+rules:
+  - id: compose-stack-shell-modes
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      The Compose swarm stack reads its deployment mode or scheduler state backend from the shell that runs compose,
+      where an agent's own settings reach the stack. Interpolate the stack-scoped SWARM_DEPLOYMENT and
+      SWARM_SCHEDULER_STATE_BACKEND instead.
+    paths:
+      include:
+        - /compose.yaml
+        - /scripts/swarm/stack/**/*.yaml
+        - '**/compose-stack-shell-modes.test.yaml'
+    pattern-regex: '(?<!\$)\$\{?AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b'

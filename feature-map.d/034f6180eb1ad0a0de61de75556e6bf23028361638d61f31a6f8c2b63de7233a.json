@@ -1,0 +1,11 @@
+{
+  "id": "documentation-session-skips-plan-sources",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2921",
+  "behaviour": "Planning lane or planning kind source sessions finish without documentation work while engineering code changes still queue documentation.",
+  "seam": "Session end worker completion, persisted verdict and queued documentation task",
+  "tests": [
+    "tests/test_documentation_session.py::test_plan_sources_finish_without_queuing_documentation",
+    "tests/test_documentation_session.py::test_session_end_queues_one_documentation_task_with_source_and_docs_evidence"
+  ]
+}

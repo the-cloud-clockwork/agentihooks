@@ -1,0 +1,21 @@
+rules:
+  - id: queue-sweep-cancels-merged-group-runs
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A merge queue sweep cancels an older merge group run because its gh-readonly-queue branch is gone, without
+      asking whether that group merged. GitHub deletes a group's branch when the group merges as well as when it is
+      invalidated, so on 17 and 18 November the Tests select step cancelled the green merged runs of pull requests
+      11800 and 11440 and their conclusions read cancelled. Keep a run whose head commit is an ancestor of this
+      group's base commit, git merge-base --is-ancestor in a full history checkout, before cancelling it.
+    paths:
+      include:
+        - '**/.github/workflows/*.yml'
+        - '**/.github/workflows/*.yaml'
+        - '**/queue-sweep-cancels-merged-group-runs.test.yaml'
+    patterns:
+      - pattern: |
+          run: $SCRIPT
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: (?s)^(?!.*merge-base --is-ancestor).*matching-refs/heads/gh-readonly-queue/.*actions/runs/\S+/cancel.*

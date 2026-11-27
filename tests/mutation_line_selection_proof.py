@@ -9,7 +9,7 @@ from scripts.ci_mutation.plan import estimate
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import file_seconds
-from tests.dep_manifest import build
+from scripts.dep_manifest import build
 
 
 def prepare(root: Path, folder: Path) -> None:

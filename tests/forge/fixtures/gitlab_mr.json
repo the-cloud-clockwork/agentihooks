@@ -1,0 +1,22 @@
+{
+  "id": 9001,
+  "iid": 12,
+  "project_id": 77,
+  "title": "Add the example",
+  "description": "Reviewer seats read the change through the forge.",
+  "state": "opened",
+  "source_branch": "feature",
+  "target_branch": "main",
+  "sha": "5f0c2d1e9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
+  "web_url": "https://gitlab.example.com/group/sub/repo/-/merge_requests/12",
+  "head_pipeline": {
+    "id": 501,
+    "iid": 40,
+    "project_id": 77,
+    "sha": "5f0c2d1e9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
+    "ref": "feature",
+    "status": "failed",
+    "source": "merge_request_event",
+    "web_url": "https://gitlab.example.com/group/sub/repo/-/pipelines/501"
+  }
+}

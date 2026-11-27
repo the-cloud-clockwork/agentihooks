@@ -17,10 +17,13 @@ rules:
   - id: feature-front-door-no-token
     languages: [python]
     severity: ERROR
-    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token; ordered 2026-10-28, an expired front door login alone falls back to the master token route.
+    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token; ordered 2026-10-28, an expired front door login alone falls back to the master token route; ordered 2026-11-17, a forced master start also falls back to the master token route.
     patterns:
       - pattern-not-inside: |
           if front and str($EXC) == native_login.EXPIRED:
+            ...
+      - pattern-not-inside: |
+          if forced or (front and str($EXC) == native_login.EXPIRED):
             ...
       - pattern-either:
           - pattern-inside: |

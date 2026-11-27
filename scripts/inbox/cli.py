@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
+from typing import Any
 
 from hooks.context.conditions import INBOX_SEND
 from hooks.filters import check as filters
@@ -158,16 +159,18 @@ def _operator_door(store, me):
     return door
 
 
-def _apply_reply(store, me, record):
+def _apply_reply(store: InboxStore, me: str, record: dict[str, Any]) -> dict[str, Any]:
     from scripts.inbox.addresses import check_address
 
     args = record["args"]
-    sender = store.get(args["id"]).sender
+    item = store.get(args["id"])
+    sender = item.sender
     if sender == SWARM:
         close = {"kind": "done", "detail": args["text"]}
         return _apply_close(store, me, {**record, "item": args["id"], "args": close})
     check_address(store, me, sender)
-    master_fence.check_send(store, me, sender)
+    if not store.reached_through_pool(item, me):
+        master_fence.check_send(store, me, sender)
     check_answer(store, args["id"], sender, args["text"])
     answer = store.reply(args["id"], me, args["text"], fyi=args["fyi"], answer_id=record["item"])
     return {"id": answer.id, "to": answer.address, "closed": args["id"]}

@@ -128,6 +128,57 @@ def test_archive_prunes_intents_for_the_rows_it_archives(store):
     assert other.execution_id not in intents
 
 
+@pytest.mark.feature("swarm-archive-prunes-stale-intents")
+@pytest.mark.parametrize("external", [False, True])
+def test_archive_prunes_intents_left_by_executions_archived_before_the_prune(store: RedisStore, external: bool) -> None:
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        first, second, third, other = history(store)
+    if external:
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
+    assert store.execution_registry.archive("fixture") == 3
+    backlog = {
+        row.execution_id: {
+            "execution_id": row.execution_id,
+            "generation": row.generation,
+            "controller_epoch": held.epoch,
+        }
+        for row in (first, second, other)
+    }
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update(backlog))
+    assert set(backlog) <= set(section(store, "intents"))
+
+    assert store.execution_registry.archive("fixture") == 0
+
+    assert set(section(store, "intents")) == {third.execution_id}
+
+
+@pytest.mark.feature("swarm-archive-prunes-stale-intents")
+@pytest.mark.parametrize("body", [{}, {"execution_id": "exe-elsewhere"}])
+def test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission(
+    store: RedisStore, body: dict[str, str]
+) -> None:
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        live = started(store, "eng-1@fixture")
+    entry = {**body, "epoch": held.epoch}
+
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update(i=entry))
+    assert "i" in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 0
+
+    intents = section(store, "intents")
+    assert intents["i"] == entry
+    assert live.execution_id in intents
+
+
 @pytest.mark.parametrize("external", [False, True])
 def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
     from scripts.swarm import lease
@@ -397,6 +448,59 @@ def test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head(sto
 
     assert section(store, "executions") == executions
     assert store.redis.hgetall(store.key("fixture", "agents")) == live
+
+
+PLACED = {"overlays": ["brain"], "profile_decision": {"profile": "engineer", "validation": {"home": "/homes/codex"}}}
+
+
+@pytest.mark.feature("execution-launch-decision-survives-stale-put")
+def test_a_put_from_a_copy_read_after_the_launch_decision_still_lands_a_blanked_field(store):
+    current = started(store, "eng-1@fixture")
+    store.execution_registry.set_launch("fixture", current.execution_id, {**DECISION, **PLACED})
+    [fresh] = store.agents("fixture")
+
+    store.put_agent("fixture", replace(fresh, account=""))
+
+    record = store.execution("fixture", current.execution_id)
+    assert record.account == ""
+    assert (record.harness, record.profile, record.profile_decision) == (
+        "codex",
+        "engineer",
+        PLACED["profile_decision"],
+    )
+
+
+@pytest.mark.feature("execution-launch-decision-survives-stale-put")
+def test_a_put_from_a_copy_read_before_the_launch_decision_keeps_the_decision(store):
+    from scripts.swarm import live_binding
+
+    current = started(store, "eng-1@fixture")
+    [stale] = store.agents("fixture")
+    store.execution_registry.set_launch("fixture", current.execution_id, {**DECISION, **PLACED})
+
+    store.put_agent("fixture", replace(stale, model="gpt-5.1", model_source="session"))
+
+    record = store.execution("fixture", current.execution_id)
+    [agent] = store.agents("fixture")
+    kept = {**DECISION, **PLACED, "model": "gpt-5.1"}
+    assert {field: getattr(record, field) for field in kept} == kept
+    assert {field: getattr(agent, field) for field in kept} == kept
+    assert record.model_source == "session"
+    observed = {"harness": "codex", "profile": "engineer", "account": "work"}
+    assert not {"profile", "account"} & set(live_binding.unknown(agent, observed))
+
+
+@pytest.mark.feature("execution-launch-decision-survives-stale-put")
+def test_a_registry_update_that_clears_the_profile_decision_still_clears_it(store):
+    current = started(store, "eng-1@fixture")
+    store.execution_registry.set_launch("fixture", current.execution_id, {**DECISION, **PLACED})
+    held = store.execution("fixture", current.execution_id)
+
+    store.execution_registry.update("fixture", replace(held, profile_decision={}))
+
+    record = store.execution("fixture", current.execution_id)
+    assert record.profile_decision == {}
+    assert (record.harness, record.profile, record.account) == ("codex", "engineer", "work")
 
 
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):

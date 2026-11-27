@@ -137,7 +137,8 @@ The existing base grading command accepts these environment settings:
 | `TEST_COUNT_BASE_RECORD` | Downloaded record file. Unset, unreadable, malformed or mismatched records fall back to base collection. |
 | `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
 | `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
-| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids, reused by later CI steps. |
+| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids. No step of the Tests workflow sets it; the `collect` job's own `Collect the head's tests` step writes the head ids to its own `COLLECTED` file instead. |
+| `TEST_COUNT_REVIEWED_HEAD`, `TEST_COUNT_REVIEWS` | The pull request head and its reviews. The Tests workflow sets them only on the approval hold of the `collect` job; see [Code owner approval](#code-owner-approval). |
 
 For example, the workflow grades from the base checkout with the downloaded record:
 
@@ -178,7 +179,7 @@ A cache miss preserves normal grading. Token creation is a separate workflow ste
 
 Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts, except the [signed retirements](#signed-retirements) a pull request adds.
 
-A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature.
+A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature and, on a pull request, a code owner's approval.
 
 ### Deleted definitions and constants
 
@@ -214,10 +215,10 @@ An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls in
 
 ### Parametrized ids that name a deleted file
 
-A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A deleted file also counts as renamed, and admits nothing, when the head adds any file with the same extension or the same name before its extension, so a file renamed with edits keeps the floor where it was wherever its case moves. In a git checkout only tracked files count, so files a job writes into the workspace neither keep nor rename anything.
+A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `nightly-report.yml-stats` names `nightly-report.yml` and `prenightly-report.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A deleted file also counts as renamed, and admits nothing, when the head adds any file with the same extension or the same name before its extension, so a file renamed with edits keeps the floor where it was wherever its case moves. In a git checkout only tracked files count, so files a job writes into the workspace neither keep nor rename anything. For a head that deletes `.github/workflows/nightly-report.yml`, the log reads:
 
 ```text
-tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[mutation-preflight.yml-stats] is admitted: its id names .github/workflows/mutation-preflight.yml, which the head deletes
+tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[nightly-report.yml-stats] is admitted: its id names .github/workflows/nightly-report.yml, which the head deletes
 ```
 
 ### Signed retirements
@@ -226,9 +227,9 @@ A lost test of behaviour the pull request removes from a module that survives ha
 
 ```json
 {
-  "tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory": {
+  "tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary": {
     "reader": "Standards reader",
-    "reason": "The head removes the branch preflight kill memory seed this test held."
+    "reason": "The head removes the nightly report summary upload this test held."
   }
 }
 ```
@@ -244,13 +245,51 @@ An entry admits its lost test only when all of these hold:
 1. Its file name matches its node id and holds that one entry.
 2. The reader starts with the word `Standards`, in any case (`Standards reader`, `standards_reader`), and the reason is not blank.
 3. The base has no file of that name, so the pull request itself retires the test.
+4. While a reviewed head is set, a code owner of the retirement file approved that head. The Tests workflow grades this rule in the `collect` job, not in the floor step.
 
-Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
+Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review, which the floor checks on a pull request through [Code owner approval](#code-owner-approval).
 
 ```text
 test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
-tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory is admitted: the pull request retires it, signed by Standards reader
+tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader and approved by @code-owner
 ```
+
+#### Code owner approval
+
+The reader is text the pull request writes, so on a pull request a retirement also needs a code owner's approval. The `collect` job grades it. Its `Read the pull request reviews` step lists the pull request's reviews on the job's App token, which holds pull requests read, and writes one line per review with its `user`, `state` and `commit_id`. Its `Hold each new retirement to a code owner's approval` step then runs the base copy of the floor in its approvals mode with that file and the pull request head from the event payload:
+
+| Setting | Use |
+|---|---|
+| `TEST_COUNT_REVIEWED_HEAD` | The pull request head commit. While it is set, a retirement is admitted only with a code owner's approval of this commit. |
+| `TEST_COUNT_REVIEWS` | The reviews file. A missing or unreadable file admits no retirement while the head is set. |
+
+The owners of a retirement file are those the last matching rule of the base revision's `.github/CODEOWNERS` names, so a pull request cannot name its own approver. The floor reads anchored rules with a star inside one segment and a trailing slash for a folder, the grammar `tests/test_codeowners.py` holds the file to and matches with the same `tests.count_floor.code_owners`. One rule outside it (unanchored, `**`, `?`, a range, a negation, an escape or a folder without its slash), wherever it sits in the file, leaves no known owner, since GitHub might match it last; no retirement is then admitted. Each reviewer's last approval, request for changes or dismissal decides; a later comment leaves it standing, as on GitHub. An approval of an earlier head does not count, so every push after the approval needs a new one. Team owners are not matched, since a review names only its user.
+
+```text
+test-retirements/1f0f….json is not approved on the pull request head by a code owner (@code-owner), so it admits nothing
+The pull request reviews could not be read, so no retirement is admitted
+```
+
+The hold step runs the approvals mode, which grades the approval on its own, without collecting either tree:
+
+```bash
+python -m tests.count_floor --approvals --base "<base checkout>" --head "<head checkout>"
+```
+
+The approvals mode reads the same two settings. It exits 1 when the head holds a new signed retirement that no code owner approved on the reviewed head, and names each one; it exits 0 when every new signed retirement is approved, when the head holds none, and when no reviewed head is set.
+
+```text
+test-retirements/1f0f….json is not approved on the pull request head by a code owner (@code-owner), so it admits nothing
+::error::tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is retired without a code owner's approval of the pull request head.
+```
+
+The mode needs `--base`; beside `--record` or `--retire` it is refused with a usage error. A base copy of the floor without the mode fails the hold step with `The base carries no count floor approvals mode`; merge dev into the branch.
+
+The floor step of `test-count` sets neither setting, so its verdict depends only on the two trees and the grading lab can run it: it grades signed retirements by the first three rules. The hold is stricter than a floor that read the reviews: a new signed retirement without an approval fails `collect` even when its test is not lost.
+
+A review does not start a Tests run. After a code owner approves the head, rerun the failed `collect` job. GitHub refuses an author's approval of their own pull request, so a pull request authored by the only code owner's account cannot retire a test.
+
+Merge groups and dispatched runs carry no pull request head, so they grade signed retirements by the first three rules. A pull request enters the queue only with its own `collect` green, which required the approval.
 
 ### Deleted keyword branches
 

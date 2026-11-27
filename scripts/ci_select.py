@@ -13,7 +13,7 @@ from typing import Any, NotRequired, TypedDict, cast
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_test_plan import find_record
-from tests.shards import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, _assign_work, source_sizes
+from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, assign_work, source_sizes
 
 PULL_REQUEST = "pull_request"
 FULL = "full"
@@ -33,6 +33,7 @@ HARNESS = frozenset(
         ".github/test-excludes.txt",
         "tests/__init__.py",
         "tests/shards.py",
+        "scripts/shard_sizing.py",
         "tests/flake_ledger.py",
         "tests/pass_record.py",
         "tests/dep_inputs.py",
@@ -49,6 +50,8 @@ FAKEREDIS = "fakeredis"
 LOCKED_CHECK = f"{TESTS}/test_locked_tests.py"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
+TICK_CATALOGUE = f"{TESTS}/test_docs_tick.py"
+TICK_STEPS = "scripts/tick/steps/"
 # Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -57,6 +60,7 @@ UNKNOWN_SECONDS = 10.0
 class Record(TypedDict):
     units: list[int]
     files: NotRequired[list[str]]
+    outside: NotRequired[list[str]]
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:
@@ -143,7 +147,8 @@ def reshaped(root: Path, base: str, head: str) -> bool:
 
 
 def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
-    """Test files whose recorded run executed a changed unit or read a changed file that not every test reads."""
+    """Test files whose recorded run executed a changed unit or read a changed file that not every test reads, among
+    its recorded files and the files it opened outside its record."""
     names: list[str] = manifest["units"]
     records: dict[str, Record] = manifest["tests"]
     units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
@@ -152,7 +157,7 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     return {
         test.partition("::")[0]
         for test, found in records.items()
-        if units.intersection(found["units"]) or read.intersection(found.get("files", []))
+        if units.intersection(found["units"]) or read.intersection([*found.get("files", []), *found.get("outside", [])])
     }
 
 
@@ -190,6 +195,8 @@ def selected_tests(
     if any(path.endswith(DOC) for path in changed):
         tests |= markdown_tests(root)
     tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    if tests and (root / TICK_CATALOGUE).is_file() and any(path.startswith(TICK_STEPS) for path in changed):
+        tests.add(TICK_CATALOGUE)
     if (
         tests
         and (root / SUITE_SPEED).is_file()
@@ -279,7 +286,7 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
             sizes.update(dict.fromkeys(units, sizes.pop(path)))
     collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
     files_of = {unit: unit.partition("::")[0] for unit in work}
-    legs = _assign_work(work, work, collection, count, 1, None, files_of)
+    legs = assign_work(work, work, collection, count, 1, None, files_of)
     legs[0] = sorted(tests & FIRST_SHARD_FILES) + legs[0]
     return [sorted(leg) for leg in legs if leg]
 

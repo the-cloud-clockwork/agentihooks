@@ -69,11 +69,12 @@ RECORDS_SLUG = "records_slug"
 ARCHIVE = "archive"
 ARCHIVE_REF = "archive_ref"
 BY_NAME = "by-name"
+BY_SEAT = "by-seat"
 ARCHIVED_NAMES = "archived-names"
 INDEXED = ""
 MOVED = "moved_to"
 SECTIONS = tuple(name for name, value in EMPTY.items() if isinstance(value, dict))
-LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME)
+LOADED = (META, *(name for name in SECTIONS if name != ARCHIVE), BY_NAME, BY_SEAT)
 STALE = "the controller lease is stale"
 HYDRATED: ContextVar[dict[str, dict[str, Record]] | None] = ContextVar("fencing_hydrated", default=None)
 
@@ -190,12 +191,21 @@ def _read_records(store: Any, slug: str) -> dict[str, Any]:
 
 
 def _heads(rows: dict[str, Any]) -> dict[str, str]:
+    return _keyed_heads(rows, "name")
+
+
+def _seat_heads(rows: dict[str, Any]) -> dict[str, str]:
+    """The newest execution key of each seat, which two admissions to one seat both write."""
+    return _keyed_heads(rows, "seat")
+
+
+def _keyed_heads(rows: dict[str, Any], field: str) -> dict[str, str]:
     found: dict[str, tuple[Any, str]] = {}
     for key, row in rows.items():
-        name, generation = row.get("name"), row.get("generation")
-        if isinstance(name, str) and isinstance(generation, int | float):
-            found[name] = max((generation, key), found.get(name, (generation, key)))
-    return {name: key for name, (_, key) in found.items()}
+        owner, generation = row.get(field), row.get("generation")
+        if isinstance(owner, str) and isinstance(generation, int | float):
+            found[owner] = max((generation, key), found.get(owner, (generation, key)))
+    return {owner: key for owner, (_, key) in found.items()}
 
 
 def _expected(loaded: dict[str, dict[str, Record]], section: str, key: str) -> int:
@@ -218,7 +228,8 @@ def _section_changes(
 
 
 def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, dict[str, Record]]) -> list[RecordWrite]:
-    """Every record a change wrote, each expecting the revision it was read at, plus the derived name indexes."""
+    """Every record a change wrote, each expecting the revision it was read at, plus the derived name and seat
+    indexes."""
     writes: list[RecordWrite] = []
     for name in sorted((before.keys() | after.keys()) - {ARCHIVE_REF, RECORDS_SLUG}):
         if name in SECTIONS:
@@ -228,10 +239,12 @@ def _changes(before: dict[str, Any], after: dict[str, Any], loaded: dict[str, di
         elif name not in before or before[name] != after[name]:
             writes.append(RecordWrite("put", META, name, _expected(loaded, META, name), after[name]))
     heads = (_heads(before.get("executions", {})), _heads(after.get("executions", {})))
+    seats = (_seat_heads(before.get("executions", {})), _seat_heads(after.get("executions", {})))
     archived = (_heads(before.get(ARCHIVE, {})), _heads(after.get(ARCHIVE, {})))
     return (
         writes
         + _section_changes(BY_NAME, heads[0], heads[1], loaded)
+        + _section_changes(BY_SEAT, seats[0], seats[1], loaded)
         + _section_changes(ARCHIVED_NAMES, archived[0], archived[1], loaded)
     )
 
@@ -630,6 +643,8 @@ def _view(doc: dict[str, Any], section: str) -> dict[str, Any]:
         return {key: value for key, value in doc.items() if key not in (*SECTIONS, ARCHIVE_REF, RECORDS_SLUG)}
     if section == BY_NAME:
         return _heads(doc["executions"])
+    if section == BY_SEAT:
+        return _seat_heads(doc["executions"])
     return doc[section]
 
 
@@ -651,7 +666,7 @@ def _admit(doc: dict[str, Any], revision: int, batch: FencedBatch) -> None:
 
 
 def _apply(doc: dict[str, Any], write: RecordWrite) -> None:
-    if write.kind == "check" or write.section == BY_NAME:
+    if write.kind == "check" or write.section in (BY_NAME, BY_SEAT):
         return
     target = doc if write.section == META else doc[write.section]
     if write.kind == "put":

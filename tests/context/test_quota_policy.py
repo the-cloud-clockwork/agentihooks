@@ -1,6 +1,8 @@
 """Tests for hooks.context.quota_policy — deterministic handoff / wait / stop."""
 
 import time
+from dataclasses import replace
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -295,14 +297,62 @@ def test_a_swarm_session_hands_off_through_its_seat(monkeypatch):
     assert "keeps your seat and task" in text
 
 
-def test_wait_directive_carries_a_cron_for_the_reset():
-    d = _decide(99.2, 50, [])
+@pytest.mark.feature("quota-wait-no-session-cron")
+@pytest.mark.parametrize(
+    ("swarm", "reset_delta", "minutes"),
+    [
+        (None, 1800, 32),
+        ("", 1800, 32),
+        ("quota-swarm", 1800, 32),
+        ("quota-swarm", 7200, 60),
+        ("quota-swarm", None, 2),
+        (None, None, 2),
+        ("quota-swarm", -119.5, 1),
+        ("quota-swarm", 0.5, 3),
+    ],
+    ids=[
+        "session",
+        "empty-swarm",
+        "swarm",
+        "long-wait",
+        "swarm-no-reset",
+        "session-no-reset",
+        "short-wait",
+        "round-up",
+    ],
+)
+def test_wait_directive_carries_a_cron_for_the_reset(
+    monkeypatch: pytest.MonkeyPatch, swarm: str | None, reset_delta: float | None, minutes: int
+) -> None:
+    now = 1_800_000_000.0
+    monkeypatch.setattr(qp.time, "time", lambda: now)
+    if swarm is None:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    reset = now + reset_delta if reset_delta is not None else None
+    d = replace(_decide(99.2, 50, []), five_reset=reset)
+    at = datetime.fromtimestamp((reset or now) + 120).astimezone().isoformat()
 
-    text = qp.render(d, "sess-1", "/tmp")
+    text = qp.render(d, "sess-1", "/repo")
+    lines = text.splitlines()
 
     assert text.startswith("QUOTA WAIT")
-    assert 'cron "' in text
-    assert "CronCreate" in text
+    assert "CronCreate" not in text
+    assert at in text
+    if swarm:
+        assert lines[1] == f'1. Run: agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"'
+        assert lines[2] == (
+            "If this wait ends before the reset time in its reason, declare another bounded wait "
+            "until that time, even if QUOTA WAIT no longer appears."
+        )
+        assert "agentihooks timer add" not in text
+    else:
+        assert lines[1] == (
+            f'1. Run: agentihooks timer add --at "{at}" --session "sess-1" '
+            '"The 5-hour quota window has reset. Continue the task from where you stopped."'
+        )
+        assert "agentihooks swarm" not in text
 
 
 def test_stop_directive_asks_for_another_account():
@@ -311,6 +361,51 @@ def test_stop_directive_asks_for_another_account():
     assert text.startswith("QUOTA STOP")
     assert "at least 2 accounts" in text
     assert '"keep pushing"' in text
+
+
+@pytest.mark.feature("master-quota-login-guidance")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("name", ["master@123456-0001", "engineer@123456-0002", ""])
+@pytest.mark.parametrize("action", ["stop", "wait"])
+def test_quota_exhaustion_text_uses_the_master_login_only_for_masters(
+    monkeypatch: pytest.MonkeyPatch, harness: str, name: str, action: str
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", harness)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "quota-swarm")
+    monkeypatch.setattr(qp.time, "time", lambda: 1_800_000_000.0)
+    expected_reset = 1_800_003_600.0 if action == "wait" else 1_800_086_400.0
+    monkeypatch.setattr(qp, "reset_when", lambda reset: "later" if reset == expected_reset else "wrong reset")
+    decision = qp.Decision(action, "week", "alpha", 99.2, 98.5, 1_800_003_600.0, 1_800_086_400.0, None, ())
+    head = "7-day quota 98.5% used (limit 98%) on alpha."
+    others = "no other account is configured; handoffs need at least 2 accounts"
+    master = name.startswith("master@")
+    if action == "wait":
+        at = datetime.fromtimestamp(1_800_003_720.0).astimezone().isoformat()
+        advice = (
+            "Ask through the inbox for a master login slot added with agentihooks claude login --master; "
+            "this session waits until the reset at later, then stop. "
+            if master
+            else "Tell the operator this session waits until the reset at later, then stop. "
+        )
+        expected = (
+            f"QUOTA WAIT — {head} The 7-day window still has 2% left and no other account qualifies ({others}).\n"
+            f'1. Run: agentihooks swarm quota-swarm wait 60 --reason "quota reset at {at}"\n'
+            "If this wait ends before the reset time in its reason, declare another bounded wait "
+            "until that time, even if QUOTA WAIT no longer appears.\n"
+            f"2. {advice}Tools are not blocked."
+        )
+    else:
+        prefix = "AH_CX_TOKEN_" if harness == "codex" else "AH_CC_TOKEN_"
+        advice = (
+            "Stop working and ask through the inbox for a master login slot added with "
+            "agentihooks claude login --master. Tools are not blocked."
+            if master
+            else f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
+            '"keep pushing" to continue on this account until 100%. Tools are not blocked.'
+        )
+        expected = f"QUOTA STOP — {head} Resets later. No other account has room: {others}.\n{advice}"
+    assert qp.render(decision, "sess-1", "/repo") == expected
 
 
 @pytest.mark.parametrize(

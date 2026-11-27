@@ -26,12 +26,23 @@ class _Pattern(NamedTuple):
 _NOSECRET_RE = re.compile(r"#\s*nosecret\b", re.IGNORECASE)
 
 _CODE_EXPRESSION_RE = re.compile(r"[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$]|\(|\[)")
+_SECRET_REFERENCE_RE = re.compile(
+    r"/?[a-z][a-z0-9_.-]*+(?:/[a-z][a-z0-9_.-]*+)++"
+    r"|arn:(?:aws|aws-cn|aws-us-gov):"
+    r"(?:(?P<manager>secretsmanager)|ssm):"
+    r"[a-z]{2}(?:-[a-z]++)++-[0-9]++:[0-9]{12}:"
+    r"(?(manager)sec"
+    r"ret:[A-Za-z0-9/_+=.@-]++|parameter/[A-Za-z0-9_./-]++)"
+)
 
 
-def _is_literal_secret(match: re.Match) -> bool:
-    """Whether a matched assignment value is a literal; a bare member access, call or subscript is code
-    reading a secret, not a secret.
-    """
+def _is_literal_secret(match: re.Match[str]) -> bool:
+    if match.group("reference") is not None:
+        return False
+    quoted = match.group("quoted") or match.group("json_quoted")
+    quote = match.group("quote") or match.group("json_quote")
+    if quoted is not None and match.string[match.end() : match.end() + 1] == quote:
+        return _SECRET_REFERENCE_RE.fullmatch(quoted) is None
     bare = match.group("bare")
     return bare is None or not _CODE_EXPRESSION_RE.match(bare)
 
@@ -67,8 +78,10 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
         "generic_secret",
         re.compile(
+            rf"""(?P<reference_quote>["'])(?P<reference>(?-i:{_SECRET_REFERENCE_RE.pattern}))(?P=reference_quote)(?!\s*:)|"""
             r"(?:PASSWORD|(?<!/)PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)(?:\s*(?:=(?!=)|:)\s*"
-            r"""(?:["'](?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))|["']\s*:\s*["'][^\s"'$<{]{8,})""",
+            r"""(?:(?P<quote>["'])(?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))"""
+            r"""|["']\s*:\s*(?P<json_quote>["'])(?P<json_quoted>[^\s"'$<{]{8,}))""",
             re.IGNORECASE,
         ),
         _is_literal_secret,

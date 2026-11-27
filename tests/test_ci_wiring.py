@@ -246,6 +246,85 @@ def test_workflows_off_the_pull_request_path_need_no_declaration():
     assert _check(workflows, {}) == []
 
 
+@pytest.mark.feature("ci-wiring-dequeued-operations")
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"pull_request_target": {"types": ["dequeued"]}},
+        {"pull_request_target": {"types": ["dequeued"]}, "workflow_run": {"types": ["completed"]}},
+    ],
+    ids=["dequeued", "dequeued-and-completed"],
+)
+def test_dequeued_only_recovery_is_outside_pull_request_gates(on: dict[str, Any]) -> None:
+    workflows = {
+        "test.yml": _gate_workflow(),
+        "recovery.yml": {"on": on, "jobs": {"resume": {}}},
+    }
+    assert ci_wiring.check(workflows, {}) == []
+
+
+@pytest.mark.feature("ci-wiring-dequeued-operations")
+@pytest.mark.parametrize(
+    "on",
+    [
+        "pull_request_target",
+        ["pull_request_target"],
+        {"pull_request_target": None},
+        {"pull_request_target": {}},
+        {"pull_request_target": {"types": None}},
+        {"pull_request_target": {"types": []}},
+        {"pull_request_target": {"types": "dequeued"}},
+        {"pull_request_target": {"types": ["opened"]}},
+        {"pull_request_target": {"types": ["synchronize"]}},
+        {"pull_request_target": {"types": ["reopened"]}},
+        {"pull_request_target": {"types": ["dequeued", "opened"]}},
+        {"pull_request_target": {"types": ["DEQUEUED"]}},
+        {"pull_request_target": {"types": ["unknown"]}},
+        {"pull_request_target": {"types": ["dequeued"]}, "pull_request": None},
+        {"pull_request_target": {"types": ["dequeued"]}, "merge_group": None},
+        {"pull_request": {"types": ["dequeued"]}},
+    ],
+    ids=[
+        "string",
+        "list",
+        "null",
+        "default",
+        "null-types",
+        "empty",
+        "scalar",
+        "opened",
+        "synchronize",
+        "reopened",
+        "mixed",
+        "case",
+        "unknown",
+        "ordinary-pull",
+        "merge-group",
+        "different-event",
+    ],
+)
+def test_other_pull_request_triggers_still_require_a_declaration(on: Any) -> None:
+    workflows = {
+        "test.yml": _gate_workflow(),
+        "recovery.yml": {"on": on, "jobs": {"resume": {}}},
+    }
+    assert ci_wiring.check(workflows, {}) == [
+        "recovery.yml/resume runs on pull requests outside test.yml, so it cannot be a need of Gate — Required."
+    ]
+    assert ci_wiring.check(workflows, {"outside_gate": _declared("recovery.yml/resume")}) == []
+
+
+@pytest.mark.feature("ci-wiring-dequeued-operations")
+def test_a_dequeued_only_operation_is_not_a_gate_declaration() -> None:
+    workflows = {
+        "test.yml": _gate_workflow(),
+        "recovery.yml": {"on": {"pull_request_target": {"types": ["dequeued"]}}, "jobs": {"resume": {}}},
+    }
+    assert ci_wiring.check(workflows, {"outside_gate": _declared("recovery.yml/resume")}) == [
+        "recovery.yml/resume is declared outside the gate but names no pull request job outside test.yml."
+    ]
+
+
 def test_a_stale_outside_declaration_is_red():
     workflows = {
         "test.yml": _gate_workflow(),
@@ -347,6 +426,23 @@ def test_a_planted_undeclared_flag_is_red(tmp_path: Path, capsys: pytest.Capture
 def test_every_declared_authoritative_flag_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config = {"lab_gates": {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}}
     assert _main_with_lab(tmp_path, _gate_workflow(), config, {"authoritative": ["lint", "unit"]}) == 0
+    assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
+
+
+def test_a_planted_undeclared_queue_flag_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}}
+    lab = {"authoritative": ["unit"], "queue": {"authoritative": ["unit", "lint"]}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, lab) == 1
+    assert capsys.readouterr().out == (
+        "1 workflows, 3 jobs, 1 wiring problems\n"
+        "::error::lab.queue.authoritative names lint, but .github/gate-wiring.json declares no lab/lint lab gate.\n"
+    )
+
+
+def test_every_declared_queue_flag_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}}
+    lab = {"authoritative": [], "queue": {"authoritative": ["unit", "lint"], "full_suite_entries": 3}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, lab) == 0
     assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
 
 

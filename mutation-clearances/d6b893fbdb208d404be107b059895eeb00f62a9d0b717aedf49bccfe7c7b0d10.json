@@ -1,0 +1,6 @@
+{
+  "scripts/ci_queue_retry.py:scripts.ci_queue_retry.x_run_for_pull:0631f94fa7124076e3837e6876231d8da7093a01a6926d79fd81a6359458899b": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: run_for_pull has no statements after its pagination loop except return None. At the exhausted inventory branch, break reaches that return without another API call or state change. A bare return exits with the same None immediately. Matching run returns and all other paths are unchanged."
+  }
+}

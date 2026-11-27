@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:4d270b6b397d9ca0e7be936bcfb1cdeab908444cefb06812303f8c4150f0bfa9": {
+    "reader": "standards-reader",
+    "reason": "SQLite resolves the unquoted table name ARC the same as arc inside the f-string delete, so the loop deletes the same rows."
+  }
+}

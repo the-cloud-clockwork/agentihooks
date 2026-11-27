@@ -14,9 +14,9 @@ from time import monotonic, sleep
 from typing import Any, cast
 from urllib.parse import urlencode
 
+from scripts import dep_manifest
 from scripts.ci_budget import rate_limit
 from scripts.ci_test_plan import UnusableRecord, _api, _strings, _valid_test
-from tests import dep_manifest
 
 PREFIX = "branch-record-3.12-"
 RUNS = 8

@@ -112,7 +112,7 @@ in code, and the hook log records which one opened it (`typed`, `ledger` or
   idle nudges and a swarm agent's launch or handoff prompt never arm it.
 - **Ledger comment**: in a swarm agent's session, your comment holding such a
   phrase on that agent's own task on the ledger page. Agent comments never count.
-- **Master relay**: the master's `agentihooks ledger relay tasks/<id> "<text>"
+- **Master relay**: the master's `agentihooks api relay tasks/<id> "<text>"
   --quote "<your words>"` onto that task. The ledger accepts it only while the
   master session holds your words, typed in its pane, and the gate counts it only
   when those stored words hold such a phrase; the relay's own text never counts.
@@ -303,14 +303,16 @@ in parallel on the original input and can still block it.
 
 ## Rewrites and permissions
 
-Claude Code applies a rewritten input only together with a permission decision.
+Claude Code applies a rewritten input that carries no permission decision and
+still runs its own permission rules on it, so the session prompts as it would
+have without the hook.
 
 | Session mode | Condition returns `tool_input` and… | Result |
 |---|---|---|
-| `bypassPermissions` | no decision | rewrite applied, `allow` |
+| any but `auto` | no decision | rewrite applied, no decision: the session's own permission rules decide |
 | any | `"decision": "allow"` | rewrite applied and auto-approved |
 | any | `"decision": "ask"` | rewrite applied, user asked (denied in `-p`) |
-| not bypass | no decision | rewrite dropped, the agent is told why |
+| `auto` | no decision | rewrite dropped, the agent is told why: auto mode can deny a call a hook changed |
 
 A rewrite never widens permissions without the condition saying so. Deny and ask
 rules in settings still apply to the rewritten input.
@@ -330,6 +332,33 @@ rules in settings still apply to the rewritten input.
 
 PostToolUse does not fire for tools that fail, so a `post` condition never sees
 failed calls.
+
+## First read for seated sessions
+
+The package supplies `pre-any-first_read.sh`, `post-bash-first_read_mark.py`
+and `start-first_read_reset.py` on Claude Code and Codex. They apply to swarm
+members and quick seats; standalone sessions pass through.
+
+The `first-read` gate defaults to `observe`. Before a session runs
+`agentihooks seat brief`, ordinary calls produce a would-be denial naming that
+command. `enforce` blocks those calls. Seat brief, the mounted profile canary,
+the launch opening prompt Read, ToolSearch and condition tools remain exempt.
+Codex shell names are normalized to Bash before the conditions run.
+
+A completed successful brief writes `AGENTIHOOKS_HOME/first-read/<session-id>`;
+the default home is `~/.agentihooks`. A failed or still-running command leaves
+the session unread. SessionStart with `source=compact` clears only that session's
+marker. The pre condition exits in Bash before starting Python for standalone
+sessions and for sessions whose marker already exists.
+
+SessionStart also caches resolved seat membership under
+`first-read/.members/<session-id>`, so a swarm identity supplied by the session
+registry follows the same fast path as one supplied by environment variables.
+
+Use the existing gate controls to select `first-read-gate=off` on a swarm.
+`AGENTIHOOKS_GATE_FIRST_READ=off` selects off when the swarm configuration does
+not supply a mode. Changing the default to enforce is a separate rollout after
+the observe log is checked.
 
 ## Performance
 

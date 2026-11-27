@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x_view:92ae24f634ab6f6129d8dad1b3d0b777c139fbf7049a66379a073ced51352585": {
+    "reader": "standards_reader",
+    "reason": "Clear: lease.now_ms ignores its argument (return document.now_ms()), so lease.now_ms(None) changes no output; the mutant is equivalent."
+  }
+}

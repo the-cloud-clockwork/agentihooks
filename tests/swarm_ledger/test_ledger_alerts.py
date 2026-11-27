@@ -726,9 +726,20 @@ def test_a_raised_release_alert_opens_one_alert_for_the_master():
     assert [(a["source"], a["target"], a["state"]) for a in state["alerts"]] == [("release", "master", "open")]
 
 
+@pytest.mark.feature("swarm-autoscaler-scale-up-alert")
+def test_a_raised_autoscaler_alert_opens_one_alert_for_the_master() -> None:
+    make_ledger()
+    text = "Cluster autoscaler node group pool has 2 failed scale ups in a row"
+    state, rejected = sync(ops=[{**raise_promotion("r1", text), "source": "autoscaler"}])
+    assert rejected == []
+    assert [(a["source"], a["target"], a["state"], a["text"]) for a in state["alerts"]] == [
+        ("autoscaler", "master", "open", text)
+    ]
+
+
 RAISE_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
-    "a text of up to 2000 characters and, for inbox and setup, an item"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup', "
+    "'autoscaler'), a text of up to 2000 characters and, for inbox and setup, an item"
 )
 
 
@@ -897,3 +908,474 @@ def test_a_refused_alert_claim_or_close_carries_the_server_reason(before: str, k
         ledger.refused({**state, "rejected": rejected}, [op])
     assert str(refusal.value) == f"{kind} refused: alert {target} {reason}"
     assert [a for a in state["alerts"] if a["source"] == "sync"] == []
+
+
+RAISE_WARNING_AT = 1_700_000_000_000
+
+RAISE_WARNING_CASES = [
+    pytest.param(
+        [],
+        (ledger_alerts.SIZE, "grew too large"),
+        [],
+        [
+            {
+                "id": "al-10-0",
+                "text": "grew too large",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+            }
+        ],
+        True,
+        id="a_new_warning_on_an_empty_list",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-0-0",
+                "text": "other warning",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 0,
+            }
+        ],
+        (ledger_alerts.SYNC, "refused text", "eng-1", "tasks/t1"),
+        [],
+        [
+            {
+                "id": "al-0-0",
+                "text": "other warning",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 0,
+            },
+            {
+                "id": "al-10-1",
+                "text": "refused text",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT,
+            },
+        ],
+        True,
+        id="a_new_sync_warning_with_an_owner_beside_another_live_row",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "existing text",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 1,
+            }
+        ],
+        (ledger_alerts.SIZE, "different text"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "existing text",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 1,
+            },
+            {
+                "id": "al-10-1",
+                "text": "different text",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+            },
+        ],
+        True,
+        id="a_live_row_of_another_text",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "size is big",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 1,
+            }
+        ],
+        (ledger_alerts.SIZE, "size is big"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "size is big",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 1,
+                "rev": 1,
+            }
+        ],
+        False,
+        id="a_live_row_of_the_same_text",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 10,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT - 10,
+            }
+        ],
+        (ledger_alerts.SYNC, "refused", "eng-1", "tasks/t1"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 10,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT,
+            }
+        ],
+        True,
+        id="a_live_sync_row_of_the_same_writer_and_item",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 10,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT - 10,
+            }
+        ],
+        (ledger_alerts.SYNC, "refused", "eng-2", "tasks/t1"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 10,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT - 10,
+            },
+            {
+                "id": "al-10-1",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-2",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+                "writer": "eng-2",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT,
+            },
+        ],
+        True,
+        id="a_live_sync_row_of_another_writer",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "generic sync notice",
+                "source": "sync",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 5,
+                "rev": 1,
+            }
+        ],
+        (ledger_alerts.SYNC, "generic sync notice"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "generic sync notice",
+                "source": "sync",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT - 5,
+                "rev": 1,
+            }
+        ],
+        False,
+        id="a_sync_warning_with_no_owner_on_a_live_row",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "closed text",
+                "source": "size",
+                "target": "master",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "closed_by": "x",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            }
+        ],
+        (ledger_alerts.SIZE, "closed text"),
+        [],
+        [
+            {
+                "id": "al-1-0",
+                "text": "closed text",
+                "source": "size",
+                "target": "master",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "closed_by": "x",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            },
+            {
+                "id": "al-10-1",
+                "text": "closed text",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+            },
+        ],
+        True,
+        id="a_closed_known_row",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "closed text",
+                "source": "size",
+                "target": "master",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "closed_by": "x",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            }
+        ],
+        (ledger_alerts.SIZE, "closed text"),
+        ["closed text"],
+        [
+            {
+                "id": "al-1-0",
+                "text": "closed text",
+                "source": "size",
+                "target": "master",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "closed_by": "x",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            }
+        ],
+        False,
+        id="a_closed_row_whose_warning_returned",
+    ),
+    pytest.param(
+        [],
+        (ledger_alerts.SIZE, "known text"),
+        ["known text"],
+        [
+            {
+                "id": "al-10-0",
+                "text": "known text",
+                "source": "size",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+            }
+        ],
+        True,
+        id="a_text_known_before_the_first_alert",
+    ),
+    pytest.param(
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "closed_by": "eng-1",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            }
+        ],
+        (ledger_alerts.SYNC, "refused", "eng-1", "tasks/t1"),
+        ["refused"],
+        [
+            {
+                "id": "al-1-0",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "done",
+                "at": RAISE_WARNING_AT - 100,
+                "rev": 1,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "closed_by": "eng-1",
+                "closed_at": RAISE_WARNING_AT - 50,
+                "outcome": "fixed",
+            },
+            {
+                "id": "al-10-1",
+                "text": "refused",
+                "source": "sync",
+                "target": "eng-1",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+                "writer": "eng-1",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT,
+            },
+        ],
+        True,
+        id="a_closed_sync_row_with_an_owner",
+    ),
+    pytest.param(
+        [],
+        (ledger_alerts.SYNC, "refused by operator", ledger_alerts.OPERATOR, "tasks/t1"),
+        [],
+        [
+            {
+                "id": "al-10-0",
+                "text": "refused by operator",
+                "source": "sync",
+                "target": "master",
+                "state": "open",
+                "at": RAISE_WARNING_AT,
+                "rev": 10,
+                "writer": "operator",
+                "item": "tasks/t1",
+                "last_refused_at": RAISE_WARNING_AT,
+            }
+        ],
+        True,
+        id="the_operator_as_writer",
+    ),
+]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+@pytest.mark.parametrize("alerts_before, warning, before, expected_alerts, expected_dirty", RAISE_WARNING_CASES)
+def test_raise_warning_covers_every_branch(
+    alerts_before: list[dict[str, object]],
+    warning: tuple[str, ...],
+    before: list[str],
+    expected_alerts: list[dict[str, object]],
+    expected_dirty: bool,
+) -> None:
+    doc = {"alerts": [dict(row) for row in alerts_before]}
+    context = core.Context({"rev": 9, "stamps": {}}, RAISE_WARNING_AT)
+    ledger_alerts.raise_warning(doc, context, warning, before)
+    assert doc["alerts"] == expected_alerts
+    assert context.dirty is expected_dirty
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_new_alert_appends_a_row_and_marks_the_context_dirty() -> None:
+    doc = {"alerts": []}
+    context = core.Context({"rev": 4, "stamps": {}}, RAISE_WARNING_AT)
+    alert = ledger_alerts.new_alert(doc, context, ledger_alerts.SIZE, "a fresh warning", "master")
+    assert alert == {
+        "id": "al-5-0",
+        "text": "a fresh warning",
+        "source": "size",
+        "target": "master",
+        "state": "open",
+        "at": RAISE_WARNING_AT,
+        "rev": 5,
+    }
+    assert doc["alerts"] == [alert]
+    assert context.dirty is True
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_appends_a_row_from_a_revision_and_a_time_with_no_context() -> None:
+    doc = {"alerts": []}
+    changed = ledger_alerts.warning_raised(doc, 3, RAISE_WARNING_AT, (ledger_alerts.SIZE, "grew too large"), [])
+    assert changed is True
+    assert doc["alerts"] == [
+        {
+            "id": "al-3-0",
+            "text": "grew too large",
+            "source": "size",
+            "target": "master",
+            "state": "open",
+            "at": RAISE_WARNING_AT,
+            "rev": 3,
+        }
+    ]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_alert_row_builds_a_row_from_a_revision_and_a_time_with_no_context() -> None:
+    doc = {"alerts": []}
+    row = ledger_alerts.alert_row(doc, 6, RAISE_WARNING_AT, ledger_alerts.SIZE, "a fresh warning", "master")
+    assert row == {
+        "id": "al-6-0",
+        "text": "a fresh warning",
+        "source": "size",
+        "target": "master",
+        "state": "open",
+        "at": RAISE_WARNING_AT,
+        "rev": 6,
+    }
+    assert doc["alerts"] == [row]

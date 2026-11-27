@@ -71,9 +71,19 @@ def cmd_bundle(
         list_bundle(user=user, shared=shared)
     elif action == "pull":
         pull(rebase=rebase, user=user, shared=shared)
+    elif action == "layer":
+        layer(user=user, shared=shared)
     else:
         print(f"Unknown bundle action: {action}", file=sys.stderr)
         sys.exit(1)
+
+
+def layer(user: bool = False, shared: bool = False) -> None:
+    bundle = _linked(user, shared)
+    if not bundle:
+        print(f"No {_names(user, shared)[1]} linked.", file=sys.stderr)
+        sys.exit(1)
+    print(profile_chain.layer_root(bundle))
 
 
 def _linked(user: bool = False, shared: bool = False) -> Path | None:
@@ -148,7 +158,7 @@ def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> N
 
     profiles_dir = bundle_dir / "profiles"
     profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
-    has_claude = (bundle_dir / ".claude").is_dir()
+    has_claude = (profile_chain.layer_root(bundle_dir) / ".claude").is_dir()
 
     _i._cprint(f"[OK] Linked {label}: {bundle_dir}")
     if profile_names:
@@ -221,6 +231,7 @@ def list_bundle(user: bool = False, shared: bool = False) -> None:
 
     print(f"{label.capitalize()}: {bundle}")
     print(f"Linked: {linked_at}")
+    print(f"Layer: {profile_chain.layer_root(bundle)}")
     print()
 
     profiles_dir = bundle / "profiles"
@@ -250,11 +261,11 @@ def user_last(argv: list[str]) -> list[str]:
 
 
 def add_parser(sub: Any) -> None:
-    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
+    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull, layer)")
     bundle_p.add_argument(
         "action",
-        choices=["new", "link", "unlink", "list", "pull"],
-        help="new <path> | link <path> | unlink | list | pull",
+        choices=["new", "link", "unlink", "list", "pull", "layer"],
+        help="new <path> | link <path> | unlink | list | pull | layer (print the directory the bundle ships from)",
     )
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
     bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")

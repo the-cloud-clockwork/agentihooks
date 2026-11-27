@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -15,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from hooks.compat import real_home
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -24,7 +25,7 @@ from scripts.profiles import binding, browser, bundle_copy, connectors, homes, p
 from scripts.swarm import brain_binding
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
-from scripts.targets.codex_hook_trust import trusted_state
+from scripts.targets.codex_hook_trust import rebase_state, trusted_state
 from scripts.targets.codex_target import codex_home
 
 SHARED_DIRS = ("projects", "sessions", "todos")
@@ -55,7 +56,7 @@ def rendered_root() -> Path:
 
 
 def live_root() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+    return real_home() / ".agentihooks" / "profiles"
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
@@ -207,13 +208,8 @@ def stamp(name: str) -> dict[str, Any]:
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    shared, user = _shared(), _user()
-    return (
-        ([bundle] if bundle is not None else [])
-        + ([shared] if shared is not None else [])
-        + ([user] if user is not None else [])
-        + [d for _, d in dirs]
-    )
+    roots = [root for root in (bundle, _shared(), _user()) if root is not None]
+    return [profile_chain.layer_root(root) for root in roots] + [d for _, d in profile_chain.unlayered(dirs, roots)]
 
 
 def _features(
@@ -390,7 +386,7 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user, shared))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     later = {"shared bundle": shared, "user bundle": user}
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, later))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, (HEADER, FOOTER), later))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
@@ -544,11 +540,8 @@ def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings
     doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
     doc["sqlite_home"] = str(operator)
     doc["features"]["hooks"] = True
-    source = f"{operator / 'hooks.json'}:"
     state: dict[str, Any] = cast(dict[str, Any], cast(dict[str, Any], installed.get("hooks") or {}).get("state") or {})
-    trusted: dict[str, Any] = {
-        f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)
-    }
+    trusted = rebase_state(state, operator / "hooks.json", out / "hooks.json")
     for key, value in trusted_state(operator / "hooks.json", out / "hooks.json").items():
         trusted[key] = {**trusted.get(key, {}), **value}
     if trusted:
@@ -575,25 +568,32 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
         _link(out / item, cast(Path, rollouts) / item)
 
 
+def codex_agent_doc(src: Path) -> dict[str, object] | None:
+    """A Claude agent file with a string description and a body as a Codex custom agent document, else None."""
+    import yaml
+
+    parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
+    if len(parts) != 3 or parts[0]:
+        return None
+    try:
+        front: dict[str, object] | None = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return None
+    meta: dict[str, object] = front if isinstance(front, dict) else {}
+    name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
+    if not (isinstance(description, str) and description.strip() and body):
+        return None
+    named = name.strip() if isinstance(name, str) and name.strip() else src.stem
+    return {"name": named, "description": description, "developer_instructions": body}
+
+
 def _codex_agents(claude_agents: Path, out: Path) -> None:
     """Write each Claude home agent with a string description and a body as a Codex custom agent file in ``out``."""
     import tomlkit
-    import yaml
 
     out.mkdir()
     for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
-        parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
-        if len(parts) != 3 or parts[0]:
-            continue
-        try:
-            front: dict[str, object] | None = yaml.safe_load(parts[1])
-        except yaml.YAMLError:
-            continue
-        meta: dict[str, object] = front if isinstance(front, dict) else {}
-        name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
-        if isinstance(description, str) and description.strip() and body:
-            named = name.strip() if isinstance(name, str) and name.strip() else src.stem
-            doc = {"name": named, "description": description, "developer_instructions": body}
+        if doc := codex_agent_doc(src):
             _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps(doc))
 
 

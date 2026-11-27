@@ -116,6 +116,7 @@ def test_a_writer_at_or_above_the_stored_version_writes(monkeypatch, floor):
     assert calls == [(connection, "s", OLD, {"_meta": {"rev": 3}}, ["e"])]
 
 
+@pytest.mark.feature("ledger-alert-warning-without-context")
 def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write(monkeypatch):
     calls = written(monkeypatch)
     refused = [("10.0.0.5", 0, 1), ("an unseen client", 1, 2)]
@@ -134,6 +135,7 @@ def test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_w
     assert ledger_alerts.TARGETS[ledger_alerts.WRITER] == "master"
 
 
+@pytest.mark.feature("ledger-alert-warning-without-context")
 def test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one(monkeypatch):
     calls = written(monkeypatch)
     connection = Statements({postgres.REFUSED_WRITERS: [("10.0.0.5", 0, 1)]})
@@ -143,6 +145,7 @@ def test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one(monkeypat
     ]
 
 
+@pytest.mark.feature("ledger-alert-warning-without-context")
 def test_a_closed_refusal_alert_is_not_raised_again_while_its_writer_stays_connected(monkeypatch):
     calls = written(monkeypatch)
     text = f"The ledger writer at 10.0.0.5 was refused: {postgres.refusal(0, 1)}"

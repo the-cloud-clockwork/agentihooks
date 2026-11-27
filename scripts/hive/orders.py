@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from scripts import serena_router_daemon
-from scripts.hive import placement, registry
+from scripts.hive import dispatch, placement, registry
 from scripts.scheduler.process_interval import Interval
 from scripts.swarm import launch_check, lease, model_pick, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
@@ -269,7 +269,8 @@ class Consumer:
 
     def _start_resume(self, order: CommandOrder, receipt: str) -> None:
         """Start a process for an unanswered resume order unless one holds its running marker; after RESUME_RUNS
-        starts that never answered, answer it failed so the hub hands the task to a fresh agent."""
+        starts that never answered, or when its process cannot start, answer it failed so the hub hands the task to a
+        fresh agent."""
         redis: Any = self.orders.redis
         if not redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
             return
@@ -277,7 +278,10 @@ class Consumer:
             answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, "resume never answered"))
             return
         redis.expire(receipt, RECEIPT_SECONDS)
-        self.offbeat(order)
+        try:
+            self.offbeat(order)
+        except Exception as exc:
+            answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, f"error: {type(exc).__name__}"))
 
     def sync_workspaces(self, ttl: int) -> None:
         """Publishes the work folder of each worker task whose latest execution runs here: the hive its host target
@@ -303,7 +307,10 @@ class Consumer:
             return self.reap_execution(order, agent)
         if order.action == "resume":
             return self.resume(order)
-        if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
+        if (
+            agent.generation != order.generation
+            or (agent.runtime_target.get("host_id") if agent.runtime_target else agent.hive) != self.hive
+        ):
             return FOREIGN
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
@@ -369,11 +376,14 @@ class Consumer:
         answer(redis, receipt, ack)
 
     def _spawn_resume(self, order: CommandOrder) -> None:
-        """Run a resume order in its own process so a slow herdr resume never holds the heartbeat."""
-        subprocess.Popen(
-            [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+        """Run a resume order in its own process so a slow herdr resume never holds the heartbeat, and keep that
+        process so a restart on a moved checkout waits for it."""
+        dispatch.track(
+            subprocess.Popen(
+                [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
         )
 
     def _holding(self, order: CommandOrder) -> AgentRecord | None:
@@ -404,6 +414,9 @@ class Consumer:
         return Ack(DONE if outcome.ok else FAILED, ack.target, "" if outcome.ok else outcome.detail)
 
     def apply(self, order: LaunchOrder) -> Ack | None:
+        cleanup = self.store.redis.hget(self.orders.receipt(order), "cleanup")
+        if cleanup is not None:
+            return self._cleanup_failed_launch(json.loads(cleanup))
         now = lease.now_ms(self.store)
         started = self.store.redis.hget(self.orders.receipt(order), "started")
         if started is not None:
@@ -493,7 +506,7 @@ class Consumer:
                 return slot["account"]
         return order.slot
 
-    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict[str, Any]) -> Ack:
+    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict[str, Any]) -> Ack | None:
         if refused := self.front_door_refusal(order, agent):
             return Ack("failed", {}, refused)
         config = self.store.config(order.slug)
@@ -530,7 +543,7 @@ class Consumer:
             return Ack("failed", {}, "retired")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
-            return Ack("failed", {}, _failure(outcome))
+            return self._failed_spawn(order, agent, outcome)
         placed = outcome.value
         pid = placed.profile_decision.get("validation", {}).get("pid")
         try:
@@ -566,6 +579,24 @@ class Consumer:
             **({"remote_control": placed.remote_control} if placed.remote_control else {}),
         }
         return Ack("live", target, "", execution)
+
+    def _failed_spawn(self, order: LaunchOrder, agent: AgentRecord, outcome: Outcome) -> Ack | None:
+        pane = (outcome.value or {}).get("pane_id")
+        if not pane:
+            return Ack("failed", {}, _failure(outcome))
+        failed = replace(agent, pane_id=pane)
+        cleanup = {"agent": asdict(failed), "failure": _failure(outcome)}
+        self.store.redis.hset(self.orders.receipt(order), "cleanup", json.dumps(cleanup))
+        return self._cleanup_failed_launch(cleanup)
+
+    def _cleanup_failed_launch(self, cleanup: dict[str, Any]) -> Ack | None:
+        agent = AgentRecord(**cleanup["agent"])
+        try:
+            if not self.runtime.terminate(agent).ok:
+                return None
+        except Exception:
+            return None
+        return Ack("failed", agent.runtime_target, cleanup["failure"], {"pane_id": agent.pane_id})
 
     def _stop(self, agent: AgentRecord, failure: str) -> Ack:
         outcome = self.runtime.terminate(agent)

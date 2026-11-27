@@ -4,6 +4,7 @@ swarm exit and is denied the call. The claim is the Redis key the tick and hub p
 import json
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -87,7 +88,7 @@ def check(
     with (folder / "progress.md").open("a") as progress:
         progress.write(NOTE.format(at=at, name=name, owner=holder))
     (spawn or subprocess.Popen)(
-        ["agentihooks", "swarm", slug, "--as", name, "exit"],
+        [sys.executable, "-P", "-m", "scripts.install", "swarm", slug, "--as", name, "exit"],
         start_new_session=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/panic.py:scripts.swarm.panic.x_tick_pass:ff91d2551791e7ff4fc82be45a4a225989426462e4d2167d0ee5d8cec55f90d7": {
+    "reader": "Standards",
+    "reason": "Lock.acquire's blocking parameter is evaluated for truthiness, not identity; None and False are both falsy, so acquire(blocking=None) and acquire(blocking=False) both do an immediate non-blocking try-acquire with identical return values and no wait in every case."
+  }
+}

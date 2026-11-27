@@ -1,0 +1,12 @@
+{
+  "id": "type-gate-split-by-tier",
+  "origin": "inventory",
+  "behaviour": "The strict type gate splits its scope by tier: the type-gate job's grading step sets TYPE_GATE_DIRECT_IMPORTERS=1 in its own step env, so a pull request and the lab unit the CI lab discovers from that step grade only the changed files and their direct importers; the type-gate-tree job grades the whole tree with python -m scripts.type_gate --tree, which is red only when a file holds more errors than its entry in tests/TYPE_BASELINE.json or a file with no entry holds more than zero, grading no drift and asking for no baseline rewrite. That job is a need of promotion-ready and of promote, both conditions requiring its success, and is not a need of Gate - Required.",
+  "seam": "the --tree mode of scripts.type_gate main; the type-gate job's grading step env and the type-gate-tree job of .github/workflows/test.yml; scripts.ci_lab.static_gates.discover reading that step's env",
+  "tests": [
+    "tests/test_type_gate_tree.py::test_a_file_above_its_tree_baseline_entry_is_red",
+    "tests/contracts/ci_tiers/test_type_gate_tiers.py::test_the_type_gate_grading_step_sets_direct_importers_on_itself_not_the_job",
+    "tests/contracts/ci_tiers/test_type_gate_tiers.py::test_the_lab_discovers_the_same_direct_importers_scope_from_the_grading_step",
+    "tests/contracts/promotion/test_workflow.py::test_promotion_requires_a_clean_whole_tree_type_check"
+  ]
+}

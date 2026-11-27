@@ -1,0 +1,23 @@
+rules:
+  - id: forced-master-token-fallback-expired-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A front door launch takes the token fallback only when its claude ai login expired, so a forced master start
+      whose login is held, reserved at the master floor or spent still ends with no master. A forced start takes the
+      token fallback on any login refusal: gate the fallback on the forced flag or the expired refusal.
+    paths:
+      include:
+        - /scripts/routing/
+        - /scripts/master_claude_login.py
+        - forced-master-token-fallback-expired-only.py
+    patterns:
+      - pattern-inside: |
+          try:
+              ...
+          except $REFUSED as $EXC:
+              ...
+      - pattern: |
+          if $FRONT and str($EXC) == $EXPIRED:
+              ...
+              return $LOGIN.launch_token(...)

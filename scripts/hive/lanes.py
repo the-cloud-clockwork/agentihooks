@@ -18,7 +18,7 @@ from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import SpawnRequest
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "review", "plan")
 EXCLUDED_ENV = "HIVE_EXCLUDED"
 TAKE_MS = workstation.TAKE_MS
 IDLE_S = workstation.IDLE_S
@@ -29,7 +29,7 @@ class LaneTasks:
     def __init__(self, bus, hive: str, configs: Callable[[str], object]):
         self.bus, self.hive, self.configs = bus, hive, configs
 
-    def _ask(self, op: str, event: Envelope, **fields):
+    def _ask(self, op: str, event: Envelope, **fields: Any) -> Any:
         ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive)
         request = {
             "op": op,
@@ -62,6 +62,9 @@ class LaneTasks:
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
+
+    def dead_lettered(self, event: Envelope) -> None:
+        self._ask("reopen", event, dead=True)
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self._ask("failed", event, harness=harness, reason=reason)
@@ -125,9 +128,14 @@ def stop_once(store: Any, bus: Any, runtime: Any, hive: str, held: dict[str, exe
 
 
 def draining(store: Any, hive: str) -> bool:
-    """True while this pod's member of hive takes no new agents; a store without Redis has no members."""
+    """True while the hive record or this pod's member of the hive says draining; a store without Redis has no hive
+    record."""
     redis = getattr(store, "redis", None)
-    return redis is not None and registry.member_draining(redis, hive, registry.member_name())
+    if redis is None:
+        return False
+    record: dict[str, Any] = registry.show(redis, hive) or {}
+    member = record.get("members", {}).get(registry.member_name(), {})
+    return "yes" in (record.get("draining"), member.get("draining"))
 
 
 def beat(store: Any, bus: Any, hive: str) -> None:

@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 
 import pytest
 
@@ -64,7 +65,7 @@ def escalate(n=1, reason=REASON):
 
 
 def write(doc, change):
-    ctx = Ctx()
+    ctx = cast(Any, Ctx())
     blockers.check(change)
     return blockers.apply(doc, change, ctx), ctx
 
@@ -297,11 +298,15 @@ class Inner:
         return "inner"
 
 
+def apply_stub(*args: object, **kwargs: object) -> bool:
+    return True
+
+
 def test_the_gate_passes_allowed_writes_to_its_inner_gate(tier):
-    inner, doc, ctx = Inner(), ledger(), Ctx()
+    inner, doc, ctx = Inner(), ledger(), cast(Any, Ctx())
     change = {"op": "priority", "id": "p", "by": "swarm", "item": ITEM, "text": "Ask."}
-    assert blockers.Gate(SLUG, inner).apply(doc, change, ctx, print) == "inner"
-    assert inner.calls == [(doc, change, ctx, print)]
+    assert blockers.Gate(SLUG, inner).apply(doc, change, ctx, apply_stub) == "inner"
+    assert inner.calls == [(doc, change, ctx, apply_stub)]
 
 
 @pytest.mark.parametrize(
@@ -321,8 +326,8 @@ def test_the_gate_passes_allowed_writes_to_its_inner_gate(tier):
     ],
 )
 def test_the_gate_refuses_an_ask_without_the_protocol(tier, change, refusal):
-    inner, ctx = Inner(), Ctx()
-    assert blockers.Gate(SLUG, inner).apply(ledger(), change, ctx, print) is False
+    inner, ctx = Inner(), cast(Any, Ctx())
+    assert blockers.Gate(SLUG, inner).apply(ledger(), change, ctx, apply_stub) is False
     assert (ctx.refused, inner.calls) == ([refusal], [])
 
 

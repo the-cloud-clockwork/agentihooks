@@ -1,0 +1,58 @@
+name: fixture
+on:
+  push:
+    branches: [dev]
+  pull_request:
+jobs:
+  waits-beside-the-legs:
+    if: github.event_name != 'merge_group'
+    # ruleid: sonar-coverage-wait-without-unit-need
+    needs: [select, reuse, admission, lab-verdict, collect]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Take each shard's coverage as it lands
+        uses: actions/github-script@v7
+        with:
+          script: await require(process.env.ARRIVALS).arrive()
+      - name: Merge shard coverage
+        run: bash .github/coverage/combine.sh --downloaded 20
+
+  waits-beside-the-selected-legs:
+    # ruleid: sonar-coverage-wait-without-unit-need
+    needs: [select, unit-selected]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take each shard's coverage as it lands
+        run: echo wait
+
+  hands-the-push-off:
+    # ok: sonar-coverage-wait-without-unit-need
+    needs: [select, reuse, admission, lab-verdict, collect]
+    runs-on: ubuntu-latest
+    env:
+      GIT_CONFIG_COUNT: "1"
+      SONAR_HAND_OFF: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.SONAR_HAND_OFF != 'true'
+      - name: Take each shard's coverage as it lands
+        run: echo wait
+
+  waits-for-every-unit-leg:
+    # ok: sonar-coverage-wait-without-unit-need
+    needs: [select, reuse, admission, lab-verdict, collect, unit]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take each shard's coverage as it lands
+        run: echo wait
+      - name: Merge shard coverage
+        run: bash .github/coverage/combine.sh --downloaded 20
+
+  merges-without-waiting:
+    # ok: sonar-coverage-wait-without-unit-need
+    needs: [select]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge shard coverage
+        run: bash .github/coverage/combine.sh --downloaded 20

@@ -2,16 +2,20 @@ import ast
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import sysconfig
+from collections.abc import Iterator
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 import pytest
 import yaml
 from coverage import CoverageData
 
-from tests import dep_manifest
+from scripts import dep_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
@@ -48,18 +52,20 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
-def _deselect_in_test_count(tmp_path, head_manifest):
+def _deselect_in_test_count(
+    tmp_path: Path, head_manifest: str, package: str = "scripts"
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner = tmp_path / "runner"
     workspace = tmp_path / "workspace"
     for checkout, manifest in (
-        (runner / "planner", (ROOT / "tests" / "dep_manifest.py").read_text()),
+        (runner / "planner", (ROOT / "scripts" / "dep_manifest.py").read_text()),
         (workspace, head_manifest),
     ):
-        (checkout / "tests").mkdir(parents=True)
-        (checkout / "tests" / "__init__.py").write_text("")
-        (checkout / "tests" / "dep_manifest.py").write_text(manifest)
+        (checkout / package).mkdir(parents=True)
+        (checkout / package / "__init__.py").write_text("")
+        (checkout / package / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
     (runner / "collected.json").write_text(json.dumps(collected))
     env = {
@@ -69,7 +75,7 @@ def _deselect_in_test_count(tmp_path, head_manifest):
         "PYTHON_PATH": sys.executable,
         "DEV_PLAN": str(workspace / "reused-tests.json"),
     }
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
@@ -182,6 +188,21 @@ def test_tests_files_and_global_inputs_invalidate_their_dependants(tmp_path):
     hit, cause = dep_manifest.invalidated(manifest, [(".github/workflows/test.yml", None, None)])
     assert hit == set(manifest["tests"]) and cause == ".github/workflows/test.yml"
     assert dep_manifest.invalidated(manifest, [("profiles/x.py", "", "y")])[1] == "profiles/x.py"
+
+
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test() -> None:
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [], "files": [], "escapes": False, "outside": ["docs/a.md"]},
+            "tests/test_b.py::test_two": {"units": [], "files": ["docs/a.md"], "escapes": False},
+            "tests/test_c.py::test_three": {"units": [], "files": [], "escapes": False},
+        },
+    }
+    hit = {"tests/test_a.py::test_one", "tests/test_b.py::test_two"}
+    assert dep_manifest.invalidated(manifest, [("docs/a.md", "a", "b")]) == (hit, None)
+    assert dep_manifest.invalidated(manifest, [("docs/other.md", "a", "b")]) == (set(), None)
 
 
 def test_a_source_change_invalidates_the_tests_that_read_it_as_data():
@@ -308,7 +329,7 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it() -> None:
     job = _job("dep-manifest")
     assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
     assert "sonar" not in job["needs"]
@@ -322,18 +343,86 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     )
     assert _step("dep-manifest", "Download shard coverage")["with"]["pattern"] == "coverage-3.12-*"
     build = _step("dep-manifest", "Build the test dependency manifest")
-    assert "python -m tests.dep_manifest build" in build["run"]
+    assert "python -m scripts.dep_manifest build" in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
-    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
+    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
-    assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
+    assert build["run"].index(contexts) < build["run"].index("python -m scripts.dep_manifest build")
     upload = _step("dep-manifest", "Upload the test dependency manifest")
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
     sonar = [step.get("name") for step in _job("sonar")["steps"]]
     assert not any("dependency manifest" in (name or "") for name in sonar)
     assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
+
+
+@pytest.mark.feature("manifest-build-storage")
+def test_the_manifest_job_preserves_records_and_releases_coverage(tmp_path: Path) -> None:
+    source = tmp_path / "hooks" / "sample.py"
+    source.parent.mkdir()
+    source.write_text("def double(value):\n    return value * 2\n\n\ndef increment(value):\n    return value + 1\n")
+    config = tmp_path / ".github" / "coverage" / "coverage.ini"
+    config.parent.mkdir(parents=True)
+    config.write_text((ROOT / ".github" / "coverage" / "coverage.ini").read_text())
+    first = "tests/test_fixture.py::test_first"
+    second = "tests/test_fixture.py::test_second"
+    shards = tmp_path / ".coverage-shards"
+    reports = []
+    databases = []
+    for name, test, line in [
+        ("coverage-3.12-0", first, 2),
+        ("coverage-3.12-1/reused-coverage", second, 6),
+        ("coverage-3.12-2", first, 2),
+    ]:
+        folder = shards / name
+        folder.mkdir(parents=True)
+        database = folder / ".coverage"
+        data = CoverageData(str(database))
+        data.set_context(f"{test}|run")
+        data.add_arcs({str(source): [(-1, line), (line, -1)]})
+        data.write()
+        databases.append(database)
+        report = folder / "dep-inputs" / "inputs.jsonl"
+        report.parent.mkdir()
+        report.write_text(json.dumps({"test": test, "files": ["docs/input.json"], "escapes": False}) + "\n")
+        reports.append(report)
+    sentinel = shards / "unrelated.txt"
+    sentinel.write_text("keep")
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    build = _step("dep-manifest", "Build the test dependency manifest")
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", build["run"]],
+        cwd=tmp_path,
+        env=dict(
+            os.environ,
+            PYTHONPATH=str(ROOT),
+            RUNNER_TEMP=str(runner),
+            GITHUB_SHA="fixture",
+            ENVIRONMENT="py3.12-fixture",
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = {
+        "version": 2,
+        "commit": "fixture",
+        "environment": "py3.12-fixture",
+        "units": ["hooks/sample.py::<module>", "hooks/sample.py::double", "hooks/sample.py::increment"],
+        "tests": {
+            first: {"units": [0, 1], "files": ["docs/input.json"], "escapes": False},
+            second: {"units": [0, 2], "files": ["docs/input.json"], "escapes": False},
+        },
+        "lines": {first: {"hooks/sample.py": [2]}, second: {"hooks/sample.py": [6]}},
+    }
+    output = runner / "dep-manifest"
+    assert (output / "manifest.json").read_text() == json.dumps(expected, separators=(",", ":"))
+    assert dep_manifest.unpack(json.loads((output / "packed.json").read_text())) == expected
+    assert sentinel.read_text() == "keep"
+    assert all(report.is_file() for report in reports)
+    assert not any(database.exists() for database in databases), "Consumed coverage databases remain"
 
 
 @pytest.mark.parametrize("torn", ["", "line", "database"])
@@ -413,7 +502,24 @@ def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suff
     assert dep_manifest.plan(manifest, [(".github/workflows/test.yml", None, None)], "41")["tests"] == []
 
 
+@pytest.fixture
+def bounded() -> Iterator[None]:
+    """Raise TimeoutError in a test still running after five seconds, with no timeout plugin loaded."""
+
+    def expire(signum: int, frame: FrameType | None) -> None:
+        raise TimeoutError("the test ran past its five second bound")
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 @pytest.mark.parametrize("path", [".github/workflows/swarm-smoke.yml", ".github/workflows/test.yml"])
+@pytest.mark.usefixtures("bounded")
 def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_its_tests(path):
     manifest = {
         "version": 2,
@@ -549,6 +655,7 @@ def test_files_a_module_reads_while_imported_during_collection_belong_only_to_it
         "jobs:\n  unit:\n    needs: select\n  split: {}\n  select:\n    steps: [{run: changed}]\n",
     ],
 )
+@pytest.mark.usefixtures("bounded")
 def test_execution_input_plants_still_invalidate_every_test(tmp_path, new):
     manifest = _measure(tmp_path)
     old = "jobs:\n  unit:\n    needs: select\n  split: {}\n  select: {}\n"
@@ -591,17 +698,17 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("test-count", "Plan the tests whose inputs did not change")
+    plan = _step("collect", "Plan the tests whose inputs did not change")
     assert plan["env"]["GRADER"] == (
         "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("test-count", "Wait for the test plan")["id"] == "plan"
+    assert _step("collect", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
-    deselected = _step("test-count", "Deselect the reused tests")
-    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
+    deselected = _step("collect", "Deselect the reused tests")
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m scripts.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
@@ -624,7 +731,7 @@ def _imports(module):
 
 
 def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
-    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "tests.dep_manifest"], set()
+    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "scripts.dep_manifest"], set()
     third_party = {"loaded": set(), "lazy": set()}
     while pending:
         module = pending.pop()
@@ -653,7 +760,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
         steps = job.get("steps", [])
         for index, step in enumerate(steps):
             run = step.get("run", "")
-            for call in ("-m scripts.ci_test_plan", "-m tests.dep_manifest"):
+            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest"):
                 if call in run:
                     calls.add((name, step["name"]))
                     earlier = [s.get("run", "") for s in steps[:index]]
@@ -667,15 +774,15 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
                         step["name"],
                     )
     assert calls == {
-        ("test-count", "Plan the tests whose inputs did not change"),
-        ("test-count", "Deselect the reused tests"),
+        ("collect", "Plan the tests whose inputs did not change"),
+        ("collect", "Deselect the reused tests"),
         ("dep-manifest", "Build the test dependency manifest"),
     }
 
 
 def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
     planted = (
-        (ROOT / "tests" / "dep_manifest.py")
+        (ROOT / "scripts" / "dep_manifest.py")
         .read_text()
         .replace(
             "def deselect(",
@@ -690,7 +797,7 @@ def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_pat
 
 
 def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
-    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "scripts" / "dep_manifest.py").read_text())
     assert (
         chosen
         == expected
@@ -699,6 +806,27 @@ def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_cod
             "files": ["tests/test_a.py"],
         }
     )
+
+
+@pytest.mark.feature("deselect-scripts-manifest")
+def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package(tmp_path: Path) -> None:
+    manifest = (ROOT / "scripts" / "dep_manifest.py").read_text()
+    shipped = tmp_path / "shipped" / "runner" / "planner"
+    shipped.mkdir(parents=True)
+    (shipped / "tests.py").write_text("raise ModuleNotFoundError(\"No module named 'tests'\", name='tests')\n")
+    chosen, expected = _deselect_in_test_count(tmp_path / "shipped", manifest)
+    assert chosen == expected
+    legacy = tmp_path / "legacy" / "planner"
+    for package in ("scripts", "tests"):
+        (legacy / package).mkdir(parents=True)
+        (legacy / package / "__init__.py").write_text("")
+    (legacy / "tests" / "dep_manifest.py").write_text("raise SystemExit('the tests package manifest ran')\n")
+    env = {**os.environ, "RUNNER_TEMP": str(legacy.parent), "PYTHON_PATH": sys.executable}
+    run = _step("collect", "Deselect the reused tests")["run"]
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", run], env=env, capture_output=True, text=True, check=False
+    )
+    assert "the tests package manifest ran" not in result.stderr
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
@@ -755,6 +883,44 @@ def test_a_packed_manifest_without_lines_unpacks_without_lines():
     assert dep_manifest.unpack(dep_manifest.pack(manifest)) == manifest
 
 
+def test_a_packed_manifest_writes_its_own_fields_before_the_packed_tests_and_lines() -> None:
+    manifest = {
+        "lines": {"t": {"hooks/a.py": [1, 2]}},
+        "tests": {"t": {"units": [0], "files": ["x"], "escapes": False}},
+        "version": 2,
+        "commit": "c",
+        "units": ["hooks/a.py::f"],
+    }
+    assert list(dep_manifest.pack(manifest)) == ["version", "commit", "units", "tests", "lines", "files", "spans"]
+
+
+@pytest.mark.feature("packed-manifest-outside-files")
+def test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout() -> None:
+    manifest = {
+        "commit": "c",
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [0], "files": ["x"], "escapes": False, "outside": ["docs/a.md"]},
+            "tests/test_a.py::test_two": {"units": [], "files": ["x"], "escapes": True, "outside": []},
+            "tests/test_b.py::test_b": {"units": [], "files": ["docs/a.md"], "escapes": False},
+        },
+    }
+    packed = dep_manifest.pack(json.loads(json.dumps(manifest)))
+    assert packed["files"] == [["x"], ["docs/a.md"], []]
+    assert packed["tests"] == {
+        "tests/test_a.py::test_one": [[0], 0, False, 1],
+        "tests/test_a.py::test_two": [[], 0, True, 2],
+        "tests/test_b.py::test_b": [[], 1, False],
+    }
+    assert dep_manifest.unpack(json.loads(json.dumps(packed))) == manifest
+    three = {"commit": "c", "units": [], "tests": {"t": [[1], 0, True]}, "files": [["x"]], "spans": []}
+    assert dep_manifest.unpack(three) == {
+        "commit": "c",
+        "units": [],
+        "tests": {"t": {"units": [1], "files": ["x"], "escapes": True}},
+    }
+
+
 def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_uploads_it(tmp_path, monkeypatch):
     built = {"version": 2, "commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
     monkeypatch.setattr(dep_manifest, "build", lambda *args: built)
@@ -774,6 +940,396 @@ def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_u
     assert upload["with"]["name"] == "dep-manifest-packed"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/packed.json"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def _history(root: Path) -> tuple[str, str]:
+    """Commit a base, a source change on the first parent and a merged side commit; return the merge and change."""
+
+    def git(*args: str, when: int = 0) -> str:
+        stamp = {"GIT_AUTHOR_DATE": f"@{when} +0000", "GIT_COMMITTER_DATE": f"@{when} +0000"}
+        identity = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        command = ["git", "-C", str(root), *identity, *args]
+        return subprocess.run(command, check=True, capture_output=True, text=True, env={**os.environ, **stamp}).stdout
+
+    git("init", "-q", "-b", "main")
+    (root / "hooks").mkdir()
+    (root / "hooks" / "sample.py").write_text(SOURCE)
+    (root / "notes.md").write_text("a")
+    git("add", ".")
+    git("commit", "-qm", "base", when=1000)
+    git("checkout", "-qb", "side")
+    (root / "notes.md").write_text("b")
+    git("commit", "-qam", "side", when=3000)
+    git("checkout", "-q", "main")
+    (root / "hooks" / "sample.py").write_text(SOURCE.replace("value * 2", "value * 3"))
+    git("commit", "-qam", "change", when=2000)
+    change = git("rev-parse", "HEAD").strip()
+    git("merge", "-q", "--no-ff", "-m", "merge", "side", when=4000)
+    return git("rev-parse", "HEAD").strip(), change
+
+
+def _history_manifest(base: str) -> dict[str, Any]:
+    """Return a manifest whose test a ran the changed function and whose test b read the side commit's file."""
+    tests = {
+        "a": {"units": [0], "files": [], "escapes": False},
+        "b": {"units": [], "files": ["notes.md"], "escapes": False},
+    }
+    return {"version": 2, "commit": base, "units": ["hooks/sample.py::double"], "tests": tests}
+
+
+def test_a_source_hashes_the_same_with_any_line_endings() -> None:
+    assert dep_manifest.unit_hashes(SOURCE.replace("\n", "\r\n")) == dep_manifest.unit_hashes(SOURCE)
+    assert dep_manifest.unit_hashes(SOURCE.replace("\n", "\r")) == dep_manifest.unit_hashes(SOURCE)
+
+
+def test_a_test_that_runs_module_level_code_depends_on_the_module_unit(tmp_path: Path) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text(SOURCE)
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_import|run")
+    data.add_arcs({str(package / "sample.py"): [(-1, 1), (1, -1)]})
+    data.write()
+    manifest = dep_manifest.build(tmp_path / ".coverage", [], tmp_path, "abc", "env")
+    assert manifest["version"] == 2
+    assert manifest["units"] == ["hooks/sample.py::<module>"]
+
+
+def test_a_non_ascii_function_keeps_its_unit_name_under_a_latin_1_locale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text("def café(value):\n    return value\n", encoding="utf-8")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_cafe|run")
+    data.add_arcs({str(package / "sample.py"): [(-1, 2), (2, -1)]})
+    data.write()
+    read = Path.read_text
+
+    def latin_1_locale(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        return read(path, encoding=encoding or "latin-1", errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", latin_1_locale)
+    manifest = dep_manifest.build(tmp_path / ".coverage", [], tmp_path, "abc", "env")
+    assert manifest["units"] == ["hooks/sample.py::<module>", "hooks/sample.py::café"]
+
+
+def _changed_repository(root: Path) -> None:
+    """Commit a base, then change a Python file, rename another unchanged and change a text file."""
+
+    def git(*args: str) -> str:
+        command = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", *args]
+        return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+
+    git("init", "-q", "-b", "main")
+    (root / "hooks").mkdir()
+    (root / "hooks" / "a.py").write_text("def a():\n    return 1\n")
+    (root / "hooks" / "moved.py").write_text("x = 1\n")
+    (root / "notes.md").write_text("a\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    (root / "hooks" / "a.py").write_text("def a():\n    return 2\n")
+    (root / "notes.md").write_text("b\n")
+    git("mv", "hooks/moved.py", "hooks/renamed.py")
+    git("commit", "-qam", "head")
+
+
+def _drop_blob(root: Path, path: str) -> None:
+    """Delete the loose object holding the head revision of path."""
+    blob = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", f"HEAD:{path}"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+
+@pytest.mark.parametrize("path", ["hooks/a.py", "hooks/renamed.py"])
+def test_the_changes_refuse_a_changed_python_file_whose_blob_is_missing(tmp_path: Path, path: str) -> None:
+    _changed_repository(tmp_path)
+    _drop_blob(tmp_path, path)
+    with pytest.raises(subprocess.CalledProcessError):
+        dep_manifest.changes(tmp_path, "HEAD~1", "HEAD")
+
+
+def test_the_changes_never_read_a_changed_non_python_blob(tmp_path: Path) -> None:
+    _changed_repository(tmp_path)
+    _drop_blob(tmp_path, "notes.md")
+    assert dep_manifest.changes(tmp_path, "HEAD~1", "HEAD") == [
+        ("hooks/a.py", "def a():\n    return 1\n", "def a():\n    return 2\n"),
+        ("hooks/moved.py", "x = 1\n", None),
+        ("hooks/renamed.py", None, "x = 1\n"),
+        ("notes.md", None, None),
+    ]
+
+
+@pytest.mark.usefixtures("bounded")
+def test_a_change_to_the_workflow_defaults_changes_how_tests_run() -> None:
+    before = {"jobs": {"unit": {"steps": []}, "split": {"steps": []}}}
+    after = {**before, "defaults": {"run": {"shell": "bash"}}}
+    assert dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after)) is True
+    assert dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(before)) is False
+
+
+def test_a_change_to_another_workflow_reruns_only_the_tests_that_escape() -> None:
+    tests = {"a": {"units": [], "files": [], "escapes": True}, "b": {"units": [], "files": [], "escapes": False}}
+    manifest = {"version": 2, "commit": "c", "units": [], "tests": tests}
+    assert dep_manifest.invalidated(manifest, [(".github/workflows/other.yml", None, None)]) == ({"a"}, None)
+
+
+def test_the_share_walks_first_parent_merges_and_reports_each_reusable_share(tmp_path: Path) -> None:
+    merge, change = _history(tmp_path)
+    manifest = _history_manifest(change)
+    rows = [
+        {"commit": merge, "invalidated": 1, "reusable": 0.5, "global": None},
+        {"commit": change, "invalidated": 1, "reusable": 0.5, "global": None},
+    ]
+    found = dep_manifest.share(manifest, tmp_path, "HEAD", 2)
+    assert found == {"tests": 2, "merges": 2, "mean": 0.5, "median": 0.5, "rows": rows}
+    empty = {"tests": 2, "merges": 0, "mean": 0.0, "median": 0.0, "rows": []}
+    assert dep_manifest.share(manifest, tmp_path, "HEAD", 0) == empty
+
+
+def test_each_command_refuses_its_missing_required_options(tmp_path: Path) -> None:
+    build = ["build", "--coverage", "c", "--inputs", str(tmp_path), "--out", str(tmp_path / "m.json")]
+    for argv in (
+        [],
+        [*build, "--environment", "e"],
+        [*build, "--commit", "c"],
+        ["invalidated"],
+        ["share"],
+    ):
+        with pytest.raises(SystemExit) as refused:
+            dep_manifest.main(argv)
+        assert refused.value.code == 2
+
+
+def test_the_build_command_passes_its_commit_and_writes_a_compact_packed_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    built = {"version": 2, "commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: called.append(args) or built)
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.jsonl").write_text("")
+    packed = tmp_path / "packed.json"
+    argv = ["build", "--coverage", "c", "--inputs", str(tmp_path / "inputs"), "--commit", "abc", "--environment", "e"]
+    assert dep_manifest.main([*argv, "--out", str(tmp_path / "m.json"), "--packed", str(packed)]) == 0
+    assert called[0][3:] == ("abc", "e")
+    assert packed.read_text() == json.dumps(dep_manifest.pack(dict(built)), separators=(",", ":"))
+
+
+def test_the_invalidated_and_share_commands_read_the_working_repository_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge, change = _history(tmp_path)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_history_manifest(change)))
+    monkeypatch.chdir(tmp_path)
+    assert dep_manifest.main(["invalidated", "--manifest", str(manifest)]) == 0
+    assert capsys.readouterr().out == json.dumps({"global": None, "tests": ["b"]}, indent=2) + "\n"
+    assert dep_manifest.main(["share", "--manifest", str(manifest), "--ref", "HEAD", "--merges", "1"]) == 0
+    row = {"commit": merge, "invalidated": 1, "reusable": 0.5, "global": None}
+    shared = {"tests": 2, "merges": 1, "mean": 0.5, "median": 0.5, "rows": [row]}
+    assert capsys.readouterr().out == json.dumps(shared, indent=2) + "\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["build", "--inputs", "i", "--commit", "c", "--environment", "e", "--out", "o"],
+        ["build", "--coverage", "c", "--commit", "c", "--environment", "e", "--out", "o"],
+        ["build", "--coverage", "c", "--inputs", "i", "--commit", "c", "--environment", "e"],
+        ["deselect", "--collected", "c", "--out", "o"],
+        ["deselect", "--plan", "p", "--out", "o"],
+        ["deselect", "--plan", "p", "--collected", "c"],
+    ],
+    ids=["no-coverage", "no-inputs", "no-out", "no-plan", "no-collected", "no-deselect-out"],
+)
+def test_the_build_and_deselect_commands_refuse_a_missing_required_option(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as refused:
+        dep_manifest.main(argv)
+    assert refused.value.code == 2
+
+
+def test_the_build_command_forwards_typed_paths_and_reports_what_it_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    built = {"version": 2, "commit": "c", "units": ["u"], "tests": {"t": {"units": [0], "files": [], "escapes": True}}}
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: called.append(args) or built)
+    report = tmp_path / "inputs" / "a.jsonl"
+    report.parent.mkdir()
+    report.write_text("")
+    out = tmp_path / "m.json"
+    argv = ["build", "--coverage", "cov", "--inputs", str(report.parent), "--root", str(tmp_path)]
+    assert dep_manifest.main([*argv, "--commit", "abc", "--environment", "e", "--out", str(out)]) == 0
+    assert called == [(Path("cov"), [report], tmp_path.resolve(), "abc", "e")]
+    assert out.read_text() == json.dumps(built, separators=(",", ":"))
+    assert capsys.readouterr().out == "Dependency manifest: 1 tests, 1 units, 1 escape\n"
+
+
+def test_the_build_command_is_red_when_the_coverage_holds_no_test_contexts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: {"tests": {}})
+    (tmp_path / "a.jsonl").write_text("")
+    argv = ["build", "--coverage", "c", "--inputs", str(tmp_path), "--commit", "c", "--environment", "e"]
+    assert dep_manifest.main([*argv, "--out", str(tmp_path / "m.json")]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "::error::The coverage data holds no per test contexts.\n"
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_the_invalidated_command_passes_its_repository_and_revisions_as_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(dep_manifest, "changes", lambda *args: called.append(args) or [])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_history_manifest("recorded")))
+    argv = ["invalidated", "--manifest", str(manifest), "--repo", str(tmp_path), "--base", "b0", "--head", "h0"]
+    assert dep_manifest.main(argv) == 0
+    assert called == [(tmp_path, "b0", "h0")]
+    assert json.loads(capsys.readouterr().out) == {"global": None, "tests": []}
+
+
+def test_the_share_command_passes_its_defaults_and_typed_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(dep_manifest, "share", lambda *args: called.append(args) or {"rows": []})
+    manifest = tmp_path / "manifest.json"
+    recorded = _history_manifest("recorded")
+    manifest.write_text(json.dumps(recorded))
+    monkeypatch.chdir(tmp_path)
+    assert dep_manifest.main(["share", "--manifest", str(manifest)]) == 0
+    argv = ["share", "--manifest", str(manifest), "--repo", "elsewhere", "--ref", "r", "--merges", "3"]
+    assert dep_manifest.main(argv) == 0
+    assert called == [(recorded, Path.cwd(), "origin/dev", 40), (recorded, Path("elsewhere"), "r", 3)]
+    assert capsys.readouterr().out == 2 * (json.dumps({"rows": []}, indent=2) + "\n")
+
+
+def test_the_deselect_command_reads_every_plan_and_the_collection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    collected = ["tests/a.py::one", "tests/a.py::two", "tests/b.py::one"]
+    (tmp_path / "collected.json").write_text(json.dumps(collected))
+    (tmp_path / "dev.json").write_text(json.dumps({"tests": ["tests/a.py::one", "tests/a.py::two"]}))
+    (tmp_path / "branch.json").write_text(json.dumps({"runs": [], "tests": ["tests/b.py::one"]}))
+    out = tmp_path / "out.json"
+    plans = ["--plan", str(tmp_path / "dev.json"), "--plan", str(tmp_path / "branch.json")]
+    assert (
+        dep_manifest.main(["deselect", *plans, "--collected", str(tmp_path / "collected.json"), "--out", str(out)]) == 0
+    )
+    assert json.loads(out.read_text()) == {
+        "tests": collected,
+        "files": ["tests/a.py", "tests/b.py"],
+        "branch": ["tests/b.py::one"],
+    }
+    assert capsys.readouterr().out == (
+        "Reusing 3 collected tests; 2 test files are not collected\n1 of them passed on earlier runs of this pull request\n"
+    )
+
+
+def test_a_function_inside_a_block_and_the_line_after_it_map_as_written() -> None:
+    source = "if True:\n    def f():\n        return 1\nx = 1\n"
+    assert dep_manifest.line_units(source) == {3: "f"}
+    changed = source.replace("x = 1", "x = 2")
+    assert (
+        dep_manifest.unit_hashes(source)[dep_manifest.MODULE] != dep_manifest.unit_hashes(changed)[dep_manifest.MODULE]
+    )
+
+
+def test_unit_hashes_join_module_lines_and_repeated_definitions_as_specified() -> None:
+    module = "x = 1\ny = 2\n"
+    assert dep_manifest.unit_hashes(module)[dep_manifest.MODULE] == hashlib.sha256(b"x = 1\ny = 2").hexdigest()
+    twice = "def f():\n    return 1\ndef f():\n    return 2\n"
+    expected = hashlib.sha256(b"def f():\n    return 1\x00def f():\n    return 2").hexdigest()
+    assert dep_manifest.unit_hashes(twice)["f"] == expected
+
+
+def test_the_build_keeps_ids_with_bars_skips_missing_files_and_maps_broken_sources_to_the_module(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text(SOURCE)
+    (package / "broken.py").write_text("def (\n")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_x[a|b]|run")
+    data.add_arcs(
+        {
+            str(tmp_path / "aaa" / "gone.py"): [(-1, 1), (1, -1)],
+            str(package / "broken.py"): [(-1, 1), (1, -1)],
+            str(package / "sample.py"): [(-6, 7), (7, -6)],
+        }
+    )
+    data.write()
+    report = tmp_path / "inputs.jsonl"
+    report.write_text(json.dumps({"test": "tests/test_n.py::test_y", "files": ["f"], "escapes": False}) + "\n   \n")
+    manifest = dep_manifest.build(tmp_path / ".coverage", [report], tmp_path, "abc", "env")
+    assert sorted(manifest["tests"]) == ["tests/test_m.py::test_x[a|b]", "tests/test_n.py::test_y"]
+    assert _units(manifest, "tests/test_m.py::test_x[a|b]") == {
+        "hooks/broken.py::<module>",
+        "hooks/sample.py::double",
+        "hooks/sample.py::<module>",
+    }
+    assert manifest["tests"]["tests/test_n.py::test_y"] == {"units": [], "files": ["f"], "escapes": False}
+
+
+def test_changes_list_both_sides_of_a_rename_and_fail_on_an_unknown_revision(tmp_path: Path) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True)
+
+    git("init", "-q")
+    (tmp_path / "notes.md").write_text("a long enough body to be detected as a rename\n" * 5)
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("mv", "notes.md", "moved.md")
+    git("commit", "-qm", "head")
+    assert dep_manifest.changes(tmp_path, "HEAD^1", "HEAD") == [("moved.md", None, None), ("notes.md", None, None)]
+    with pytest.raises(subprocess.CalledProcessError):
+        dep_manifest.changes(tmp_path, "missing", "HEAD")
+
+
+@pytest.mark.usefixtures("bounded")
+def test_workflow_execution_reads_env_every_producer_and_a_malformed_split_as_changed() -> None:
+    def changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
+        return dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after))
+
+    jobs = {"unit": {"needs": ["a"]}, "unit-selected": {"needs": ["split"]}, "split": {}, "a": {"x": 1}}
+    base = {"env": {"A": "1"}, "jobs": jobs}
+    assert changed(base, base) is False
+    assert changed(base, {**base, "env": {"A": "2"}}) is True
+    assert changed(base, {**base, "jobs": {**jobs, "a": {"x": 2}}}) is True
+    assert changed(base, {**base, "jobs": {**jobs, "unit-selected": {"needs": ["split"], "y": 1}}}) is True
+    malformed = {"jobs": {"unit": {}, "split": "x"}}
+    assert changed(malformed, malformed) is True
+
+
+def test_a_python_file_under_the_workflows_folder_is_a_global_input() -> None:
+    assert dep_manifest.global_input(".github/workflows/helper.py", None, None, 2) is True
+
+
+def test_invalidation_reads_nested_test_files_and_every_change_after_a_test_file() -> None:
+    tests = {
+        "tests/sub/test_b.py::one": {"units": [], "files": [], "escapes": False},
+        "tests/test_c.py::one": {"units": [0], "files": [], "escapes": False},
+        "tests/test_d.py::one": {"units": [], "files": [], "escapes": False},
+    }
+    manifest = {"version": 2, "commit": "c", "units": ["hooks/sample.py::double"], "tests": tests}
+    changed: list[tuple[str, str | None, str | None]] = [
+        ("tests/sub/test_b.py", "", ""),
+        ("hooks/sample.py", SOURCE, SOURCE.replace("value * 2", "value * 3")),
+    ]
+    assert dep_manifest.invalidated(manifest, changed) == ({"tests/sub/test_b.py::one", "tests/test_c.py::one"}, None)
+
+
+def test_deselection_keys_files_by_path_and_needs_every_test_of_a_file() -> None:
+    collected = ["tests/a.py::Case::one", "tests/a.py::Case::two", "tests/b.py::Case::one"]
+    chosen = dep_manifest.deselect(["tests/a.py::Case::two", "tests/b.py::Case::one"], collected)
+    assert chosen == {"tests": ["tests/a.py::Case::two", "tests/b.py::Case::one"], "files": ["tests/b.py"]}
 
 
 def test_the_inputs_plugin_records_python_files_a_test_reads_as_data_but_not_its_imports(tmp_path):

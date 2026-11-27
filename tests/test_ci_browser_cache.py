@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -16,15 +17,15 @@ HOSTED = READY + " && runner.environment == 'github-hosted'"
 
 
 def _setup(
-    tmp_path,
-    monkeypatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     *,
-    cached,
-    ready,
-    recovery=True,
-    stall_once=False,
-    attempt_seconds=None,
-):
+    cached: bool,
+    ready: bool,
+    recovery: bool = True,
+    stall_once: bool = False,
+    attempt_seconds: int | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
     marker = tmp_path / "ready"
@@ -40,7 +41,16 @@ def _setup(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == *"install --with-deps chromium"* ]]; then\n'
         '  echo install >> "$CALLS"\n'
-        '  if [[ -f "$STALL" ]]; then rm "$STALL"; sleep 30; fi\n'
+        '  [[ ! -e "$APT_LOCK" ]] || { echo "E: Could not get lock $APT_LOCK" >&2; exit 100; }\n'
+        '  if [[ -f "$STALL" ]]; then\n'
+        '    rm "$STALL"\n'
+        '    if [[ -n "${BROWSER_CACHE_TEST_APT_SECONDS:-}" ]]; then\n'
+        '      touch "$APT_LOCK"\n'
+        '      setsid bash -c \'sleep "$BROWSER_CACHE_TEST_APT_SECONDS"; echo released >> "$CALLS"; rm "$APT_LOCK"\''
+        " < /dev/null > /dev/null 2>&1 &\n"
+        "    fi\n"
+        "    sleep 30\n"
+        "  fi\n"
         '  [[ "$RECOVERY" == true ]] || exit 1\n'
         '  touch "$READY"\n'
         "else\n"
@@ -54,10 +64,14 @@ def _setup(
     sudo = tmp_path / "sudo"
     sudo.write_text('#!/usr/bin/env bash\nset -euo pipefail\necho mirror >> "$CALLS"\n')
     sudo.chmod(0o755)
+    pgrep = tmp_path / "pgrep"
+    pgrep.write_text('#!/usr/bin/env bash\n[[ "$*" == "-f apt-get" && -e "$APT_LOCK" ]]\n')
+    pgrep.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("CALLS", str(calls))
     monkeypatch.setenv("READY", str(marker))
     monkeypatch.setenv("STALL", str(stall))
+    monkeypatch.setenv("APT_LOCK", str(tmp_path / "apt_lock"))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
     monkeypatch.setenv("LAUNCH_STALL", str(launch_stall))
     monkeypatch.setenv("LAUNCH_FAILS", str(os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "fail").lower())
@@ -124,6 +138,41 @@ def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(t
     assert time.monotonic() - started < 20
 
 
+def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", "8")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=6)
+    assert result.returncode == 0, result.stderr
+    assert calls == ["mirror", "install", "released", "install", "launch"]
+
+
+@pytest.mark.wall_clock
+def test_a_retry_never_installs_while_the_lock_is_held_and_ends_before_the_lock_is_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    apt_seconds = 12
+    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", str(apt_seconds))
+    started = time.monotonic()
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2)
+    assert result.returncode != 0
+    assert calls == ["mirror", "install"]
+    assert result.stdout.count("::warning title=Retried browser install::") == 1
+    assert time.monotonic() - started < apt_seconds
+
+
+def test_the_runner_pgrep_matches_apt_get_inside_a_command_line_argument() -> None:
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", "apt-get update&& apt-get install -y libnss3"]
+    )
+    try:
+        found = subprocess.run(["pgrep", "-f", "apt-get"], capture_output=True, text=True)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert str(holder.pid) in found.stdout.split()
+
+
 def test_a_stalled_installed_browser_launch_is_retried_green(tmp_path, monkeypatch):
     monkeypatch.setenv("BROWSER_CACHE_TEST_LAUNCH", "stall")
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, attempt_seconds=5)
@@ -188,7 +237,7 @@ def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_
             if step.get("name") == "Report browser setup failure":
                 assert f"{words[minutes]} minute timeout" in step["run"], (workflow, job)
                 reported += 1
-    assert reported == 3
+    assert reported == 4
 
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():

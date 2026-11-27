@@ -1,8 +1,11 @@
 import json
 import os
+import resource
 import subprocess
+import threading
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -411,15 +414,19 @@ def test_the_direct_importers_setting_measures_only_changes_and_their_direct_imp
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     same = {"hooks/user.py": "from hooks import lib\n", "hooks/far.py": "from hooks import user\n"}
-    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, {})
-    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, {})
-    commands = _fake_checker(monkeypatch, [])
+    recorded = {"hooks/__init__.py": 5, "hooks/far.py": 5, "hooks/lib.py": 5, "hooks/user.py": 5}
+    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, recorded)
+    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, recorded)
+    runs = _record_checks(monkeypatch, head)
+    measured = tmp_path / "out" / "TYPE_BASELINE.json"
+    command = ["--base", str(base), "--head", str(head), "--measured", str(measured)]
     monkeypatch.setenv(type_gate.DIRECT_IMPORTERS, "1")
-    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
-    assert [command[command.index("--pythonpath") + 2 :] for command in commands] == [["hooks/lib.py", "hooks/user.py"]]
+    assert type_gate.main(command) == 0
+    assert json.loads(measured.read_text()) == {**recorded, "hooks/lib.py": 1, "hooks/user.py": 1}
     monkeypatch.delenv(type_gate.DIRECT_IMPORTERS)
-    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
-    assert commands[-1][commands[-1].index("--pythonpath") + 2 :] == ["hooks/far.py", "hooks/lib.py", "hooks/user.py"]
+    assert type_gate.main(command) == 0
+    assert json.loads(measured.read_text()) == {**recorded, "hooks/far.py": 1, "hooks/lib.py": 1, "hooks/user.py": 1}
+    assert runs == [sorted(recorded)] * 2
 
 
 def test_a_head_without_source_changes_runs_no_checker(
@@ -556,6 +563,154 @@ def test_measure_checks_the_sorted_sources(tmp_path: Path, monkeypatch: pytest.M
             "scripts/b.py",
         ]
     ]
+
+
+def _test_sources(root: Path, count: int) -> list[str]:
+    files = [f"tests/test_{index:04}.py" for index in range(count)]
+    (root / "tests").mkdir()
+    for path in files:
+        (root / path).write_text("")
+    return files
+
+
+def _record_checks(monkeypatch: pytest.MonkeyPatch, root: Path) -> list[list[str]]:
+    runs: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--version" in command:
+            return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
+        checked = command[command.index("--pythonpath") + 2 :]
+        runs.append(checked)
+        diagnostics = [{"file": str(root / path), "severity": "error"} for path in checked]
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
+        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    return runs
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+@pytest.mark.parametrize(("count", "sizes"), [(100, [100]), (101, [51, 50]), (201, [67, 67, 67])])
+def test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_their_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, sizes: list[int]
+) -> None:
+    files = _test_sources(tmp_path, count)
+    runs = _record_checks(monkeypatch, tmp_path)
+    assert type_gate.measure(tmp_path, files[::-1]) == dict.fromkeys(files, 1)
+    assert [len(checked) for checked in sorted(runs)] == sizes
+    assert [path for checked in sorted(runs) for path in checked] == files
+
+
+@pytest.mark.feature("type-gate-one-context")
+def test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": "", "scripts/c.py": ""})
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        checked = command[command.index("--pythonpath") + 2 :]
+        before = checked[: checked.index("hooks/b.py") + 1] if "hooks/b.py" in checked else []
+        diagnostics = [{"file": str(head / "hooks/b.py"), "severity": "error"} for _ in before]
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
+        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    counted = [
+        type_gate.measure(head, files).get("hooks/b.py")
+        for files in (["hooks/b.py"], ["hooks/b.py", "scripts/c.py"], ["hooks/a.py", "hooks/b.py"], None)
+    ]
+    assert counted == [3, 3, 3, 3]
+
+
+@pytest.mark.feature("type-gate-one-context")
+def test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    files = _test_sources(tmp_path, 201)
+    runs = _record_checks(monkeypatch, tmp_path)
+    assert type_gate.measure(tmp_path, [files[120], files[30], files[100]]) == dict.fromkeys(
+        [files[30], files[100], files[120]], 1
+    )
+    assert sorted(runs) == [files[:31], files[67:121]]
+
+
+@pytest.mark.feature("type-gate-one-context")
+def test_the_gate_checks_four_runs_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_TYPE_WORKERS", raising=False)
+    monkeypatch.setattr(type_gate.os, "sched_getaffinity", lambda _pid: set(range(16)), raising=False)
+    monkeypatch.setattr(type_gate.os, "getloadavg", lambda: (0.0, 0.0, 0.0), raising=False)
+    _test_sources(tmp_path, 800)
+    barrier = threading.Barrier(4, timeout=5)
+    lock = threading.Lock()
+    active = peak = calls = 0
+    limits = []
+    executor = type_gate.ThreadPoolExecutor
+
+    def pool(max_workers: int | None = None) -> type_gate.ThreadPoolExecutor:
+        limits.append(max_workers)
+        return executor(max_workers)
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal active, peak, calls
+        with lock:
+            active += 1
+            calls += 1
+            peak = max(peak, active)
+        barrier.wait()
+        with lock:
+            active -= 1
+        report = {"generalDiagnostics": [], "summary": {"filesAnalyzed": 1}}
+        return subprocess.CompletedProcess(command, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate, "ThreadPoolExecutor", pool)
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert type_gate.measure(tmp_path) == {}
+    assert limits == [4]
+    assert (peak, calls) == (4, 8)
+
+
+def test_measuring_a_path_the_head_has_no_source_for_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": ""})
+    runs = _record_checks(monkeypatch, head)
+    with pytest.raises(type_gate.GradeError) as refused:
+        type_gate.measure(head, ["hooks/a.py", "hooks/gone.py", "docs/notes.py"])
+    assert str(refused.value) == "the head has no source docs/notes.py, hooks/gone.py to measure"
+    assert runs == []
+
+
+def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
+    def getrusage(who: int) -> SimpleNamespace:
+        assert who == resource.RUSAGE_CHILDREN
+        return SimpleNamespace(ru_maxrss=kib)
+
+    monkeypatch.setattr(resource, "getrusage", getrusage)
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+def test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {})
+    _fake_checker(monkeypatch, [])
+    _peak(monkeypatch, 4493897)
+    with pytest.raises(type_gate.GradeError) as refused:
+        type_gate.measure(head)
+    assert str(refused.value) == (
+        "basedpyright peaked at 4388 MB of resident memory, at or past the 4388 MB where it empties its type cache "
+        "and can count other errors on another runner; lower the type gate's sources per run"
+    )
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+def test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {})
+    _fake_checker(monkeypatch, [{"file": str(head / "hooks/__init__.py"), "severity": "error"}])
+    _peak(monkeypatch, 4493896)
+    assert type_gate.measure(head) == {"hooks/__init__.py": 1}
 
 
 @pytest.mark.parametrize(

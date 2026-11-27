@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_invalidated:7b4217e576c930a32efff894edd052bf7db74bd7207731a9d4150f5216260fbe": {
+    "reader": "standards_reader",
+    "reason": "For the two-element list from rsplit(\"/\", 1), [+1] and [-1] select the same element, and the path always has a slash here."
+  }
+}

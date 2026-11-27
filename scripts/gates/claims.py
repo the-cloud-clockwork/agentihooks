@@ -19,7 +19,7 @@ def refusal(lives, reason, failure, slug, task):
     return (
         f"The swarm blocked this task before a fourth agent life: claimed {lives} times, cap {CAP}. "
         f"Last handoff reason: {reason}. Last launch failure: {failure}. Change its scope or split it, then reopen "
-        f"it for three more lives with agentihooks ledger --slug {slug} task set {task} state=open"
+        f"it for three more lives with agentihooks api --slug {slug} task set {task} state=open"
     )
 
 

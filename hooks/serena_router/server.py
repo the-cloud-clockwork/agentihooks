@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, TextContent, Tool
 
 from hooks.serena_router.binding import (
     PRIMARY,
+    ROOT_ARG,
     Binding,
     BindingError,
     ensure_excluded,
@@ -53,9 +56,24 @@ async def activate(pool: Pool, binding: Binding, project: str) -> CallToolResult
     return _text(f"Active project: {root} (worktree).")
 
 
-async def dispatch(pool: Pool, binding: Binding, edits: frozenset[str], name: str, arguments: dict) -> CallToolResult:
+async def carried_binding(binding: Binding, arguments: dict[str, Any]) -> Binding:
+    """The binding of the root a call carries, else the session's, so agents sharing one session keep their worktrees."""
+    root = arguments.get(ROOT_ARG)
+    if root is None:
+        return binding
+    return Binding(*await asyncio.to_thread(resolve, str(root)))
+
+
+async def dispatch(
+    pool: Pool, binding: Binding, edits: frozenset[str], name: str, arguments: dict[str, Any]
+) -> CallToolResult:
     if name == ACTIVATE:
         return await activate(pool, binding, str(arguments.get("project", "")))
+    try:
+        binding = await carried_binding(binding, arguments)
+    except BindingError as exc:
+        return _text(f"{exc}. {UNBOUND}", error=True)
+    arguments = {key: value for key, value in arguments.items() if key != ROOT_ARG}
     if binding.root is None:
         return _text(UNBOUND, error=True)
     if not binding.root.is_dir():

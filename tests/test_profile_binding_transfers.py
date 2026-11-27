@@ -1,5 +1,7 @@
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -128,13 +130,13 @@ def test_handoff_refuses_to_clamp_saved_effort(launching):
     assert not calls
 
 
-def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
+def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching: Any) -> None:
     engine, config, task, saved, calls = launching
     saved.update(profile="master", harness="claude", effort="max")
     task["handoff_envelope"]["reason"] = "recycle"
     config.effort_min, config.effort_max = "medium", "high"
     engine.spawn(config, "master", "master", task)
-    assert calls[-1][calls[-1].index("--effort") + 1] == "high"
+    assert calls[-1][calls[-1].index("--effort") + 1] == "xhigh"
 
 
 def _quota_ready(engine, reason):
@@ -149,14 +151,14 @@ def _launched_effort(calls):
 
 
 @pytest.mark.parametrize("reason", REASONS)
-def test_a_master_envelope_saved_at_max_starts_at_high_for_every_reason(launching, reason):
+def test_a_master_envelope_saved_at_max_starts_at_xhigh_for_every_reason(launching: Any, reason: str) -> None:
     engine, config, task, saved, calls = launching
     saved.update(profile="master", harness="claude", effort="max")
     task["handoff_envelope"]["reason"] = reason
     _quota_ready(engine, reason)
     config.effort_min, config.effort_max = "medium", "high"
     engine.spawn(config, "master", "master", task)
-    assert _launched_effort(calls) == "high"
+    assert _launched_effort(calls) == "xhigh"
 
 
 @pytest.mark.parametrize("reason", REASONS)
@@ -173,22 +175,24 @@ def test_a_same_harness_lane_handoff_keeps_its_exact_saved_effort_for_every_reas
         engine.spawn(config, "eng", "worker", task)
 
 
-def test_a_master_relaunch_after_an_outage_starts_inside_the_swarm_effort_range(launching):
+def test_a_master_relaunch_after_an_outage_starts_inside_the_swarm_effort_range(launching: Any) -> None:
     engine, config, task, saved, calls = launching
     assignment = {"profile": "master", "harness": "claude", "model": "opus", "effort": "max", "account": "original"}
     master = {"id": "master", "title": "Master", "launch_assignment": assignment}
     config.effort_min, config.effort_max = "medium", "high"
     engine.spawn(config, "master", "master", master)
-    assert _launched_effort(calls) == "high"
+    assert _launched_effort(calls) == "xhigh"
 
 
 @pytest.mark.parametrize(("harness", "recorded"), [("claude", "max"), ("codex", "xhigh")])
-def test_a_master_resumed_into_its_own_conversation_starts_inside_the_swarm_effort_range(tmp_path, harness, recorded):
+def test_a_master_resumed_into_its_own_conversation_starts_inside_the_swarm_effort_range(
+    tmp_path: Path, harness: str, recorded: str
+) -> None:
     engine, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
     config.effort_min, config.effort_max = "medium", "high"
     engine.resume(config, replace(agent, lane="master", task="master", effort=recorded), "you were restored")
     launched = seen["runs"][0]
-    assert launched[-2:] == (["--effort", "high"] if harness == "claude" else ["-c", 'model_reasoning_effort="high"'])
+    assert launched[-2:] == (["--effort", "xhigh"] if harness == "claude" else ["-c", 'model_reasoning_effort="xhigh"'])
 
 
 @pytest.mark.parametrize("lane", ["master", "eng"])

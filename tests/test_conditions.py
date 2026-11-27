@@ -223,6 +223,16 @@ class TestIndexCache:
         _write(gamma, "pre-bash-gamma.sh", "echo")
         assert "pre-bash-gamma.sh" in [e["file"] for e in conditions.matching("pre", "Bash", {})]
 
+    @pytest.mark.feature("bundle-layer-manifest")
+    def test_a_bundle_layer_change_invalidates(self, layers):
+        bundle, _, _ = layers
+        self._prime(layers)
+        shipped = bundle / "ship" / ".claude" / "conditions"
+        shipped.mkdir(parents=True)
+        _write(shipped, "pre-bash-shipped.sh", "echo")
+        (bundle / "bundle.yml").write_text("layer: ship\n")
+        assert [e["file"] for e in conditions.matching("pre", "Bash", {})] == ["pre-bash-shipped.sh"]
+
     def test_fresh_mtimes_are_not_cached(self, layers):
         _write(layers[1], "pre-bash-one.sh", "echo")
         conditions.load_index()
@@ -407,7 +417,10 @@ def forced_claude(isolated_hook, monkeypatch):
 
 
 class TestPreToolUseEnvelope:
-    def test_bypass_rewrite_rides_one_envelope(self, forced_claude, capsys):
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_bypass_rewrite_rides_one_envelope(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
         _write(
             forced_claude[1],
             "pre-bash.ls-long.sh",
@@ -415,17 +428,47 @@ class TestPreToolUseEnvelope:
         )
         hm.on_pre_tool_use(_bash("ls"))
         out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
-        assert out["permissionDecision"] == "allow"
+        assert "permissionDecision" not in out
         assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
         assert "use long" in out["additionalContext"]
         assert "tool input rewritten by pre-bash.ls-long.sh" in out["additionalContext"]
 
-    def test_default_mode_drops_rewrite_without_decision(self, forced_claude, capsys):
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk"])
+    def test_rewrite_without_decision_carries_no_decision_outside_bypass(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str], mode: str
+    ) -> None:
         _write(forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}}\'')
-        hm.on_pre_tool_use(_bash("ls", mode="default"))
+        hm.on_pre_tool_use(_bash("ls", mode=mode))
         out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
-        assert "updatedInput" not in out and "permissionDecision" not in out
-        assert "outside bypassPermissions" in out["additionalContext"]
+        assert set(out) == {"hookEventName", "updatedInput", "additionalContext"}
+        assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
+        assert "tool input rewritten by pre-bash-long.sh" in out["additionalContext"]
+
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_auto_mode_drops_rewrite_without_decision(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}}\'')
+        hm.on_pre_tool_use(_bash("ls", mode="auto"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert set(out) == {"hookEventName", "additionalContext"}
+        assert (
+            "[conditions] input rewrite by pre-bash-long.sh dropped: in auto mode "
+            'a rewriting condition must return "decision": "allow" or "ask"'
+        ) in out["additionalContext"]
+
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_auto_mode_explicit_allow_applies_rewrite(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(
+            forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}, "decision": "allow"}\''
+        )
+        hm.on_pre_tool_use(_bash("ls", mode="auto"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "allow"
+        assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
 
     def test_default_mode_explicit_ask_applies_rewrite(self, forced_claude, capsys):
         _write(
@@ -443,6 +486,17 @@ class TestPreToolUseEnvelope:
         assert out["permissionDecision"] == "allow"
         assert "updatedInput" not in out
         assert "known safe" in out["permissionDecisionReason"]
+
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_explicit_ask_without_rewrite_is_emitted(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(forced_claude[1], "pre-bash-check.sh", 'echo \'{"decision": "ask", "reason": "check first"}\'')
+        hm.on_pre_tool_use(_bash("ls", mode="default"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "ask"
+        assert "updatedInput" not in out
+        assert "check first" in out["permissionDecisionReason"]
 
     def test_guards_judge_the_rewritten_input(self, forced_claude, monkeypatch):
         import hooks.context.branch_guard as branch_guard
@@ -661,7 +715,7 @@ class TestStartStep:
 
 
 class TestHookProcess:
-    def test_python_m_hooks_emits_rewrite(self, tmp_path):
+    def test_python_m_hooks_emits_rewrite(self, tmp_path: Path) -> None:
         home = tmp_path / "ahome"
         bundle = tmp_path / "bundle"
         conditions_dir = bundle / ".claude" / "conditions"
@@ -690,7 +744,7 @@ class TestHookProcess:
         assert proc.returncode == 0, proc.stderr
         out = json.loads(proc.stdout.strip().splitlines()[-1])["hookSpecificOutput"]
         assert out["updatedInput"]["command"] == "echo rewritten"
-        assert out["permissionDecision"] == "allow"
+        assert "permissionDecision" not in out
 
     @pytest.mark.parametrize(
         "body, code",

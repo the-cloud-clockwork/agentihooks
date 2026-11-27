@@ -302,12 +302,14 @@ def test_the_dispatcher_naming_type_and_profile():
 
 
 NAME = "dispatcher@a1b2c3-0001"
-LED = f"agentihooks ledger --slug {SLUG} --as {NAME}"
+LED = f"agentihooks api --slug {SLUG} --as {NAME}"
 PROMPT = f"""You are {NAME}, the dispatcher of swarm {SLUG}, working beside its master in the repo /repo. \
 The swarm runs at full autonomy.
 The tick woke you because its deterministic passes could not settle these triggers:
 - The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
+Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and \
+learned notes from the store that keeps them.
 
 Before anything else, run once: {LED} join. Read each trigger's item through the ledger API with \
 agentihooks ledger --slug {SLUG} get <item> (priorities/<id>, tasks/<id> or followups/<id>).

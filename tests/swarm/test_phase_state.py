@@ -1,4 +1,6 @@
+import copy
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,33 @@ def test_admits_only_building_tasks_and_the_planning_plan_task(task, admitted):
     assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
 
 
+def enhancement(phase: str, state: str = "open") -> dict[str, str]:
+    return {"id": f"enhance-{phase}", "phase": phase, "kind": "plan", "lane": "plan", "state": state, "enhances": "t"}
+
+
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+@pytest.mark.parametrize(("phase", "admitted"), [("build", True), ("slice", True), ("wait", False), ("done", False)])
+def test_an_enhancement_task_is_admitted_while_its_phase_plans_or_builds(phase: str, admitted: bool) -> None:
+    """A plan kind task carrying enhances is admitted while its phase is planning or building, so the planner that
+    enhances a thin task in a building phase can claim it; a waiting or finished phase still holds it."""
+    phases = [
+        {"id": "build"},
+        {"id": "wait", "depends_on": ["build"]},
+        {"id": "done", "done": True},
+        {"id": "slice", "planning": "auto"},
+    ]
+    task = enhancement(phase)
+    assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
+
+
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+def test_an_enhancement_task_is_never_taken_for_its_phase_plan_task() -> None:
+    """An enhancement plan task in an automatic phase leaves the phase lifecycle to the phase's own plan task."""
+    phases = [{"id": "slice", "planning": "auto"}]
+    assert phase_state.lifecycle(phases[0], doc(phases, [enhancement("slice", "done")])) == "to_plan"
+    assert phase_state.lifecycle(phases[0], doc(phases, [enhancement("slice", "done"), plan("slice")])) == "planning"
+
+
 def test_a_ledger_without_a_phases_list_holds_nothing():
     old = {"tasks": [{"id": "t", "phase": "p1", "state": "open"}]}
     assert phase_state.lifecycle({"id": "p1", "depends_on": ["p0"]}, old) == "waiting"
@@ -91,6 +120,88 @@ def test_held_lists_each_open_task_a_phase_holds_with_its_state():
         {"id": "d", "phase": "p2", "state": "open", "out_of_scope": True},
     ]
     assert phase_state.report(doc(phases, tasks)) == [("p1", "building", []), ("p2", "waiting", ["b"])]
+
+
+class CountedRows(list[dict[str, object]]):
+    def __init__(self, rows: list[dict[str, object]], counts: dict[str, int], name: str) -> None:
+        super().__init__(rows)
+        self.counts, self.name = counts, name
+
+    def __iter__(self) -> Iterator[dict[str, object]]:
+        self.counts[self.name] += 1
+        return super().__iter__()
+
+
+def counted_status_doc(count: int) -> tuple[dict[str, object], dict[str, int]]:
+    counts = {"phases": 0, "tasks": 0}
+    phases = [{"id": f"p{i}", "planning": "auto"} for i in range(count)]
+    phases += [{"id": f"w{i}", "depends_on": [f"p{i}"]} for i in range(count)]
+    tasks = [plan(f"p{i}") for i in range(count)]
+    return {"phases": CountedRows(phases, counts, "phases"), "tasks": CountedRows(tasks, counts, "tasks")}, counts
+
+
+@pytest.mark.feature("swarm-phase-status-linear")
+def test_status_scans_phases_and_tasks_a_fixed_number_of_times_whatever_the_phase_count() -> None:
+    small, small_counts = counted_status_doc(3)
+    large, large_counts = counted_status_doc(30)
+
+    phase_state.status(small)
+    phase_state.status(large)
+
+    assert large_counts == small_counts
+    assert large_counts["tasks"] <= 1
+
+
+@pytest.mark.feature("swarm-phase-status-linear")
+def test_status_reports_each_phase_s_lifecycle_and_label_exactly() -> None:
+    phases = [
+        {"id": "gone-scope", "out_of_scope": True, "done": True},
+        {"id": "finished", "title": "Finished", "done": True},
+        {"id": "blocked", "depends_on": ["gone", "finished", "open-dep", "gone"], "planning": "auto"},
+        {"id": "open-dep", "title": "Open dependency"},
+        {"id": "untitled", "title": ""},
+        {"id": "waits-untitled", "depends_on": ["untitled"]},
+        {"id": "manual"},
+        {"id": "unplanned", "planning": "auto"},
+        {"id": "planning", "planning": "auto"},
+        {"id": "reviewing", "planning": "auto"},
+        {"id": "approved", "planning": "auto", "review": {"state": "approved"}},
+        {"id": "twice", "planning": "auto"},
+        {"id": "twice", "done": True},
+    ]
+    tasks = [
+        {"id": "loose"},
+        {"id": "enhancer", "phase": "planning", "kind": "plan", "enhances": "t1", "state": "done"},
+        plan("planning"),
+        plan("planning", state="done"),
+        plan("reviewing", state="done"),
+        plan("approved", state="done"),
+    ]
+    data = doc(phases, tasks)
+    before = copy.deepcopy(data)
+
+    found = phase_state.status(data)
+
+    expected = {p["id"]: {"state": phase_state.lifecycle(p, data), "label": phase_state.label(p, data)} for p in phases}
+    assert found == expected
+    assert found["blocked"] == {"state": "waiting", "label": "Waits for phase gone, Open dependency, gone"}
+    assert found["waits-untitled"] == {"state": "waiting", "label": "Waits for phase untitled"}
+    assert [found[key]["state"] for key in ("gone-scope", "finished", "manual", "unplanned", "planning")] == [
+        "out_of_scope",
+        "done",
+        "building",
+        "to_plan",
+        "planning",
+    ]
+    assert [found[key]["state"] for key in ("reviewing", "approved", "twice")] == ["in_review", "building", "done"]
+    assert list(found) == list(dict.fromkeys(p["id"] for p in phases))
+    assert data == before
+    assert phase_state.status({}) == {}
+    assert phase_state.status({"tasks": []}) == {}
+    assert phase_state.status({"phases": [{"id": "m"}, {"id": "w", "depends_on": ["m"], "planning": "auto"}]}) == {
+        "m": {"state": "building", "label": phase_state.LABELS["building"]},
+        "w": {"state": "waiting", "label": "Waits for phase m"},
+    }
 
 
 def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):

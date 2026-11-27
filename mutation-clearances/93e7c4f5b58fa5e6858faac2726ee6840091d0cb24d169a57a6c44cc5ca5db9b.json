@@ -1,0 +1,6 @@
+{
+  "scripts/coverage_check.py:scripts.coverage_check.x_problem:f91c2136a39591d93dc57f44e4d038aec795201385cded6e92bf0b83e571cd77": {
+    "reader": "standards-reader",
+    "reason": "SQLite pragma names are case insensitive, so PRAGMA INTEGRITY_CHECK runs the same integrity check as pragma integrity_check."
+  }
+}

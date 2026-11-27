@@ -1,17 +1,18 @@
-import { ACTIVE_MS } from "./config.js";
-import { $, closedText, excerpt, h, headCount, newId, span, when } from "./dom.js";
-import { renderCycle } from "./render_cycle.js";
-import { hiddenDone, inScope, itemState, pendingOf, taskBlockers, taskRank, taskRanks } from "./state.js";
-import { closedLeft, closedLeftIn, doc, meta, queue, renderSync, toggle } from "./sync.js";
+import { $, closedText, excerpt, h, headCount, newId } from "./dom.js";
+import { forget, kept, place, rebuildAll, renderCycle } from "./render_cycle.js";
+import { hiddenDone, itemState, pendingOf, sourceOf, taskBlockers, taskRank, taskRanks, workOrder } from "./state.js";
+import { checks, closedLeft, closedLeftIn, doc, ops, queue, renderSync, toggle } from "./sync.js";
+import { openStates } from "./seed.js";
 import { renderArtifacts } from "./artifacts.js";
 import { commentsView, taskLink, threadView } from "./threads.js";
-import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
+import { renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
 import { renderOutline } from "./outline.js";
 import { markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
-import { inboxPending, renderSwarm, swarm } from "./swarm.js";
+import { renderSwarm, swarm } from "./swarm.js";
+import { renderStats } from "./stats.js";
 import { readWorkspace } from "./api.js";
-import { closedMore, firstPage, moreButton } from "./pages.js";
+import { closedMore, firstPage, moreButton, openMore } from "./pages.js";
 import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
 import { phaseReview, phaseStatus } from "./phase_review.js";
@@ -81,14 +82,70 @@ function phaseRow(item, n) {
 }
 
 const sliceTaskCounts = new Map();
+const slicesByPhase = new Map();
+let pendingMarks = new Map();
+
+function notePending() {
+  const marks = new Map();
+  const add = (key, mark) => { if (typeof key === "string") marks.set(key, `${marks.get(key) || ""}${mark};`); };
+  for (const op of ops) {
+    add(op.item, op.id);
+    add(op.target, op.id);
+    if (typeof op.thread === "string") add(op.thread.split("/").slice(0, 2).join("/"), op.id);
+  }
+  for (const [path, c] of Object.entries(checks)) add(path.split("/").slice(0, 2).join("/"), `${path}=${c.value}`);
+  pendingMarks = marks;
+}
+
+const tails = new Map();
+
+function steady(key, node) {
+  const old = tails.get(key);
+  if (!node) tails.delete(key);
+  else if (old && old.className === node.className && old.textContent === node.textContent) return old;
+  else tails.set(key, node);
+  return node;
+}
+
+function setText(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+function rowInputs(key, item) {
+  return [sourceOf(item), pendingMarks.get(key) || "", holdClass(key), !!ownFreeze(doc, key)];
+}
+
+function sliceCount(s) {
+  return (sliceTaskCounts.get(`slices/${s.id}`) || 0) + closedLeftIn("tasks", `slices/${s.id}`);
+}
+
+function sliceInputs(phase) {
+  return (slicesByPhase.get(`phases/${phase.id}`) || []).flatMap((s) => [s, sliceCount(s), ...rowInputs(`slices/${s.id}`, s).slice(2)]);
+}
 
 function phaseSlices(phase) {
-  const rows = viewItems("slices", doc.slices).filter((s) => s.phase === `phases/${phase.id}`);
+  const rows = slicesByPhase.get(`phases/${phase.id}`) || [];
   if (!rows.length) return null;
-  const count = (s) => (sliceTaskCounts.get(`slices/${s.id}`) || 0) + closedLeftIn("tasks", `slices/${s.id}`);
   return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
     ...rows.map((s) => h("span", { class: "slice" + holdClass(`slices/${s.id}`), id: `item-slices-${s.id}` }, holdMark(`slices/${s.id}`),
-      h("span", { class: "slice-name", text: `${s.anchor} ${count(s)}` }), freezeButton(`slices/${s.id}`))));
+      h("span", { class: "slice-name", text: `${s.anchor} ${sliceCount(s)}` }), freezeButton(`slices/${s.id}`))));
+}
+
+function notesThread() {
+  return kept("notes", () => [sourceOf(doc.notes), ...[...pendingMarks].filter(([key]) => key.startsWith("notes")).flat()],
+    () => threadView("notes", doc.notes, "thread flat"))({ id: "notes" });
+}
+
+const stubs = new WeakMap();
+
+function hiddenStubs() {
+  const ids = ((doc.closed || {}).tasks || {}).ids || [];
+  if (!stubs.has(ids)) stubs.set(ids, [...hiddenDone(doc, "tasks")].map((id) => ({ id, state: "done" })));
+  return stubs.get(ids);
+}
+
+function keptPhases() {
+  return kept("phases", (p, i) => [...rowInputs(`phases/${p.id}`, p), i, doc.phase_status[p.id], ...sliceInputs(p)], (p, i) => phaseRow(p, i + 1));
 }
 
 function planGroups() {
@@ -104,33 +161,42 @@ function planActions(key, plan) {
   return h("span", { class: "item-actions plan-actions" }, freezeButton(key), scopeDot(key, plan, frozen(doc, key)));
 }
 
-function planRow({ key, id, title, phases, plan }) {
-  const idOf = (p) => `item-phases-${p.id}`;
-  const total = phases.length + closedLeftIn("phases", key);
+function planShell({ key, id, title, plan }, total) {
   const head = h("div", { class: "plan-head" }, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
     h("span", { class: "plan-count", text: `${total} ${total === 1 ? "phase" : "phases"}` }), planActions(key, plan));
-  const list = h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
-    moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." }));
-  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, head, list);
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, head, h("ol", { class: "plan-phases" }));
+}
+
+function planRow(group, shells, phases) {
+  const idOf = (p) => `item-phases-${p.id}`;
+  const total = group.phases.length + closedLeftIn("phases", group.key);
+  const shell = shells(group, total);
+  place(shell.lastChild, [...firstPage(group.key, group.phases, idOf).map(phases), steady(`more ${group.key}`, moreButton(group.key, group.phases.length, "more phases", render)),
+    steady(`empty ${group.key}`, group.phases.length ? null : h("li", { class: "empty", text: "None." }))]);
+  return shell;
 }
 
 function phaseList(cooperative = false, current = () => true) {
   sliceTaskCounts.clear();
   for (const task of doc.tasks) if (!task.deleted && task.slice) sliceTaskCounts.set(task.slice, (sliceTaskCounts.get(task.slice) || 0) + 1);
-  if (!doc.plans.length) return listInto("phases", viewItems("phases", doc.phases), (p, i) => phaseRow(p, i + 1), undefined, closedMore("phases", "done phases", render));
+  slicesByPhase.clear();
+  for (const s of viewItems("slices", doc.slices)) slicesByPhase.set(s.phase, [...(slicesByPhase.get(s.phase) || []), s]);
+  if (!doc.plans.length) return listInto("phases", viewItems("phases", doc.phases), keptPhases(), undefined, closedMore("phases", "done phases", render));
   if (!sectionOpen("phases")) return;
   const groups = planGroups();
   const target = $("phases");
-  const empty = groups.length ? "" : h("li", { class: "empty", text: "All phases are hidden." });
-  if (!cooperative) return target.replaceChildren(...groups.map(planRow), empty, closedMore("phases", "done phases", render) || "");
+  const empty = steady("empty phases", groups.length ? null : h("li", { class: "empty", text: "All phases are hidden." }));
+  const phases = keptPhases();
+  const shells = kept("phases/plans", (g, total) => [g.plan, g.title, total, ...rowInputs(g.key, g.plan || {}).slice(1)], planShell);
+  if (!cooperative) return place(target, [...groups.map((g) => planRow(g, shells, phases)), empty, steady("closed phases", closedMore("phases", "done phases", render))]);
   const paint = async () => {
-    const rows = document.createDocumentFragment();
+    const rows = [];
     for (const group of groups) {
       await scheduler.postTask(() => {}, { priority: "background" });
       if (!current()) return;
-      rows.append(planRow(group));
+      rows.push(planRow(group, shells, phases));
     }
-    if (current()) target.replaceChildren(rows, empty, closedMore("phases", "done phases", render) || "");
+    if (current()) place(target, [...rows, empty, steady("closed phases", closedMore("phases", "done phases", render))]);
   };
   return paint();
 }
@@ -207,6 +273,7 @@ function taskCounts(tasks) {
   const order = ["open", "claimed", "pr", "blocked", "done"];
   const n = {};
   for (const t of tasks) n[t.state || "open"] = (n[t.state || "open"] || 0) + 1;
+  for (const [st, left] of Object.entries(openStates("tasks"))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft("tasks")) n.done = (n.done || 0) + closedLeft("tasks");
   const states = [...order, ...Object.keys(n).filter((st) => !order.includes(st))];
   return headCount(states.map((st) => [n[st], st]));
@@ -218,6 +285,7 @@ function stateCounts(list, labels) {
     const st = itemState(list, i);
     n[st] = (n[st] || 0) + 1;
   }
+  for (const [st, left] of Object.entries(openStates(list))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft(list)) n.done = (n.done || 0) + closedLeft(list);
   return headCount(Object.entries(labels).map(([st, label]) => [n[st], label]));
 }
@@ -226,161 +294,83 @@ function sectionOpen(id) {
   const box = $(id).closest("details");
   if (!box || box.open) return true;
   $(id).replaceChildren();
+  forget(id);
   return false;
 }
 
 function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`, tail = null) {
   const el = $(id);
   if (!sectionOpen(id)) return;
-  el.replaceChildren(...firstPage(id, items, idOf).map(make), moreButton(id, items.length, `more ${id}`, render) || "", tail || "");
-  if (!items.length) el.append(h("li", { class: "empty", text: doc[id].some((i) => !i.deleted) ? "All items are hidden." : "None." }));
+  place(el, [...firstPage(id, items, idOf).map(make), steady(`more ${id}`, moreButton(id, items.length, `more ${id}`, render)), steady(`tail ${id}`, tail),
+    steady(`empty ${id}`, items.length ? null : h("li", { class: "empty", text: doc[id].some((i) => !i.deleted) ? "All items are hidden." : "None." }))]);
 }
 
-export function render(focusKey, cooperative = false) {
+export function render(focusKey, cooperative = false, live = false, first = "") {
+  if (!live) rebuildAll();
   return renderCycle(focusKey, cooperative, (current) => {
+    notePending();
     prepareFrozenView(doc);
-    document.title = doc.title;
-    $("title").textContent = doc.title;
-    $("overview").textContent = excerpt(doc.overview, 200);
-    $("closed-label").textContent = closedText(doc.closed_at);
-    $("closed-banner").hidden = !doc.closed_at;
+    if (document.title !== doc.title) document.title = doc.title;
+    setText($("title"), doc.title);
+    setText($("overview"), excerpt(doc.overview, 200));
+    setText($("closed-label"), closedText(doc.closed_at));
+    if ($("closed-banner").hidden !== !doc.closed_at) $("closed-banner").hidden = !doc.closed_at;
     const sections = [
-      () => {
-        $("sources-count").textContent = headCount([[doc.sources.length]]);
-        listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
-      },
-      () => {
-        $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" }) + viewCount("phases", doc.phases);
+      ["sources", () => {
+        setText($("sources-count"), headCount([[doc.sources.length]]));
+        listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), kept("sources", (s) => [s.text], (s) => h("li", { id: `item-sources-${s.id}`, text: s.text })));
+      }],
+      ["phases", () => {
+        setText($("phases-count"), stateCounts("phases", { open: "open", done: "done" }) + viewCount("phases", doc.phases));
         return phaseList(cooperative, current);
-      },
-      () => {
-        $("tasks-count").textContent = taskCounts(doc.tasks) + viewCount("tasks", doc.tasks);
-        const known = [...doc.tasks, ...[...hiddenDone(doc, "tasks")].map((id) => ({ id, state: "done" }))];
-        groupedWork("tasks", viewItems("tasks", doc.tasks), (t) => taskRow(t, known));
-      },
-      () => {
-        $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
-        listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1), undefined, closedMore("questions", "answered questions", render));
-      },
-      () => {
-        $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
-        if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
-      },
-      () => {
-        $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" }) + viewCount("followups", doc.followups);
-        groupedWork("followups", viewItems("followups", doc.followups), (f) => checkRow("followups", f, 0, f.text, ""));
-      },
-      () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
-      () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
-      () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
+      }],
+      ["tasks", () => {
+        setText($("tasks-count"), taskCounts(doc.tasks) + viewCount("tasks", doc.tasks));
+        const known = [...doc.tasks, ...hiddenStubs()];
+        groupedWork("tasks", viewItems("tasks", doc.tasks), kept("tasks", (t) => [...rowInputs(`tasks/${t.id}`, t), taskBlockers(t, known)], (t) => taskRow(t, known)));
+      }],
+      ["questions", () => {
+        setText($("questions-count"), stateCounts("questions", { open: "open", done: "answered" }));
+        listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length),
+          kept("questions", (q, i) => [...rowInputs(`questions/${q.id}`, q), i], (q, i) => questionRow(q, i + 1)), undefined, closedMore("questions", "answered questions", render));
+      }],
+      ["notes", () => {
+        setText($("notes-count"), headCount([[doc.notes.filter((e) => !e.deleted).length]]));
+        if (sectionOpen("notes")) place($("notes"), [notesThread()]);
+      }],
+      ["followups", () => {
+        setText($("followups-count"), stateCounts("followups", { open: "open", done: "done" }) + viewCount("followups", doc.followups));
+        groupedWork("followups", viewItems("followups", doc.followups), kept("followups", (f) => rowInputs(`followups/${f.id}`, f), (f) => checkRow("followups", f, 0, f.text, "")));
+      }],
+      ["sync", () => { renderSync(); }], ["priorities", () => { renderPriorities(); }], ["notifications", () => { renderNotifications(); }], ["alerts", () => { renderAlerts(); }],
+      ["artifacts", () => { renderArtifacts(); }], ["chat", () => { renderChat(); }], ["chat badge", () => { renderChatBadge(); }], ["stats", () => { renderStats(); }],
+      ["swarm", () => { renderSwarm(swarm); }], ["outline", () => { renderOutline(); }], ["toggles", () => { markToggles(); }],
     ];
-    return sections;
+    return [...sections.filter(([name]) => name === first), ...sections.filter(([name]) => name !== first)].map(([, section]) => section);
   });
 }
 
 const NOUNS = { tasks: "tasks", followups: "follow-ups" };
 
+function doneGroup(key, text) {
+  const group = document.getElementById(key);
+  if (!group) return h("li", { class: "done-group", id: key }, h("div", { class: "done-head", text }), h("ol", {}));
+  if (group.firstChild.textContent !== text) group.firstChild.textContent = text;
+  return group;
+}
+
 function groupedWork(name, items, row) {
   if (!sectionOpen(name)) return;
   const idOf = (i) => `item-${name}-${i.id}`;
-  const live = items.filter((i) => !i.deleted && !i.done && i.state !== "done");
-  const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
-  const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
-  live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
-  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || "");
-  if (!items.length && doc[name].some((i) => !i.deleted)) $(name).append(h("li", { class: "empty", text: "All items are hidden." }));
-  if (!done.length && !closedLeft(name)) return;
-  done.reverse();
-  const key = `${name}-done`;
-  $(name).append(h("li", { class: "done-group", id: key }, h("div", { class: "done-head", text: `${done.length + closedLeft(name)} done` }),
-    h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `more done ${NOUNS[name]}`, render) || "",
-      closedMore(name, `done ${NOUNS[name]}`, render) || "")));
-}
-
-function lastSeen() {
-  const seen = {};
-  const note = (name, at) => {
-    if (name && at && !["operator", "agent", "earlier"].includes(name)) seen[name] = Math.max(seen[name] || 0, at);
-  };
-  for (const e of meta.events || []) note(e.by, e.at);
-  for (const m of meta.crew || []) note(m.name, m.last_seen);
-  const threads = [doc.notes, doc.chat, ...doc.notes.map((n) => n.comments)];
-  for (const list of ["phases", "questions", "followups", "tasks"]) for (const i of doc[list]) threads.push(i.comments, i.answers || []);
-  for (const t of threads) for (const e of t) note(e.by, e.at);
-  return seen;
-}
-
-function activeAgents() {
-  const seen = lastSeen();
-  for (const agent of (swarm && swarm.agents) || []) seen[agent.name] = Math.max(seen[agent.name] || 0, agent.started_at || 0);
-  return Object.values(seen).filter((at) => Date.now() - at < ACTIVE_MS).length;
-}
-
-export function timeLeftInputs(calc) {
-  if (!calc || !calc.tiers) return undefined;
-  const tiers = Object.entries(calc.tiers).map(([name, tier]) => `${name} ${tier.minutes}m from ${tier.samples} samples`).join(", ");
-  const slots = calc.slots === null ? "unobserved slots" : `${calc.slots} slots`;
-  const ci = calc.ci_minutes === null ? "no CI median yet" : `CI ${calc.ci_minutes}m a task`;
-  const held = calc.frozen ? ` · ${calc.frozen} frozen tasks with ${calc.frozen_work}m of work left out` : "";
-  return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}${held}`;
-}
-
-function withRefusals(top, counts) {
-  const shown = Object.entries(counts || {}).map(([reason, count]) => `${reason} ${count}`).join(" · ");
-  return shown ? { ...(top || {}), waits: [...((top && top.waits) || []), `Admission refusals ${shown}`] } : top;
-}
-
-function labLine(entry) {
-  const wait = entry.predicted_wait_s === null ? "no free slot" : `${span(entry.predicted_wait_s * 1000)} wait`;
-  const ratio = entry.verdict_cache_hit_ratio;
-  const hits = typeof ratio === "number" ? `${Math.round(ratio * 100)}% cache hits` : "no cache lookups";
-  const parts = [entry.class.replace(/_/g, " "), `${entry.pending} pending`, wait, hits].map((part, i, all) => (i < all.length - 1 ? `${part} ·` : part));
-  return h("li", { title: parts.join(" ") }, ...parts.flatMap((part, i) => [i ? " " : "", h("span", { class: "lab-part", text: part })]));
-}
-
-function labStat(lab) {
-  const age = lab.at ? ` · ${span(Date.now() - lab.at)} ago` : " · never";
-  const lines = lab.classes.map(labLine);
-  const failed = lab.error ? [h("li", { class: "lab-error", text: `Read failed ${span(Date.now() - lab.error_at)} ago: ${lab.error}` })] : [];
-  return h("div", { class: "stat lab-capacity", "data-stat": statKey("Lab") },
-    h("dt", {}, statGrip("Lab"), `Lab${age}`),
-    h("dd", {}, h("ul", { class: "lab-list" }, ...lines, ...failed)));
-}
-
-export function renderStats() {
-  const phases = inScope(doc.phases), ups = inScope(doc.followups), tasks = inScope(doc.tasks);
-  const total = phases.length + closedLeft("phases"), done = phases.filter((p) => p.done).length + closedLeft("phases");
-  const upsDone = ups.filter((f) => f.done).length + closedLeft("followups"), tasksDone = tasks.filter((t) => t.done || t.state === "done").length + closedLeft("tasks");
-  const out = ["phases", "questions", "followups"].reduce((n, l) => n + doc[l].length - inScope(doc[l]).length, 0);
-  const started = meta.created_at, elapsed = started ? Date.now() - started : null;
-  const left = doc.time_left_minutes;
-  const refresh = meta.stats_refresh;
-  const calc = (meta.time_left && meta.time_left.calculation) || (refresh && refresh.calculation);
-  const gap = calc && calc.gap;
-  const leftText = gap ? `unknown · ${gap}${left === null ? "" : ` · prior ${span(left * 60000)}`}` : left === null ? "not set" : span(left * 60000);
-  const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
-  const pct = total ? Math.round(100 * done / total) : 0;
-  const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
-  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "", "data-stat": statKey(label) }, h("dt", {}, statGrip(label), label), h("dd", {}, value, extra));
-  $("stats").replaceChildren(row("Started", started ? when(started) : "—"),
-    row("Elapsed", elapsed === null ? "—" : span(elapsed)),
-    row("Time left", leftText),
-    row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
-    row("Tasks", `${tasksDone} / ${tasks.length + closedLeft("tasks")}`),
-    row("Follow-ups", `${upsDone} / ${ups.length + closedLeft("followups")}`),
-    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)}` : "—"),
-    row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
-    row("Open", figure(counts.open)),
-    row("Claimed", figure(counts.claimed)),
-    row("Blocked", figure(counts.blocked)),
-    row("In PR", figure(counts.pr)),
-    row("Done today", figure(swarm && swarm.done_today)),
-    row("Next phase", next ? next.id : "—"),
-    ...(out ? [row("Out of scope", String(out))] : []),
-    row("Inbox pending", figure(swarm && inboxPending(swarm))),
-    row("Agents · 2 h", String(activeAgents())),
-    row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
-    ...(calc && calc.lab ? [labStat(calc.lab)] : []),
-    bottleneckStat(withRefusals(swarm && swarm.top_bottleneck, swarm && swarm.admission)));
-  document.dispatchEvent(new Event("stats"));
+  const { live, done } = workOrder(items);
+  const nodes = [...firstPage(name, live, idOf).map(row), steady(`more ${name}`, moreButton(name, live.length, `more ${NOUNS[name]}`, render) || openMore(name, `open ${NOUNS[name]}`, render))];
+  nodes.push(steady(`empty ${name}`, !items.length && doc[name].some((i) => !i.deleted) ? h("li", { class: "empty", text: "All items are hidden." }) : null));
+  if (done.length || closedLeft(name)) {
+    const key = `${name}-done`;
+    const group = doneGroup(key, `${done.length + closedLeft(name)} done`);
+    place(group.lastChild, [...firstPage(key, done, idOf).map(row), steady(`more ${key}`, moreButton(key, done.length, `more done ${NOUNS[name]}`, render)),
+      steady(`closed ${name}`, closedMore(name, `done ${NOUNS[name]}`, render))]);
+    nodes.push(group);
+  }
+  place($(name), nodes);
 }

@@ -1,0 +1,34 @@
+rules:
+  - id: fake-server-close-read-ignores-reset
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A fake server counts only an empty read as the client closing its connection. A client that closes with
+      answer bytes still unread makes the kernel send a reset, so the read raises ConnectionResetError instead.
+      On 19 November the kept alive error answer test failed all three tries in a merge group unit shard this way,
+      while the downloader had closed the answer, and the group left the queue. Count a ConnectionResetError from
+      the same read as the client closing too.
+    paths:
+      include:
+        - /tests/
+        - fake-server-close-read-ignores-reset.py
+    patterns:
+      - pattern-either:
+          - pattern: self.rfile.read(...) == b""
+          - pattern: b"" == self.rfile.read(...)
+          - pattern: not self.rfile.read(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except ConnectionResetError:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except ConnectionError:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError:
+              ...

@@ -1,15 +1,43 @@
 import os
 import sys
+import threading
+from http.client import HTTPConnection, HTTPMessage, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlsplit
 
 UPSTREAM_TIMEOUT = 30
+IDLE: list[HTTPConnection] = []
+IDLE_LOCK = threading.Lock()
 
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *args: object, **kwargs: object) -> None:
-        return None
+def upstream(origin: str) -> HTTPConnection:
+    host = urlsplit(origin)
+    if host.scheme == "https":
+        return HTTPSConnection(host.netloc, timeout=UPSTREAM_TIMEOUT)
+    return HTTPConnection(host.netloc, timeout=UPSTREAM_TIMEOUT)
+
+
+def exchange(method: str, target: str, body: bytes | None, headers: dict[str, str]) -> tuple[int, HTTPMessage, bytes]:
+    origin = os.environ["SONAR_HOST_URL"].rstrip("/")
+    while True:
+        with IDLE_LOCK:
+            pooled = IDLE.pop() if method == "GET" and IDLE else None
+        connection = upstream(origin) if pooled is None else pooled
+        try:
+            connection.request(method, urlsplit(origin).path + target, body=body, headers=headers)
+            response = connection.getresponse()
+            payload = response.read()
+        except Exception as error:
+            connection.close()
+            if pooled is None or not isinstance(error, OSError) or isinstance(error, TimeoutError):
+                raise
+            continue
+        if method == "GET" and not response.will_close:
+            with IDLE_LOCK:
+                IDLE.append(connection)
+        else:
+            connection.close()
+        return response.status, response.headers, payload
 
 
 class SonarProxy(BaseHTTPRequestHandler):
@@ -28,22 +56,10 @@ class SonarProxy(BaseHTTPRequestHandler):
         }
         headers["CF-Access-Client-Id"] = os.environ["CF_ACCESS_CLIENT_ID"]
         headers["CF-Access-Client-Secret"] = os.environ["CF_ACCESS_CLIENT_SECRET"]
-        request = Request(
-            os.environ["SONAR_HOST_URL"].rstrip("/") + self.path,
-            data=body if self.command == "POST" else None,
-            headers=headers,
-            method=self.command,
-        )
         try:
-            with build_opener(NoRedirect()).open(request, timeout=UPSTREAM_TIMEOUT) as response:
-                status, answer, payload = response.status, response.headers, response.read()
-        except HTTPError as error:
-            if 300 <= error.code < 400:
-                error.close()
-                self.send_error(502, "Upstream redirects are refused")
-                return
-            with error:
-                status, answer, payload = error.code, error.headers, error.read()
+            status, answer, payload = exchange(
+                self.command, self.path, body if self.command == "POST" else None, headers
+            )
         except OSError as error:
             status = 504 if "timed out" in str(error) else 502
             print(
@@ -52,6 +68,9 @@ class SonarProxy(BaseHTTPRequestHandler):
                 flush=True,
             )
             self.send_error(status, "No answer from the Sonar server")
+            return
+        if 300 <= status < 400:
+            self.send_error(502, "Upstream redirects are refused")
             return
         if status >= 400:
             refused_by = " ".join(f"{name}={answer.get(name, '-')}" for name in ("server", "cf-ray", "cf-mitigated"))

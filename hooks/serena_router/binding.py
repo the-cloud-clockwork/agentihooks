@@ -6,6 +6,7 @@ from pathlib import Path
 
 PRIMARY = "primary"
 WORKTREE = "worktree"
+ROOT_ARG = "agentihooks_root"
 
 
 class BindingError(ValueError):

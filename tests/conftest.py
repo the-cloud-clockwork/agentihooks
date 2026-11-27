@@ -22,19 +22,17 @@ for _redis_name in list(os.environ):
     if "REDIS" in _redis_name.upper():
         os.environ.pop(_redis_name)
 
+from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, source_sizes
 from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.flake_ledger import WORKER_FILES
 from tests.shards import (
-    FIRST_SHARD_FILES,
     OWNER_COPIES,
-    SECONDS_PER_SOURCE_BYTE,
     assign_nodes,
     assign_owners,
     discover_test_files,
     grouped_files,
     setup_nodes_in_parallel,
     slowest_first,
-    source_sizes,
     warm_imports,
 )
 from tests.workflow_commands import refuse_commands
@@ -578,6 +576,16 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _seat_crons_stay_off_the_host_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swarm start, stop and master joins touch no scheduler in tests; tests/swarm/test_seat_crons.py turns the seat
+    crons back on over a fake scheduler."""
+    from scripts.swarm import seat_crons
+
+    for hook in ("on_start", "on_stop", "on_join"):
+        monkeypatch.setattr(seat_crons, hook, lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
 def _switch_interval_restored():
     before = sys.getswitchinterval()
     yield
@@ -620,6 +628,23 @@ def _workstation_headroom_is_roomy(monkeypatch):
         }
 
     monkeypatch.setattr(headroom, "measure", roomy)
+
+
+@pytest.fixture(autouse=True)
+def _event_offers_read_free_account_seats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Event offer seat checks read one free Claude and one free Codex seat instead of the runner's empty quota; the
+    offer quota tests import the real reader at collection, before this stub applies, and set their own rows."""
+    from scripts.swarm import capacity, offer_quota
+
+    rows = (
+        capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6),
+        capacity.Account("codex", "codex-free", "OPEN", 0, None, 90, 6),
+    )
+
+    def free(environ: dict[str, str], now: float, refresh: bool = False, redis: Any = None) -> list[capacity.Account]:
+        return list(rows)
+
+    monkeypatch.setattr(offer_quota, "accounts", free)
 
 
 @pytest.fixture(autouse=True)
@@ -764,6 +789,14 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _first_read_gate_offline(
+    _isolate_real_user_paths: None, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if request.path.parent == Path(__file__).parent / "gates":
+        monkeypatch.setenv("AGENTIHOOKS_GATE_FIRST_READ", "off")
 
 
 @pytest.fixture(autouse=True)

@@ -163,7 +163,7 @@ def test_a_live_seat_two_master_keeps_a_down_lead_from_counting_as_an_outage(sto
     runtime.full = True
     InboxStore(store.redis).send("operator", "master@sw", "anyone there")
     tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 5)
-    assert MASTER_DOWN not in ledger.notes
+    assert not [note for note in ledger.notes if note.startswith(MASTER_DOWN)]
     assert tick_master.read(store, "sw") == {}
 
 
@@ -211,7 +211,7 @@ def test_a_placement_refusal_holds_the_seat_and_says_why(store):
     MasterSeats(store.redis).set_count("sw", 2)
     runtime = Recording("placed on another host")
     assert master_fill.run("sw", store.config("sw"), store, runtime, {}, 1) == ["placed on another host"]
-    assert runtime.asked == [(MASTER, {"id": "master-2"})] and runtime.masters == []
+    assert runtime.asked == [(MASTER, {"id": "master-2", "seat": "master-2@sw"})] and runtime.masters == []
 
 
 @pytest.mark.feature("swarm-session-cap")

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -22,9 +23,9 @@ CLAIM = {"op": "task_update", "id": "u1", "by": "eng", "item": "tasks/t2", "fiel
 CHAT = {"op": "add", "id": "m1", "thread": "chat", "text": "hello"}
 
 
-def store(tmp_path):
+def store(tmp_path: Path) -> SQLiteLedgerRepository:
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repo.create("ledger", CONTENT)
+    repo.create("ledger", CONTENT, "swarm")
     with repo.connect() as connection, connection:
         connection.execute("DELETE FROM outbox")
     return repo
@@ -83,7 +84,7 @@ def test_a_change_to_neither_tasks_nor_phases_writes_no_outbox_row(tmp_path):
 
 def test_creating_a_ledger_writes_one_outbox_row_per_task_and_phase(tmp_path):
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repo.create("ledger", CONTENT)
+    repo.create("ledger", CONTENT, "swarm")
     state = repo.get_document("ledger")
     assert [(row[2], row[3]) for row in rows(repo)] == [
         (state["_meta"]["rev"], "swarm.ledger.phase.p1"),
@@ -124,6 +125,40 @@ def test_purging_a_slug_with_no_ledger_writes_no_outbox_row(tmp_path):
     with repo.transaction() as transaction:
         transaction.purge("absent")
     assert rows(repo) == []
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged(tmp_path: Path) -> None:
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repo.create("session", CONTENT)
+    assert repo.get_document("session")["size"] == "small"
+    repo.apply_ops("session", ops=[CLAIM])
+    repo.apply_ops("session", changes=[{"path": "phases/p1/done", "value": True, "base": False}])
+    with repo.transaction() as transaction:
+        transaction.purge("session")
+    assert rows(repo) == []
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_an_outbox_write_skips_a_small_ledger_and_keeps_a_swarm_or_sizeless_one() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.executescript(sqlite.SCHEMA)
+    small, swarm = {"size": "small", "tasks": [{"id": "t1"}]}, {"size": "swarm", "tasks": [{"id": "t2"}]}
+    outbox.write(connection, "session", 1, {}, small)
+    outbox.write(connection, "session", 2, small, {})
+    outbox.write(connection, "shrunk", 1, swarm, small)
+    outbox.write(connection, "crew", 1, {}, swarm)
+    outbox.write(connection, "crew", 2, swarm, {})
+    outbox.write(connection, "grown", 1, small, swarm)
+    outbox.write(connection, "older", 1, {}, {"tasks": [{"id": "t3"}]})
+    found = connection.execute("SELECT slug, revision, subject FROM outbox ORDER BY slug, revision, subject")
+    assert found.fetchall() == [
+        ("crew", 1, "swarm.crew.task.t2"),
+        ("crew", 2, "swarm.crew.task.t2"),
+        ("grown", 1, "swarm.grown.task.t1"),
+        ("grown", 1, "swarm.grown.task.t2"),
+        ("older", 1, "swarm.older.task.t3"),
+    ]
 
 
 def test_a_ledger_write_that_fails_after_the_outbox_row_leaves_neither(tmp_path, monkeypatch):

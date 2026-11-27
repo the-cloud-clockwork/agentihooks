@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/relay.py:scripts.ci_lab.relay.x_relay:398efbda115692d315bd892ab42d5722fea2a9f7ed89c55fc679d660ab330f29": {
+    "reader": "standards-reader",
+    "reason": "checks.name branches on the truthiness of shadow, so None and False give the same check name, status key and action text"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "codex-planner-native-sandbox",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-canary-timeout",
+  "behaviour": "Worker images include the official Codex bubblewrap companion and verify its native identity without weakening other companion checks, and hive worker Pods can select paired Localhost seccomp and AppArmor profiles while the default render stays unchanged.",
+  "seam": "Worker artifact lock, companion inventory and the hive worker Pod sandbox profile selection",
+  "tests": [
+    "tests/swarm_node/test_planner_sandbox.py::test_worker_image_locks_the_planner_sandbox_runtime",
+    "tests/swarm_node/test_planner_sandbox.py::test_companion_identity_accepts_its_native_usage",
+    "tests/swarm_node/test_planner_sandbox.py::test_companion_identity_refuses_another_executable",
+    "tests/swarm_node/test_sandbox_chart.py::test_paired_profile_render_proof_is_connected",
+    "tests/swarm_node/test_sandbox_chart.py::test_profile_defaults_and_shared_service_security_are_preserved"
+  ],
+  "rules": ["codex-planner-bwrap"]
+}

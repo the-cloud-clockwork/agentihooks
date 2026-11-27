@@ -4,6 +4,9 @@
 {{- if and (eq (toString $hub.bus.backend) "nats") (not $busUrl) }}
 {{- fail "hub.bus.url is required with the nats backend when nats.enabled is false: the hub reads every reactor's events from that address" }}
 {{- end }}
+{{- if not $hub.servingFile }}
+{{- fail "hub.servingFile is required: the hub creates that file once it answers slots requests, and its readiness probe waits for it" }}
+{{- end }}
 {{- $reload := list }}
 {{- range (concat (default (list) .Values.secretEnv) (default (list) $hub.secretEnv)) }}
 {{- $reload = append $reload .secretName }}
@@ -13,10 +16,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-hub
-  {{- with ($reload | uniq) }}
   annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- with ($reload | uniq) }}
     secret.reloader.stakater.com/reload: {{ join "," . | quote }}
-  {{- end }}
+    {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: hub
@@ -82,7 +86,21 @@ spec:
             {{- end }}
             {{- include "swarm.extraEnv" $hub.env | nindent 12 }}
             {{- include "swarm.secretKeyEnv" $hub.secretEnv | nindent 12 }}
+            - name: AGENTIHOOKS_HUB_SERVING_FILE
+              value: {{ $hub.servingFile | quote }}
           {{- include "swarm.envFrom" . | nindent 10 }}
+          readinessProbe:
+            exec:
+              command: [test, -f, {{ $hub.servingFile | quote }}]
+            periodSeconds: 2
           resources:
             {{- toYaml $hub.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /home/swarm/.agentihooks
+      volumes:
+        - name: cache
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $hub.cache.sizeLimit | quote }}
 {{- end }}

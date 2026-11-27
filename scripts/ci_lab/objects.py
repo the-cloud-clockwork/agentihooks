@@ -1,4 +1,5 @@
-"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt} and lab/grades/<run>/, on local or S3 storage."""
+"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt,manifest.json}, lab/flakes/<kind>/<digest>.jsonl and
+lab/grades/<run>/, on local or S3 storage."""
 
 import os
 import re
@@ -16,14 +17,16 @@ __all__ = [
     "Objects",
     "S3Objects",
     "Uploads",
+    "flakes_path",
     "grade_prefix",
     "is_report",
+    "manifest_folder",
     "unit_path",
     "upload_path",
 ]
 
 ROOT = "lab/"
-FILES = {"report": "report.json", "log": "log.txt"}
+FILES = {"report": "report.json", "log": "log.txt", "manifest": "manifest.json"}
 UPLOAD_SECONDS = 900
 KEY = re.compile(r"(?P<kind>[a-z]+)-v[0-9]+-(?P<digest>[0-9a-f]{64})")
 REPORT = re.compile(ROOT + r"[a-z]+/[0-9a-f]{64}/report\.json")
@@ -36,6 +39,8 @@ class Objects(Protocol):
 
     def keys(self, prefix: str) -> list[str]: ...
 
+    def remove(self, path: str) -> None: ...
+
     def upload_url(self, path: str, expires_s: int) -> str: ...
 
 
@@ -47,6 +52,14 @@ def unit_path(kind: str, key: str, name: str) -> str:
     return f"{ROOT}{kind}/{match['digest']}/{FILES[name]}"
 
 
+def flakes_path(kind: str, key: str) -> str:
+    """Return the path of a unit's flake rows, lab/flakes/<kind>/<digest>.jsonl, refusing a key of another kind."""
+    match = KEY.fullmatch(key)
+    if match is None or match["kind"] != kind:
+        raise ValueError(f"not a {kind} unit key: {key}")
+    return f"{ROOT}flakes/{kind}/{match['digest']}.jsonl"
+
+
 def grade_prefix(run: str) -> str:
     """Return the folder of one grade run."""
     return f"{ROOT}grades/{run}/"
@@ -55,6 +68,11 @@ def grade_prefix(run: str) -> str:
 def upload_path(job: str, name: str) -> str:
     """Return where a worker uploads a leased job's report or log."""
     return f"{ROOT}uploads/{job}/{FILES[name]}"
+
+
+def manifest_folder(slug: str) -> str:
+    """Return the folder of a repository's packed dependency manifests, one <commit>.json per dev commit."""
+    return f"{ROOT}manifests/{slug.replace('/', '--')}/"
 
 
 def is_report(path: str) -> bool:
@@ -89,6 +107,10 @@ class LocalObjects:
         """Return the sorted paths under a prefix."""
         return self.backend.keys(prefix)
 
+    def remove(self, path: str) -> None:
+        """Remove an object; a missing one is already gone."""
+        self.backend.remove(path)
+
     def upload_url(self, path: str, expires_s: int) -> str:
         """Return the file URL a local worker writes the object to; a local file never expires."""
         return contain(self.root, path).as_uri()
@@ -114,6 +136,10 @@ class S3Objects:
     def keys(self, prefix: str) -> list[str]:
         """Return the sorted paths under a prefix."""
         return self.backend.keys(prefix)
+
+    def remove(self, path: str) -> None:
+        """Remove an object; a missing one is already gone."""
+        self.backend.remove(path)
 
     def upload_url(self, path: str, expires_s: int) -> str:
         """Return a presigned PUT URL for the object."""

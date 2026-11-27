@@ -47,6 +47,19 @@ def launch_claude(binary, args, environ, report):
         raise
 
 
+def launch_claude(binary, args, environ, report):
+    try:
+        child, found, number = _front(environ, cwd)
+    except login.LoginRefused as exc:
+        if forced or (front and str(exc) == native_login.EXPIRED):
+            # ok: feature-front-door-no-token
+            return login.launch_token(binary, args, environ, report, forced=forced)
+        if forced:
+            # ruleid: feature-front-door-no-token
+            return login.launch_token(binary, args, environ, report)
+        raise
+
+
 class BadRuntime:
     # ruleid: feature-front-door-runtime-check
     def spawn(self, config, lane, name, task):

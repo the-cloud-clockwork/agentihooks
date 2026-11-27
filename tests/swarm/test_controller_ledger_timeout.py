@@ -1,5 +1,6 @@
-"""The controller run loop survives a pass whose ledger client times out."""
+"""The controller run loop survives a pass whose ledger client times out or whose ledger storage fails."""
 
+import sqlite3
 import threading
 
 import pytest
@@ -21,6 +22,17 @@ class TimedOutLedger:
     @staticmethod
     def call(slug: str, ops: list[dict] | None, service: bool = False) -> dict:
         raise SystemExit("ledger server not answering on http://ledger:8765: The read operation timed out")
+
+
+class ClosedLedger:
+    """A ledger module double whose database connection Postgres closed mid write, as the leader controller saw."""
+
+    class Missing(Exception):
+        """The ledger module's missing ledger error."""
+
+    @staticmethod
+    def call(slug: str, ops: list[dict] | None, service: bool = False) -> dict:
+        raise sqlite3.DatabaseError("connection already closed")
 
 
 class Ended(Exception):
@@ -109,4 +121,47 @@ def test_controller_run_once_reports_a_ledger_timeout_as_a_failed_pass(
     monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: pytest.fail("a single pass never waits"))
     assert controller.main(["run", "--once"]) == 1
     assert "The read operation timed out" in capsys.readouterr().err
+    assert service.stopped == 1
+
+
+@pytest.mark.feature("controller-survives-ledger-storage-failure")
+def test_controller_run_backs_off_after_a_ledger_storage_failure_and_runs_the_next_pass(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], service: Service
+) -> None:
+    passes: list[int] = []
+    waits: list[float] = []
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "7")
+    monkeypatch.setattr(controller, "scheduled_wait", waits.append)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ClosedLedger)
+
+    def tick_once(store: str, running: Service) -> dict:
+        passes.append(len(passes) + 1)
+        if len(passes) == 1:
+            ledger_client.LedgerClient(service=True).state("rig-grade-swarm")
+        raise Ended
+
+    monkeypatch.setattr(controller, "tick_once", tick_once)
+    with pytest.raises(Ended):
+        controller.main(["run"])
+    assert passes == [1, 2]
+    assert waits == [7.0]
+    assert "controller: pass ended, next pass after one tick: connection already closed\n" in capsys.readouterr().err
+    assert service.stopped == 1
+
+
+@pytest.mark.feature("controller-survives-ledger-storage-failure")
+def test_controller_run_once_reports_a_ledger_storage_failure_as_a_failed_pass(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], service: Service
+) -> None:
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ClosedLedger)
+
+    def tick_once(store: str, running: Service) -> dict:
+        return ledger_client.LedgerClient(service=True).state("rig-grade-swarm")
+
+    monkeypatch.setattr(controller, "tick_once", tick_once)
+    monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: pytest.fail("a single pass never waits"))
+    assert controller.main(["run", "--once"]) == 1
+    captured = capsys.readouterr()
+    assert '{"event": "controller_pass_end", "pass": 1, "outcome": "ledger_storage"}' in captured.out.splitlines()
+    assert "controller: pass ended, next pass after one tick: connection already closed\n" in captured.err
     assert service.stopped == 1

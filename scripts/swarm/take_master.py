@@ -5,7 +5,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-from hooks.context.account_sessions import agent_pid
+from hooks.context.account_sessions import agent_pid, pid_route
 from hooks.context.broadcast import live_session_ids, name_session, pin_session
 from hooks.context.master_coding import record_seat
 from hooks.observability import agent_trace
@@ -99,7 +99,7 @@ def retired(store, slug, runtime, others):
         store.drop_agent(slug, agent.name)
 
 
-def master_record(slug, name, pid, now_ms):
+def master_record(slug: str, name: str, pid: int, now_ms: int) -> AgentRecord:
     account, validated = launch_of(pid)
     harness = harness_of(pid) or validated.get("harness", "")
     model, effort = launch_model.read(harness, argv_of(pid)) if harness else ("", "")
@@ -115,6 +115,7 @@ def master_record(slug, name, pid, now_ms):
         account=account,
         seat=seat_address(slug, MASTER),
         profile_decision={"validation": validated} if validated else {},
+        route_kind=pid_route(pid, PROC),
     )
 
 

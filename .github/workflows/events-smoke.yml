@@ -47,7 +47,10 @@ jobs:
       - name: Install dependencies
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
-        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+        run: |
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]' && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
+          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install the pinned nats server
         timeout-minutes: 3
@@ -57,4 +60,4 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/events_smoke --confcutdir=tests/events_smoke -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/events-smoke.log"
-          grep -q ' 6 passed' "$RUNNER_TEMP/events-smoke.log" || { echo '::error::The six events launch seams did not all run.'; exit 1; }
+          grep -q ' 8 passed' "$RUNNER_TEMP/events-smoke.log" || { echo '::error::The eight events smoke seams did not all run.'; exit 1; }

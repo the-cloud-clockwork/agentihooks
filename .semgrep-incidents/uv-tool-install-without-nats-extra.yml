@@ -1,0 +1,12 @@
+rules:
+  - id: uv-tool-install-without-nats-extra
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A uv tool install of agentihooks without the nats extra builds a tool venv with no nats-py, so with
+      AGENTIHOOKS_BUS=nats opening the bus fails on ModuleNotFoundError no module named nats. Install the spec with the
+      extra, ".[nats]" or "agentihooks[nats]".
+    patterns:
+      - pattern: '[$UV, "tool", "install", ...]'
+      - pattern-not: '[$UV, "tool", "install", ..., "=~/\[(nats|all)\]$/", ...]'
+      - pattern-not: '[$UV, "tool", "install", ..., f"{$PACKAGE}[nats]", ...]'

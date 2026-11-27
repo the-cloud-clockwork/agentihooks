@@ -79,7 +79,7 @@ This single command:
 6. Symlinks `~/.claude/CLAUDE.md` to the chosen profile's `CLAUDE.md` (at profile root)
 7. Installs MCPs (agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
 8. Reconciles the managed-MCP ledger in `~/.claude.json` — removes servers agentihooks installed on a prior run but that are no longer defined in any profile/bundle source (servers you added by hand are preserved; run `agentihooks prune` to sweep genuine cruft)
-10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+10. Installs the `agentihooks` CLI globally via `uv tool install --editable .[nats]`
 11. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 
 The install is **idempotent** -- re-running is safe. Settings are only backed up on the first run.
@@ -92,16 +92,17 @@ If you ever recreate the venv or change its location, re-run the installer from 
 The global CLI has its own uv tool environment. A normal install includes
 `websockets>=15.0`, the runtime dependency used by the managed Codex app-server
 client; neither `[dev]` nor `[all]` is required for that client dependency.
-To install the tool from this checkout without optional extras:
+The tool install also carries the `nats` extra, the NATS client that the event
+bus opens when `AGENTIHOOKS_BUS=nats`. To install the tool from this checkout:
 
 ```bash
-uv tool install --editable .
+uv tool install --editable ".[nats]"
 ```
 
 After updating the checkout, refresh an existing installation with:
 
 ```bash
-uv tool install --reinstall --editable .
+uv tool install --reinstall --editable ".[nats]"
 ```
 
 Verify imports with the **tool environment's Python**, since a successful

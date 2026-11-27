@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
 from tests.test_package_internal_names import LEAKS
@@ -14,11 +15,17 @@ from tests.test_profile_render import world as render_world
 
 world = render_world
 ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
-ROLE_SKILLS = {"master": "swarm-master", "engineer": "swarm-engineer", "cicd": "swarm-ci", "planner": "swarm-planner"}
+ROLE_SKILLS = {
+    "master": "swarm-master",
+    "engineer": "swarm-engineer",
+    "cicd": "swarm-ci",
+    "planner": "swarm-planner",
+    "reviewer": "swarm-reviewer",
+}
 COMMON = (
-    "agentihooks ledger --slug <slug> --as <name> join",
+    "agentihooks api --slug <slug> --as <name> join",
     "agentihooks ledger watch <slug> --as <name>",
-    "agentihooks ledger --slug <slug> --as <name> ack",
+    "agentihooks api --slug <slug> --as <name> ack",
     "agentihooks msg reply <id>",
     "agentihooks msg close <id>",
     "agentihooks swarm <slug> handoff <doc>",
@@ -33,15 +40,17 @@ LOOP = {
         "--must",
         "agentihooks swarm <slug> restore-decision",
         "<!-- slice: <id> -->",
-        "agentihooks ledger --slug <slug> --as <name> publish-plan",
+        "agentihooks api --slug <slug> --as <name> publish-plan",
         "--plan-slice <id>",
     ),
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
     "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
+    "reviewer": (*WORKER, "agentihooks msg send <author>", "--finding <url>"),
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
-PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["seat"] = lambda argv: seat_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:
@@ -69,13 +78,11 @@ def test_planner_guidance_nests_task_headings_with_slice_anchors():
         ROLES.parent / "skills" / "take-master" / "SKILL.md",
     ],
 )
-def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance: Path) -> None:
     text = " ".join(guidance.read_text().split())
     rules = (
         "A full plan is a plan file a master or planner writes and publishes "
         "to the artifacts; every task built from it carries its slice.",
-        "Follow ups, open questions, operator notes and orders the operator "
-        "types or gives are standalone tasks with no plan and no slice.",
         "A standalone task that a master or planner expands because it grew "
         "wide becomes a plan: write and publish the plan with slice markers, "
         "then add its tasks with their slices.",
@@ -202,7 +209,6 @@ def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill
     [
         ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
         ROLES / "master" / "CLAUDE.md",
-        ROLES / "master" / ".claude" / "rules" / "master-role.md",
     ],
 )
 def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
@@ -210,6 +216,28 @@ def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
 
     assert "agentihooks swarm <slug> merge queue <url>" in text
     assert "merge on green" not in text.lower()
+
+
+def test_master_role_rule_names_no_merge_on_green() -> None:
+    """The master role rule never tells the master to merge on green."""
+    text = " ".join((ROLES / "master" / ".claude" / "rules" / "master-role.md").read_text().split())
+
+    assert "merge on green" not in text.lower()
+
+
+@pytest.mark.parametrize("role", sorted(p.name for p in ROLES.iterdir() if (p / "CLAUDE.md").is_file()))
+def test_role_rules_repeat_no_line_of_the_role_persona(role: str) -> None:
+    """A package role's rule files carry no bullet line its CLAUDE.md already states."""
+    persona = (ROLES / role / "CLAUDE.md").read_text().splitlines()
+    stated = {" ".join(line.split()) for line in persona if line.lstrip().startswith("- ")}
+    repeated = [
+        f"{rule.name}: {line.strip()}"
+        for rule in sorted((ROLES / role / ".claude" / "rules").glob("*.md"))
+        for line in rule.read_text().splitlines()
+        if line.lstrip().startswith("- ") and " ".join(line.split()) in stated
+    ]
+
+    assert repeated == []
 
 
 def test_rendered_qa_persona_reads_tests_from_ci_only(world):
@@ -232,9 +260,9 @@ def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
     text = " ".join((out / "skills" / "swarm-engineer" / "SKILL.md").read_text().split())
 
     assert "lint and tests green" not in text
+    assert "preflight" not in text
     steps = (
         "open a draft pull request into the base branch at that first push",
-        "never wait for the branch mutation preflight",
         "Read the test red in CI on the pull request",
         "read it green in CI",
         "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
@@ -310,6 +338,20 @@ def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
     assert rules["claude"] == rules["codex"]
     assert [phrase for phrase in MASTER_SCALING if phrase not in rules["claude"]] == []
     assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
+
+
+@pytest.mark.feature("master-quota-login-guidance")
+def test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot(world: object) -> None:
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    assert out is not None
+    advice = (
+        "When every master login slot is spent, ask through the inbox for a slot added with "
+        "`agentihooks claude login --master`."
+    )
+    for persona in (out.parent / "claude" / "CLAUDE.md", out / "AGENTS.md"):
+        assert advice in persona.read_text()
 
 
 def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():

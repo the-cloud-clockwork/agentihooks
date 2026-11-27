@@ -1,11 +1,12 @@
 """Account slot admission the hub answers for hive members, so one account total spans every swarm."""
 
+import functools
 import json
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from scripts.events.bus import Bus
+from scripts.events.bus import Bus, PayloadTooLarge
 from scripts.events.subjects import SLOTS
 from scripts.hive import account_slots, presence
 
@@ -57,6 +58,15 @@ def handle(
     return json.dumps(answer).encode()
 
 
+def refusal(subject: str, data: bytes, error: PayloadTooLarge, admitter: "Admission") -> bytes:
+    """The answer to a slot request whose own answer cannot cross the bus even compressed: an admission releases what
+    it claimed and is held with the reason, any other operation answers the error."""
+    request = json.loads(data)
+    if request.get("op") != "admit":
+        return json.dumps({"ok": False, "error": str(error)}).encode()
+    return json.dumps({"ok": True, "result": admitter.unsent(subject.split(".")[1], request, str(error))}).encode()
+
+
 def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None) -> None:
     from scripts.hub import admission
 
@@ -68,4 +78,5 @@ def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admis
         QUEUE,
         lambda subject, data: handle(bus, subject, data, clock, admitter),
         wait_ms=account_slots.REQUEST_TIMEOUT_MS,
+        refusal=functools.partial(refusal, admitter=admitter),
     )

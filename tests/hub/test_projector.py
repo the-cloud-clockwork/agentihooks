@@ -1,6 +1,7 @@
 import threading
 import time
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -94,10 +95,10 @@ def test_a_failed_refresh_naks_with_the_reactor_retry_delay_and_a_success_acks()
     handled.nak.assert_not_called()
 
 
-def stored_ledger(tmp_path):
+def stored_ledger(tmp_path: Path) -> sqlite.SQLiteLedgerRepository:
     inner = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
-    inner.create("seen", {"title": "Seen", "phases": [{"title": "One"}]})
-    inner.create("other", {"title": "Other", "phases": [{"title": "One"}]})
+    inner.create("seen", {"title": "Seen", "phases": [{"title": "One"}]}, "swarm")
+    inner.create("other", {"title": "Other", "phases": [{"title": "One"}]}, "swarm")
     return inner
 
 

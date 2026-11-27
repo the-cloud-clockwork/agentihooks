@@ -8,6 +8,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.metadata import distribution
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -285,16 +286,19 @@ def test_a_real_uv_install_against_an_index_that_never_answers_is_stopped_and_re
     assert "Python package index unavailable" in summary
 
 
-def _install_steps():
-    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+def _install_steps() -> dict[str, dict[str, Any]]:
+    workflows = ROOT / ".github/workflows"
+    jobs = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]
+    steps = {name: jobs[name]["steps"] for name in ("unit", "unit-selected", "test-count", "split")}
+    steps["events-smoke"] = yaml.safe_load((workflows / "events-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
     return {
-        name: next(step for step in jobs[name]["steps"] if step.get("name") == "Install dependencies")
-        for name in ("unit", "unit-selected", "test-count", "split")
+        name: next(step for step in job_steps if step.get("name") == "Install dependencies")
+        for name, job_steps in steps.items()
     }
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
-def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+def test_every_unit_dependency_install_runs_uv_through_the_retry(job: str) -> None:
     run = _install_steps()[job]["run"]
     online = [line.strip() for line in run.splitlines() if "uv pip install" in line and "--offline" not in line]
     assert online
@@ -302,8 +306,8 @@ def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
         assert install.startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
-def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job):
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job: str) -> None:
     lines = [line.strip() for line in _install_steps()[job]["run"].splitlines()]
     offline = next(i for i, line in enumerate(lines) if "--offline" in line)
     retry = next(i for i, line in enumerate(lines) if line.startswith("bash .github/scripts/pypi-retry.sh"))
@@ -359,15 +363,19 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
 @pytest.mark.parametrize(
     "job", ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"]
 )
-def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
+def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job: str) -> None:
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
     names = [step.get("name") for step in steps]
     take = steps[names.index("Take the helper scripts from the workflow revision")]
     install = steps[names.index("Install dependencies")]
+    fetch = {
+        "mutation-replan": "git fetch --no-tags --depth=1",
+        "mutation-refine": "git fetch --no-tags --negotiation-tip=HEAD",
+    }.get(job, "git fetch --no-tags")
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     assert take.get("if") == install.get("if")
     assert take["run"].splitlines() == [
-        'git fetch --no-tags origin "$GITHUB_SHA"',
+        f'{fetch} origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
         'git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"',
     ]
@@ -421,7 +429,7 @@ def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revisio
 
 
 def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry():
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["collect"]["steps"]
     (plan,) = [step for step in steps if step.get("name") == "Plan the tests whose inputs did not change"]
     assert [line.strip() for line in plan["run"].splitlines() if "pip install" in line] == [
         'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '

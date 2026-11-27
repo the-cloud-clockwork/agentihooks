@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import github_reads, idle, waits
+from scripts.swarm import github_reads, idle, lab_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
@@ -13,6 +13,8 @@ pytestmark = pytest.mark.unit
 CHECK = "https://github.com/org/repo/runs/456"
 PULL_CHECK = "https://github.com/org/repo/pull/7/checks?check_run_id=456"
 ENDPOINT = "repos/org/repo/check-runs/456"
+SHA = "a" * 40
+GRADE = f"http://lab.ci:8800/grades/{SHA}"
 
 
 @pytest.fixture
@@ -62,11 +64,16 @@ def test_a_lab_wait_takes_a_check_run_url(target: str) -> None:
         "https://github.com/org/repo/pull/7/files?check_run_id=456",
         "http://github.com/org/repo/runs/456",
         "https://lab.example/grades/456",
+        f"{GRADE}/runs",
+        f"ftp://lab.ci/grades/{SHA}",
+        f"http://lab.ci/grades/{SHA[:39]}",
+        f"http://lab.ci/grades/{SHA}?head=1",
     ],
 )
 @pytest.mark.feature("swarm-lab-wait")
 def test_a_lab_wait_refuses_anything_but_a_check_run_url(target: str) -> None:
-    assert waits.target_problem("lab", target, "t1", {}, None) == f"wait on lab needs a check run url, not {target}"
+    refusal = f"wait on lab needs a check run url or a lab grade url, not {target}"
+    assert waits.target_problem("lab", target, "t1", {}, None) == refusal
 
 
 @pytest.mark.feature("swarm-lab-wait")
@@ -169,3 +176,145 @@ def test_a_stored_lab_wait_on_a_bad_target_ends_without_reading_github(
 
 def test_the_kinds_list_names_the_lab_wait() -> None:
     assert waits.KINDS == ("checks", "merge", "reply", "task", "intent", "lab")
+
+
+@pytest.fixture
+def lab(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    state: dict[str, Any] = {"grades": [], "error": None, "asked": []}
+
+    def grades(url: str) -> list[dict[str, Any]]:
+        state["asked"].append(url)
+        if state["error"] is not None:
+            raise state["error"]
+        return state["grades"]
+
+    monkeypatch.setattr(lab_wait, "grades", grades)
+    return state
+
+
+def grade(conclusion: str | None, checks: dict[str, str] | None = None, superseded: bool = False) -> dict[str, Any]:
+    named = {name: {"status": "completed", "conclusion": end} for name, end in (checks or {}).items()}
+    return {"run": "r1", "conclusion": conclusion, "superseded": superseded, "checks": named}
+
+
+def hold_grade(rig: Any) -> None:
+    idle.declare_wait(rig.store.redis, "sw", ME, 10_000_000, "", 1, on=waits.on("lab", GRADE))
+
+
+@pytest.mark.parametrize("target", [GRADE, f"https://lab.example/ci/grades/{'b' * 64}"])
+@pytest.mark.feature("swarm-lab-wait")
+def test_a_lab_wait_takes_a_lab_grade_url(target: str) -> None:
+    assert waits.target_problem("lab", target, "t1", {}, None) == ""
+
+
+@pytest.mark.parametrize("found", [[], [grade(None)], [grade("success"), grade(None)]])
+@pytest.mark.feature("swarm-lab-wait")
+def test_a_lab_grade_not_yet_closed_holds_the_wait(
+    tick: Any,  # noqa: F811
+    lab: dict[str, Any],
+    found: list[dict[str, Any]],
+) -> None:
+    lab["grades"] = found
+    hold_grade(tick)
+    assert tick.end() == []
+    assert (idle.wait(tick.store.redis, "sw", ME) or {})["on"] == {"kind": "lab", "target": GRADE}
+    assert lab["asked"] == [GRADE]
+    assert tick.told() == []
+
+
+@pytest.mark.parametrize("error", [OSError("refused"), ValueError("lab grades document carries no grades")])
+@pytest.mark.feature("swarm-lab-wait")
+def test_an_unreachable_lab_holds_the_grade_wait(
+    tick: Any,  # noqa: F811
+    lab: dict[str, Any],
+    error: Exception,
+) -> None:
+    lab["error"] = error
+    hold_grade(tick)
+    assert tick.end() == []
+    assert (idle.wait(tick.store.redis, "sw", ME) or {})["on"]["target"] == GRADE
+
+
+@pytest.mark.feature("swarm-lab-wait")
+def test_the_tick_ends_a_green_lab_grade_wait_with_the_inbox_notice(
+    tick: Any,  # noqa: F811
+    lab: dict[str, Any],
+) -> None:
+    lab["grades"] = [grade("success", {"Gate — Required": "success"}), grade(None, superseded=True)]
+    hold_grade(tick)
+    outcome = f"lab grade {GRADE}, now green"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [notice(outcome)]
+
+
+@pytest.mark.parametrize(
+    "found, failed",
+    [
+        ([grade("failure", {"lab/tests": "failure", "lab/lint": "success", "lab/docs": "skipped"})], "lab/tests"),
+        (
+            [grade("failure", {"lab/unit": "timed_out", "lab/types": "neutral", "lab/tests": "failure"})],
+            "lab/tests, lab/unit",
+        ),
+        ([grade("success"), grade("failure", {"lab/tests": "cancelled"})], "lab/tests"),
+        ([grade("failure")], "with no failed check named"),
+    ],
+)
+@pytest.mark.feature("swarm-lab-wait")
+def test_the_tick_ends_a_red_lab_grade_wait_naming_the_failed_checks(
+    tick: Any,  # noqa: F811
+    lab: dict[str, Any],
+    found: list[dict[str, Any]],
+    failed: str,
+) -> None:
+    lab["grades"] = found
+    hold_grade(tick)
+    outcome = f"lab grade {GRADE}, now red; failed {failed}"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [notice(outcome)]
+
+
+@pytest.mark.feature("swarm-lab-wait")
+def test_a_lab_grade_whose_every_grade_a_newer_head_replaced_ends_the_wait(
+    tick: Any,  # noqa: F811
+    lab: dict[str, Any],
+) -> None:
+    lab["grades"] = [grade(None, superseded=True), grade("failure", superseded=True)]
+    hold_grade(tick)
+    outcome = f"lab grade {GRADE}, superseded; a newer head replaced it"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert tick.told() == [notice(outcome)]
+
+
+class Reply:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __enter__(self) -> "Reply":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
+def test_the_grade_read_asks_the_grade_url_within_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, float]] = []
+
+    def urlopen(url: str, timeout: float) -> Reply:
+        seen.append((url, timeout))
+        return Reply(json.dumps({"head": SHA, "grades": [grade("success")]}).encode())
+
+    monkeypatch.setattr(lab_wait, "urlopen", urlopen)
+    assert lab_wait.grades(GRADE) == [grade("success")]
+    assert seen == [(GRADE, lab_wait.TIMEOUT_S)]
+
+
+@pytest.mark.parametrize("body", [b"[]", b'{"head": "x"}', b'{"grades": {}}'])
+def test_a_grade_document_without_a_grades_list_is_refused(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+    monkeypatch.setattr(lab_wait, "urlopen", lambda url, timeout: Reply(body))
+    with pytest.raises(ValueError, match="^lab grades document carries no grades$"):
+        lab_wait.grades(GRADE)

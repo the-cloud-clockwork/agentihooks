@@ -1,9 +1,11 @@
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, quota_notice
 from scripts.swarm.store import MASTER, RedisStore
+from scripts.swarm_v2 import front_door
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,16 @@ class Thresholds:
         if not (0 < thresholds.week < hard_week and 0 < thresholds.five < hard_five):
             raise ValueError("quota warning thresholds must be positive and below the hard handoff thresholds")
         return thresholds
+
+
+def master_thresholds(thresholds: Thresholds) -> Thresholds:
+    """The front door master's warnings, only at its master floor: one hundred minus the primary login reserve of the
+    week and one hundred minus the hard five hour handoff, as the hive master selection reads them."""
+    from scripts.routing import reservation
+
+    return replace(
+        thresholds, week=100 - reservation.primary_reserve_pct(os.environ), five=100 - reservation.master_five_floor()
+    )
 
 
 def windows(account: capacity.Account, thresholds: Thresholds) -> list[str]:
@@ -79,8 +91,9 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         if agent.state == "finished" or account is None:
             continue
         account = replace(account, reserved="") if agent.lane == MASTER else account
+        front = agent.lane == MASTER and front_door.holds(slug, agent.seat)
         life, due = str(agent.started_at), []
-        for window in windows(account, thresholds):
+        for window in windows(account, master_thresholds(thresholds) if front else thresholds):
             field, period = f"{agent.name}:{window}", f"{life}:{_reset(account, window)}"
             if store.redis.hget(periods, field) != period:
                 due.append((window, field, period))
@@ -113,13 +126,20 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
 
 
 def refusal(
-    predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason: Callable[[capacity.Account], str]
+    predecessor: tuple,
+    harnesses: tuple,
+    accounts: list[capacity.Account],
+    reason: Callable[[capacity.Account], str],
+    master: bool = False,
 ) -> str:
     reasons = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in accounts)
-    return (
+    message = (
         f"no {' or '.join(harnesses)} account can take the quota handoff from {predecessor[0]} account "
         f"{predecessor[1]}: {reasons or 'no accounts were observed'}"
     )
+    if master:
+        message += "; ask through the inbox for a master login slot added with agentihooks claude login --master"
+    return message
 
 
 def successor(

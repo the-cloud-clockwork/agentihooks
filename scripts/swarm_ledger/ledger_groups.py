@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ledger_kinds, ports
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("task_group", "task_ungroup")
 MAX_TASKS = 5
@@ -14,7 +15,7 @@ MINUTES = {"S": 10, "M": 25, "L": 40}
 CEILING = MINUTES["M"]
 FOLD_CEILING = 2 * MINUTES["L"]
 GROUPED_KINDS = ("code", "ci")
-REFUSED_LANES = ("eng", "ci", "plan")
+REFUSED_LANES = ("eng", "ci", "plan", "expert")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
@@ -86,7 +87,7 @@ def _upstream(task, known):
     return set(seen)
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     lane_of = ports.swarm().naming.lane_of
 
     if lane_of(op["by"]) in REFUSED_LANES:
@@ -97,7 +98,7 @@ def apply(doc, op, ctx):
     return (_ungroup if op["op"] == "task_ungroup" else _group)(known, op, ctx)
 
 
-def _group(known, op, ctx):
+def _group(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: OpContext) -> bool:
     lead_id = op["item"].split("/")[1]
     if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
@@ -114,7 +115,7 @@ def _group(known, op, ctx):
     return True
 
 
-def _ungroup(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: Any) -> bool:
+def _ungroup(known: dict[str, dict[str, Any]], op: dict[str, Any], ctx: OpContext) -> bool:
     lead_id = op["item"].split("/")[1]
     if not known.get(lead_id, {}).get("group_members"):
         ctx.refused.append(f"{op['item']} leads no group")

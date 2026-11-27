@@ -22,7 +22,7 @@ done
 for carried in .coverage-shards/branch-*/*/.coverage*; do
     if [[ -s "$carried" ]]; then reports+=("$carried"); fi
 done
-trap 'kill "${lcov_pid:-}" "${table_pid:-}" 2> /dev/null || true' EXIT
+trap 'kill "${lcov_pid:-}" 2> /dev/null || true' EXIT
 lcov_log=$(mktemp)
 selected=()
 if [[ "${SCOPE:-}" == selected ]]; then selected=(--selected); fi
@@ -31,17 +31,19 @@ lcov_pid=$!
 flat=$(mktemp -d)
 flattening=()
 for index in "${!reports[@]}"; do
-    python "$(dirname "$0")/flatten.py" "${reports[$index]}" "$flat/.coverage.$index" &
+    report="${reports[$index]}"
+    taken="$(dirname "$report")/flat-$(basename "$report")"
+    if [[ -s "$taken" ]]; then
+        mv "$taken" "$flat/.coverage.$index"
+        continue
+    fi
+    python "$(dirname "$0")/flatten.py" "$report" "$flat/.coverage.$index" &
     flattening+=($!)
 done
 for pid in "${flattening[@]}"; do wait "$pid"; done
 python -m coverage combine --rcfile="$config" "$flat"/.coverage.*
-table=$(mktemp)
-python -m coverage report --rcfile="$config" > "$table" &
-table_pid=$!
-python -m coverage xml --rcfile="$config" -o coverage.xml
-wait "$table_pid"
-cat "$table"
+workers=$(python "$(dirname "$0")/../../scripts/ci_cpu_quota.py")
+python "$(dirname "$0")/parallel_xml.py" "$config" "$workers" coverage.xml
 lcov_status=0
 wait "$lcov_pid" || lcov_status=$?
 cat "$lcov_log"

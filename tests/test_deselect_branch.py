@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from tests import dep_manifest
+from scripts import dep_manifest
 
 pytestmark = pytest.mark.unit
 
