@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -14,6 +15,12 @@ pytestmark = pytest.mark.unit
 
 USED = "def used():\n    return 1\n\n\nprint(used())\n"
 PLANTED = USED + "\n\ndef planted():\n    return 2\n"
+DEAD_CODE_SCAN = (
+    'if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then\n'
+    '  cd "$RUNNER_TEMP/grader"\n'
+    "fi\n"
+    'python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
+)
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -264,9 +271,9 @@ def test_the_grader_refuses_another_vulture_version(tmp_path, capsys, monkeypatc
     assert out == f"::error::The dead code gate needs vulture {dead_code.VULTURE_VERSION}, found 0.0.1.\n"
 
 
-def _step():
+def _step() -> dict[str, Any]:
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
-    return next(step for step in steps if step.get("name") == "Hold dead code in hooks and scripts")
+    return next(step for step in steps if "python -m scripts.dead_code" in step.get("run", ""))
 
 
 def test_the_gate_runs_in_lint_graded_by_dev_against_the_base() -> None:
@@ -278,15 +285,11 @@ def test_the_gate_runs_in_lint_graded_by_dev_against_the_base() -> None:
     )
     step = _step()
     assert step["if"] == "${{ !cancelled() }}"
-    assert step["run"] == (
-        'if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then\n'
-        '  cd "$RUNNER_TEMP/grader"\n'
-        "fi\n"
-        'python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-    )
+    assert DEAD_CODE_SCAN in step["run"]
 
 
-def _run_step(tmp_path, workspace):
+def _run_step(tmp_path: Path, workspace: Path) -> subprocess.CompletedProcess[str]:
+    assert DEAD_CODE_SCAN in _step()["run"]
     (tmp_path / "grader").mkdir()
     _tree(tmp_path / "base", {"hooks/guard.py": USED})
     env = dict(
@@ -295,7 +298,7 @@ def _run_step(tmp_path, workspace):
         GITHUB_WORKSPACE=str(workspace),
         PATH=f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     )
-    return subprocess.run(["bash", "-e", "-c", _step()["run"]], env=env, cwd=_ROOT, capture_output=True, text=True)
+    return subprocess.run(["bash", "-e", "-c", DEAD_CODE_SCAN], env=env, cwd=_ROOT, capture_output=True, text=True)
 
 
 def test_before_dev_carries_the_grader_a_planted_unused_function_is_red(tmp_path):

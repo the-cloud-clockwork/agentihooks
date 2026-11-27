@@ -1,0 +1,14 @@
+{
+  "id": "lint-scans-run-together",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lint-scans-parallel",
+  "behaviour": "The lint job runs the wall clock marker, dead code and mapped feature test scans from the protected grader in one step, each in its own background subshell, so a failing scan never stops the other two; the step prints every scan's log, names every failed scan in one error annotation and passes only when all three pass. The static gate catalog holds that step as one lint gate with one plant.",
+  "seam": "the run text of the lint step holding the three scan commands, executed in the job shell against stub scan modules in a temporary grader, and scripts.ci_lab.static_gates.discover over the Tests workflow with the static plant catalog",
+  "tests": [
+    "tests/test_ci_gate_workflow.py::test_one_failing_lint_scan_turns_the_scans_red_while_every_scan_still_runs",
+    "tests/test_ci_gate_workflow.py::test_the_lint_scans_pass_when_every_scan_passes",
+    "tests/test_ci_gate_workflow.py::test_one_lint_step_runs_each_scan_in_its_own_background_subshell",
+    "tests/test_ci_gate_workflow.py::test_the_combined_lint_scans_step_names_every_failed_scan_and_no_other",
+    "tests/ci_lab/test_static_plants.py::test_one_static_gate_runs_the_three_lint_scans_with_one_plant"
+  ]
+}

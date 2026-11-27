@@ -16,6 +16,8 @@ PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 EXCLUSIONS = ROOT / "tests" / "ci_lab" / "static_gate_exclusions.json"
 NEEDS = {"step env", "secret", "checkout", "earlier step", "docker", "network"}
 UNSUPPLIED = {"step env"}
+LINT_SCANS = {"scripts.ci_wall_clock", "scripts.dead_code", "scripts.feature_map"}
+LINT_SCANS_GATE = "lint/run-the-wall-clock-dead-code-and-feature-map-scans-together"
 
 
 def gates() -> dict[str, StaticGate]:
@@ -92,9 +94,19 @@ def test_an_exclusion_names_what_the_lab_lacks() -> None:
     assert unsupplied == {name for name, entry in exclusions().items() if UNSUPPLIED & set(entry["needs"])}
 
 
+@pytest.mark.feature("lint-scans-run-together")
+def test_one_static_gate_runs_the_three_lint_scans_with_one_plant() -> None:
+    holding = [gate for gate in gates().values() if LINT_SCANS & set(gate.modules)]
+    assert [gate.name for gate in holding] == [LINT_SCANS_GATE]
+    assert LINT_SCANS <= set(holding[0].modules)
+    planted = [name for name, spec in plants().items() if spec["gate"] == LINT_SCANS_GATE]
+    assert planted == [LINT_SCANS_GATE.replace("/", ".")]
+
+
 @pytest.mark.feature("lab-dead-code-plant-reported")
 def test_the_dead_code_plant_adds_a_function_the_dead_code_gate_reports_on_this_tree(tmp_path: Path) -> None:
-    [edit] = plants()["lint.hold-dead-code-in-hooks-and-scripts"]["edits"]
+    [gate] = [gate.name for gate in gates().values() if "scripts.dead_code" in gate.modules]
+    [edit] = next(spec for spec in plants().values() if spec["gate"] == gate)["edits"]
     [planted] = re.findall(r"def (\w+)\(", edit["after"].removesuffix(edit["before"]))
     names = [path.relative_to(ROOT).as_posix() for path in size_limits.files(ROOT)]
     for name in names:
