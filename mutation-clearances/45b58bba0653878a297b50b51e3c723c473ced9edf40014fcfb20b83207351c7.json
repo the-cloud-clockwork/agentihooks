@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.xǁQueueǁdrain:99dbab59539eec90729ead146d7775648dbb0a1504534aaa0dc93e38c4ee5358": {
+    "reader": "standards_reader",
+    "reason": "head is None only for a missing hash; DRAIN then reads a nil state, removes the member and returns 0 before it touches KEYS[3], so the placeholder head key is never written."
+  }
+}

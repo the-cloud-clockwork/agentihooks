@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
 from tests.test_package_internal_names import LEAKS
@@ -49,6 +50,7 @@ LOOP = {
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["seat"] = lambda argv: seat_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:

@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__pull:2f197db46bef260a1d5d7072690d7eb663cbcf7f0a6444f839e34166ab73ce20": {
+    "reader": "standards_reader",
+    "reason": "The info placeholder in _pull is never read: a successful consumer_info assigns it before any read, NotFoundError with provision false re-raises, and with provision true the provision branch always reassigns it from add_consumer before the return expression; other exceptions propagate first. It exists only so the strict type checker sees info bound."
+  }
+}

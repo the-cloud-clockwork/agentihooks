@@ -1,0 +1,13 @@
+{
+  "id": "lab-scheduler-fail-skips-a-second-completed-post",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+  "behaviour": "A head that the CI lab scheduler release step refuses or retires more than once in one pass, because it holds two waiting entries under different lane names for the same head, gets its failed required check posted once. `Scheduler._fail`'s second post of the same head, gate and run key finds the check already completed and records that in the pass's action instead of posting again or raising the scheduler process out of the pass. A head behind the colliding one in the same pass is still looked at and gets its own check. A head refused in two different passes still gets a failed check in each, since each pass's run key differs and never collides.",
+  "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, with a real scripts.ci_lab.checks.Checks poster and a fake expander whose reachability check raises or cleanly returns unreachable for one head pushed under two waiting lanes due in the same pass",
+  "tests": [
+    "tests/ci_lab/test_scheduler_release.py::test_a_head_refused_from_two_waiting_entries_in_one_pass_posts_its_failed_check_once",
+    "tests/ci_lab/test_scheduler_release.py::test_a_pull_request_head_retired_from_two_waiting_entries_in_one_pass_posts_its_failed_check_once",
+    "tests/ci_lab/test_scheduler_release.py::test_a_head_refused_in_two_different_passes_still_posts_a_failed_check_in_each",
+    "tests/ci_lab/test_checks.py::test_a_move_that_is_not_forward_raises_its_own_type_and_the_other_refusals_do_not"
+  ]
+}

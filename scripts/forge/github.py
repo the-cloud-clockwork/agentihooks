@@ -1,6 +1,7 @@
 """GitHub pull requests read and commented on through the gh CLI."""
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from typing import Any
@@ -9,6 +10,8 @@ from scripts.forge.model import ChangeRequest, Check, ForgeError
 
 GH_TIMEOUT_SEC = 60
 FIELDS = "number,url,title,body,headRefOid,files,statusCheckRollup"
+SUBJECTS = '.commits[].commit.message | split("\\n")[0]'
+QUEUED = re.compile(r"\(#(\d+)\)\s*$")
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -35,6 +38,19 @@ class GitHubForge:
     def _api(self, path: str) -> Any:
         host, _, name = self.repo.partition("/")
         return json.loads(self._call(["gh", "api", "--hostname", host, f"repos/{name}/{path}"]))
+
+    def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
+        host, _, path = self.repo.partition("/")
+        done = self.run(
+            ["gh", "api", "--hostname", host, f"repos/{path}/compare/{base}...{head}", "--jq", SUBJECTS],
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SEC,
+        )
+        if done.returncode:
+            raise ForgeError(f"gh failed: {done.stderr.strip()}")
+        found = (QUEUED.search(line) for line in done.stdout.splitlines())
+        return tuple(dict.fromkeys(int(match.group(1)) for match in found if match))
 
     def read(self, number: int) -> ChangeRequest:
         raw = json.loads(self._gh(["pr", "view", str(number), "--json", FIELDS]))

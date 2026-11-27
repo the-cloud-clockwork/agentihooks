@@ -191,6 +191,15 @@ def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict
         journal.write(action, url, head, before, journal.groups(), errors)
 
 
+def _prioritized(priority: Callable[[], Any]) -> dict[str, Any]:
+    """The outcome of the optional priority step run after an accepted enqueue, or its error text under
+    ``priority_error``, so the accepted queue outcome still reaches the caller."""
+    try:
+        return {"priority": priority()}
+    except Exception as exc:
+        return {"priority_error": str(exc)}
+
+
 def operate(
     action: str,
     url: str,
@@ -220,7 +229,7 @@ def operate(
             variables = {"id": raw["id"], "head": raw["headRefOid"]}
             journaled(journal, "queue", url, raw["headRefOid"], lambda: graphql(QUEUE, variables, run))
             if priority is not None:
-                merged = {"priority": priority()}
+                merged = _prioritized(priority)
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
         journaled(journal, "dequeue", url, raw["headRefOid"], lambda: graphql(DEQUEUE, {"id": raw["id"]}, run))
