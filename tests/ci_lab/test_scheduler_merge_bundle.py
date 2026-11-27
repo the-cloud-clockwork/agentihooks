@@ -111,7 +111,6 @@ def test_bundle_returns_the_commit_with_its_parent_excluded_past_an_unrelated_st
     bundle_sha, bundle_ref = _git(store_b, "bundle", "list-heads", str(bundle_path)).split()
     assert bundle_sha == sha
 
-    # the parent is excluded as a prerequisite: a repository that lacks it refuses the bundle's own ref, naming it
     empty = tmp_path / "empty"
     _git(tmp_path, "init", "-q", "--bare", str(empty))
     refused = subprocess.run(
@@ -122,8 +121,6 @@ def test_bundle_returns_the_commit_with_its_parent_excluded_past_an_unrelated_st
     assert refused.returncode != 0
     assert parent in refused.stderr
 
-    # the commit itself is in the bundle: a repository that already holds the excluded parent takes it from no
-    # more than the bundle alone
     _git(satisfied, "fetch", "-q", str(bundle_path), f"{bundle_ref}:{bundle_ref}")
     assert _git(satisfied, "cat-file", "-t", sha).strip() == "commit"
     assert _git(store_b, "for-each-ref", "refs/lab-bundle/").strip() == ""
