@@ -11,7 +11,7 @@ from scripts.ci_mutation import stats_candidates
 pytest_plugins = ["pytester"]
 
 
-def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[str, list[str]]:
+def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute: bool = False) -> dict[str, list[str]]:
     root = pytester.path
     pytester.makepyfile(app="def target(value):\n    return value + 1\ndef other(value):\n    return value\n")
     pytester.makeini("[pytest]\nenable_assertion_pass_hook = true\n")
@@ -29,6 +29,10 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "def pytest_sessionfinish(session):\n"
         "    Path('selection.json').write_text(json.dumps(result))\n" + plugin
     )
+    if not execute:
+        items = pytester.getitems(root / "test_sample.py")
+        selected = stats_candidates.candidate_tests(items, root, {"app.py": [2]})
+        return {"original": [item.name for item in items], "selected": [item.name for item in selected]}
     result = pytester.runpytest_inprocess(
         "test_sample.py",
         "-q",
@@ -239,6 +243,22 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
             "    assert target(1) == 2\n",
             ["test_reaches"],
         ),
+        (
+            "class Dormant:\n"
+            "    def __init__(self):\n        target(1)\n"
+            "class Note:\n    value: Dormant\n"
+            "def test_unrelated():\n    assert True\n"
+            "def test_reaches():\n    assert target(1) == 2\n",
+            ["test_reaches"],
+        ),
+        (
+            "class Note:\n    value: target(1)\ndef test_annotation_import():\n    assert True\n",
+            ["test_annotation_import"],
+        ),
+        (
+            "def dormant(value: target(1)):\n    return value\ndef test_annotation_import():\n    assert True\n",
+            ["test_annotation_import"],
+        ),
     ],
     ids=[
         "direct",
@@ -266,6 +286,9 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "property-reach",
         "known-external-reassignment",
         "unrelated-file-methods",
+        "bare-annotation-is-not-construction",
+        "annotation-call-initialization",
+        "function-annotation-initialization",
     ],
 )
 def test_statistics_candidates_preserve_indirect_reach_and_order(
@@ -335,6 +358,7 @@ def test_statistics_candidates_ignore_unrelated_bound_hook_state(pytester: pytes
         "    def pytest_runtest_logreport(self, report):\n"
         "        self.calls[report.nodeid] = report.passed or self.calls.get(report.nodeid, False)\n"
         "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
+        execute=True,
     )
     assert result["selected"] == ["test_reaches"]
 
@@ -354,6 +378,7 @@ def test_statistics_candidates_stop_graph_work_after_known_reach(
     result = select(
         pytester,
         "def test_reaches():\n    import other\n    assert target(1) == 2\n",
+        execute=True,
     )
     assert result["selected"] == ["test_reaches"]
 
