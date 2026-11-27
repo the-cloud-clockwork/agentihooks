@@ -874,6 +874,22 @@ def test_a_late_task_event_for_a_closed_pull_request_lists_no_swarm() -> None:
 
 
 @pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_swarm_that_first_tracks_an_already_merged_pull_request_hears_one_release() -> None:
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.observe(Observation(URL, "merged", "a1"))
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    hub.track("late", URL)
+    hub.track("crew", URL)
+    hub.track("late", URL)
+    assert record(bus) == {"swarms": ["late"], "unreleased": ["late"]}
+    drain(consumer)
+    hub.announce(REPO, "release.published", "v2", {"tag": "v2"})
+    hub.announce(REPO, "release.published", "v3", {"tag": "v3"})
+    assert [(e.swarm, e.key) for e in drain(consumer)] == [("late", "v2")]
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
 def test_a_track_that_races_a_drop_leaves_its_swarm_listed() -> None:
     bus, hub, _ = setup()
     hub.track("crew", URL)

@@ -231,11 +231,15 @@ class Pulls:
                 return None
             return {**snapshot, "swarms": sorted([*snapshot["swarms"], swarm])}
 
-        _update(self._state, key(url), add)
-        stored = self._snapshot(url)
+        added = _update(self._state, key(url), add)
+        stored = self._snapshot(url) or {}
+        name = repository_key(url.rsplit("/pull/", 1)[0])
         if stored["state"] not in TERMINAL:
             self._index(stored["url"], True)
-            _update(self._state, repository_key(url.rsplit("/pull/", 1)[0]), partial(_joined, swarm))
+            _update(self._state, name, partial(_joined, swarm))
+        elif added is not None and stored["state"] == "merged":
+            _update(self._state, name, partial(_joined, swarm))
+            _update(self._state, name, partial(_merged, [swarm]))
 
     def observe(self, seen: Observation) -> None:
         now = self._clock()

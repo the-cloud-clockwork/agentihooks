@@ -17095,7 +17095,7 @@
       "id": "hub-repository-record-drops-closed-swarms",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-pull-tracker-drops-closed-swarms",
-      "behaviour": "The hub pull tracker keeps a swarm on a repository record only while it has an open tracked pull request there or a merged one no release has reached: a pull request that closes unmerged drops each of its swarms with nothing else open and nothing awaiting a release, a merge keeps its swarms until one release reaches them, a reopened or newly tracked pull request lists its swarm again, a late task event for a closed pull request lists nobody, a stored legacy list is read as both lists and clears at the next release, and a track that races a drop keeps its swarm listed.",
+      "behaviour": "The hub pull tracker keeps a swarm on a repository record only while it has an open tracked pull request there or a merged one no release has reached: a pull request that closes unmerged drops each of its swarms with nothing else open and nothing awaiting a release, a merge keeps its swarms until one release reaches them, a reopened or newly tracked pull request lists its swarm again, a late task event for a closed pull request lists nobody, a swarm that first tracks an already merged pull request awaits one release, a stored legacy list is read as both lists and clears at the next release, and a track that races a drop keeps its swarm listed.",
       "seam": "scripts.hub.pulls.Pulls.observe and scripts.hub.pulls.Pulls.announce",
       "tests": [
         "tests/hub/test_pulls.py::test_a_swarm_whose_last_pull_request_closed_unmerged_hears_nothing_from_its_repository",
@@ -17108,6 +17108,7 @@
         "tests/hub/test_pulls.py::test_a_reopened_pull_request_lists_its_dropped_swarm_again",
         "tests/hub/test_pulls.py::test_tracking_a_new_pull_request_lists_a_dropped_swarm_again",
         "tests/hub/test_pulls.py::test_a_late_task_event_for_a_closed_pull_request_lists_no_swarm",
+        "tests/hub/test_pulls.py::test_a_swarm_that_first_tracks_an_already_merged_pull_request_hears_one_release",
         "tests/hub/test_pulls.py::test_a_track_that_races_a_drop_leaves_its_swarm_listed"
       ]
     },
