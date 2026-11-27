@@ -709,6 +709,8 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
     sessions = codex_sessions_by_account()
     if route.startswith("named:"):
         reference = route.removeprefix("named:").removeprefix(CODEX_TOKEN_PREFIX)
+        if not reference:
+            raise RoutingError("named Codex authentication reference is empty")
         name = f"{CODEX_TOKEN_PREFIX}{reference}"
         pool = token_accounts({key: value for key, value in environ.items() if key == name})
         account, placement, _ = select(pool, {}, sessions, time.time(), reference, environ)

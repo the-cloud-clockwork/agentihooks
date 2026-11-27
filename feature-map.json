@@ -17103,7 +17103,8 @@
       ],
       "rules": [
         "native-default-shared-login",
-        "native-named-route-stripped"
+        "native-named-route-stripped",
+        "native-named-route-empty"
       ]
     }
   ],

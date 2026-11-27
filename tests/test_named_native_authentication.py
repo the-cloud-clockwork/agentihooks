@@ -95,12 +95,15 @@ def test_codex_named_reference_preserves_expiry_validation(remaining: int, monke
 
 
 @pytest.mark.feature("quick-native-authentication")
-def test_empty_codex_named_reference_never_enters_automatic_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("route", ["named:", "named:AH_CX_TOKEN_"])
+def test_empty_codex_named_reference_never_enters_automatic_selection(
+    route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def refuse(*args: object, **kwargs: object) -> None:
         pytest.fail("empty named reference entered account selection")
 
     monkeypatch.setattr(codex_router, "select", refuse)
     monkeypatch.setattr(codex_router, "codex_sessions_by_account", lambda: {})
     with pytest.raises(codex_router.RoutingError) as error:
-        codex_router._route({"AH_CX_TOKEN_alpha": "fixture"}, "named:", refuse, "")
+        codex_router._route({"AH_CX_TOKEN_alpha": "fixture"}, route, refuse, "")
     assert str(error.value) == "named Codex authentication reference is empty"

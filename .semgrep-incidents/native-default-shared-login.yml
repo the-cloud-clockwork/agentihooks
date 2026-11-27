@@ -22,3 +22,22 @@ rules:
     pattern-either:
       - pattern: forced($ENV, $ROUTE.removeprefix("named:"))
       - pattern: _route($ENV, $ROUTE.removeprefix("named:"), ...)
+  - id: native-named-route-empty
+    message: Reject an empty named reference before it can enter automatic account selection.
+    languages: [python]
+    severity: ERROR
+    paths:
+      include:
+        - /scripts/codex_router.py
+        - native-default-shared-login.py
+    patterns:
+      - pattern: select($POOL, $QUOTAS, $SESSIONS, $NOW, $REFERENCE, $ENV)
+      - pattern-inside: |
+          $REFERENCE = $ROUTE.removeprefix("named:").removeprefix($PREFIX)
+          ...
+      - pattern-not-inside: |
+          $REFERENCE = $ROUTE.removeprefix("named:").removeprefix($PREFIX)
+          ...
+          if not $REFERENCE:
+              raise ...
+          ...

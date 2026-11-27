@@ -32,3 +32,17 @@ def preserved_route(
     forced(environ, route)
     # ok: native-named-route-stripped
     _route(environ, route, None, "")
+
+
+def empty_reference(route: str, select: Callable[..., object], prefix: str) -> None:
+    reference = route.removeprefix("named:").removeprefix(prefix)
+    # ruleid: native-named-route-empty
+    select({}, {}, {}, 0, reference, {})
+
+
+def checked_reference(route: str, select: Callable[..., object], prefix: str) -> None:
+    reference = route.removeprefix("named:").removeprefix(prefix)
+    if not reference:
+        raise ValueError("empty reference")
+    # ok: native-named-route-empty
+    select({}, {}, {}, 0, reference, {})
