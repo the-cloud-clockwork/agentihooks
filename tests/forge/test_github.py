@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.forge import github
@@ -44,3 +46,34 @@ def test_github_posts_a_review_comment_with_the_body_on_standard_input() -> None
 def test_a_failed_gh_call_raises_with_its_error_text() -> None:
     with pytest.raises(ForgeError, match="^gh failed: boom$"):
         github.GitHubForge(REPO, Ran((1, ""))).read(7)
+
+
+def _pulls(*rows: tuple[int, str, str]) -> str:
+    return json.dumps([{"number": number, "base": {"ref": base}, "head": {"ref": head}} for number, base, head in rows])
+
+
+@pytest.mark.feature("forge-change-request-seam")
+def test_github_names_the_promotion_pull_request_that_produced_a_release_tag() -> None:
+    promotion = (41, "main", f"promotion/{'a' * 40}")
+    ran = Ran((0, json.dumps({"sha": "c0ffee"})), (0, _pulls((40, "dev", "engineer-1"), promotion)))
+    assert github.GitHubForge(REPO, ran).release_pull("v1.2.3") == 41
+    assert ran.calls == [
+        (["gh", "api", "--hostname", "github.com", "repos/o/r/commits/v1.2.3"], {"input": None, **CALLED}),
+        (["gh", "api", "--hostname", "github.com", "repos/o/r/commits/c0ffee/pulls"], {"input": None, **CALLED}),
+    ]
+
+
+@pytest.mark.feature("forge-change-request-seam")
+@pytest.mark.parametrize(
+    "rows",
+    [
+        (),
+        ((40, "dev", "promotion/x"),),
+        ((40, "main", "engineer-1"),),
+        ((40, "main", "promotion/x"), (41, "main", "promotion/y")),
+    ],
+)
+def test_a_release_tag_without_one_promotion_pull_request_is_refused(rows: tuple[tuple[int, str, str], ...]) -> None:
+    ran = Ran((0, json.dumps({"sha": "c0ffee"})), (0, _pulls(*rows)))
+    with pytest.raises(ForgeError, match="^no single promotion pull request produced tag v1.2.3$"):
+        github.GitHubForge(REPO, ran).release_pull("v1.2.3")

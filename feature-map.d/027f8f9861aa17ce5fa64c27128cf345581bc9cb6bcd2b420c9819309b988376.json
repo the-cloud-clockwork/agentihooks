@@ -1,0 +1,13 @@
+{
+  "id": "github-webhook-scoped-receiver",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2907",
+  "behaviour": "A GitHub webhook receiver on a scoped bus that does not provision answers a signed merge group delivery 200 and publishes merge_group.requested on each tracking swarm's scoped events stream, which the review pass reads, while it reads the hub-github repository index through an unscoped view of its bus config and closes both buses at exit. Unscoped, it keeps one bus.",
+  "seam": "scripts.hub.github_webhooks.main on a scoped config without provision, read from the tracking swarm's for_swarm events",
+  "rules": [
+    "receiver-pulls-without-unscoped-index"
+  ],
+  "tests": [
+    "tests/hub/test_github_webhooks.py::test_a_scoped_receiver_without_provision_publishes_a_merge_group_on_the_swarm_scoped_stream"
+  ]
+}

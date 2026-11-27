@@ -77,6 +77,21 @@ def test_the_summary_answers_without_building_the_whole_page_view(live: dict, mo
 
 
 @pytest.mark.feature("ledger-summary-read")
+def test_a_summary_past_the_reply_limit_answers_resource_too_large_with_the_export_message(
+    live: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored(monkeypatch, document())
+    monkeypatch.setattr(ledger_server, "SUMMARIES", {})
+    status, whole = request(live, "GET", "summary")
+    assert status == 200
+    monkeypatch.setattr(resources, "MAX_REPLY", resources.reply_size(whole) - 1)
+    assert request(live, "GET", "summary") == (
+        413,
+        {"error": {"code": "resource_too_large", "message": "Use the explicit export operation for this resource"}},
+    )
+
+
+@pytest.mark.feature("ledger-summary-read")
 def test_an_open_first_page_answers_without_building_the_whole_page_view(
     live: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:

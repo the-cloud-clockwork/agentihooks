@@ -512,6 +512,9 @@ def _take(
         if reservation.primary_reserved(found, week_left, os.environ):
             held.append(f"{found or number} reserved at {week_left:.0f}% of the week left")
             continue
+        if week_left <= 100.0 - reservation.MASTER_LEAVES:
+            held.append(f"{found} drained")
+            continue
         with _locked(root(number)) as folder:
             try:
                 epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]

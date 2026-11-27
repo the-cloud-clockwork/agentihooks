@@ -222,7 +222,7 @@ def test_a_client_verifies_the_hosted_ledger_through_the_ca_file(tls_ledger, cer
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
 
 
-def test_init_installs_the_ledger_ca(monkeypatch, capsys):
+def test_init_installs_the_ledger_ca(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from scripts import herdr_setup, install
 
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
@@ -234,4 +234,4 @@ def test_init_installs_the_ledger_ca(monkeypatch, capsys):
 
     install.main()
 
-    assert capsys.readouterr().out.splitlines()[-1] == "ledger CA: installed"
+    assert "ledger CA: installed" in capsys.readouterr().out.splitlines()

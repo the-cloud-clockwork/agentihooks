@@ -30,7 +30,7 @@ class Placement:
 
 
 def binary() -> str | None:
-    return shutil.which("herdr")
+    return shutil.which("herdr") or shutil.which("herdr", path=str(Path.home() / ".local" / "bin"))
 
 
 def _cli(args: list[str], environ: dict[str, str]) -> dict[str, Any]:
