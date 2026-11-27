@@ -57,7 +57,7 @@ from scripts.ci_lab import (
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output, PostRefused, Token
+from scripts.ci_lab.checks import Checks, MoveRefused, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit, served, serves
@@ -1130,12 +1130,15 @@ class Scheduler:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade."""
+        retried, since the head keeps no grade. A head already refused or retired once in this pass finds its
+        required check already completed and that is recorded instead of posted again."""
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
         except (GitAuthRefused, PostRefused, OSError) as refusal:
             return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        except MoveRefused:
+            return [f"the failed {REQUIRED} check of {request.head} was already posted in this pass"]
         return []
 
     def _retire(self, request: GradeRequest, now_ms: int) -> str:

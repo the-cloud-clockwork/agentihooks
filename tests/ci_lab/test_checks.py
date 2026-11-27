@@ -13,7 +13,7 @@ import requests
 
 from scripts import github_app
 from scripts.ci_lab import checks, contract, metrics
-from scripts.ci_lab.checks import Checks, Dispatches, Output, PostRefused, Transition
+from scripts.ci_lab.checks import Checks, Dispatches, MoveRefused, Output, PostRefused, Transition
 from scripts.ci_lab.units import Unit
 
 HEAD = "a" * 40
@@ -162,6 +162,27 @@ def test_a_check_run_never_moves_back_and_a_conclusion_comes_only_with_completed
     with pytest.raises(ValueError, match=refusal):
         poster.post(HEAD, "lint", status, conclusion, OUTPUT, False)
     assert request.call_count == len(steps)
+
+
+@pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
+def test_a_move_that_is_not_forward_raises_its_own_type_and_the_other_refusals_do_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}))
+    poster.post(HEAD, "lint", "completed", "failure", OUTPUT, False)
+    with pytest.raises(MoveRefused, match=FORWARD) as forward:
+        poster.post(HEAD, "lint", "completed", "failure", OUTPUT, False)
+    assert isinstance(forward.value, ValueError)
+    with pytest.raises(ValueError, match="Unknown check run status") as unknown:
+        poster.post(HEAD, "x", "waiting", None, OUTPUT, False)
+    assert not isinstance(unknown.value, MoveRefused)
+    with pytest.raises(ValueError, match=CONCLUDED) as concluded:
+        poster.post(HEAD, "shadow/lint", "completed", None, OUTPUT, False)
+    assert not isinstance(concluded.value, MoveRefused)
+    with pytest.raises(ValueError, match="Unknown check run conclusion") as conclusion:
+        poster.post(HEAD, "-shadow/lint", "completed", "stale", OUTPUT, False)
+    assert not isinstance(conclusion.value, MoveRefused)
+    assert request.call_count == 1
 
 
 def test_a_new_grade_run_or_head_opens_a_fresh_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
