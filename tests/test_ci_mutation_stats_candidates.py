@@ -16,20 +16,32 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
     pytester.makepyfile(app="def target(value):\n    return value + 1\ndef other(value):\n    return value\n")
     pytester.makeini("[pytest]\nenable_assertion_pass_hook = true\n")
     pytester.makepyfile(test_sample="import pytest\nfrom app import target\n" + source)
+    scope = root / "changed-lines.json"
+    scope.write_text(json.dumps({"app.py": {"lines": [2]}}))
     pytester.makeconftest(
-        "import json\nfrom pathlib import Path\n"
-        f"from {stats_candidates.__name__} import candidate_tests\n"
+        "import json\nimport pytest\nfrom pathlib import Path\n"
         "result = {}\n"
+        "@pytest.hookimpl(wrapper=True)\n"
         "def pytest_collection_modifyitems(config, items):\n"
         "    result['original'] = [item.name for item in items]\n"
-        "    items[:] = candidate_tests(items, Path.cwd(), {'app.py': [2]})\n"
+        "    yield\n"
         "    result['selected'] = [item.name for item in items]\n"
         "def pytest_sessionfinish(session):\n"
         "    Path('selection.json').write_text(json.dumps(result))\n" + plugin
     )
-    result = pytester.runpytest_inprocess("test_sample.py", "-q", "-p", "no:cacheprovider")
+    result = pytester.runpytest_inprocess(
+        "test_sample.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        stats_candidates.__name__,
+        f"--mutation-stats-scope={scope}",
+    )
     assert result.ret == pytest.ExitCode.OK, result.stdout.str()
-    return json.loads((root / "selection.json").read_text())
+    report: dict[str, list[str]] = json.loads((root / "selection.json").read_text())
+    result.assert_outcomes(passed=len(report["selected"]), deselected=len(report["original"]) - len(report["selected"]))
+    return report
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")
@@ -163,6 +175,28 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         ),
         (
             "class Helper:\n"
+            "    __slots__ = ('value',)\n"
+            "    def __init__(self):\n        self.value = target(1)\n"
+            "def test_slotted():\n    assert Helper().value == 2\n",
+            ["test_slotted"],
+        ),
+        (
+            "from pathlib import Path\n"
+            "Path('boot.py').write_text(\"from app import target\\ndef export(name):\\n    if name == 'missing':\\n        return target(1)\\n    raise AttributeError(name)\\n__getattr__ = export\\n\")\n"
+            "from boot import missing\n"
+            "def test_assigned_export():\n    assert missing == 2\n",
+            ["test_assigned_export"],
+        ),
+        (
+            "from pathlib import Path\n"
+            "Path('exports.py').write_text(\"from app import target\\ndef export(name):\\n    if name == 'missing':\\n        return target(1)\\n    raise AttributeError(name)\\n__all__ = ['export']\\n\")\n"
+            "Path('boot.py').write_text('from exports import *\\n__getattr__ = export\\n')\n"
+            "from boot import missing\n"
+            "def test_star_export():\n    assert missing == 2\n",
+            ["test_star_export"],
+        ),
+        (
+            "class Helper:\n"
             "    def __enter__(self):\n        return target(1)\n"
             "    def __exit__(self, *args):\n        return False\n"
             "def test_context():\n    with Helper() as value:\n        assert value == 2\n",
@@ -215,6 +249,9 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "conditional-reassignment",
         "child-module-initialization",
         "constructor-reach",
+        "slotted-class",
+        "assigned-dynamic-export",
+        "star-assigned-dynamic-export",
         "context-manager-reach",
         "property-reach",
         "known-external-reassignment",
