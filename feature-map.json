@@ -637,7 +637,7 @@
         "tests/ci_lab/test_scheduler_fetch_timeout.py::test_tick_holds_a_hanging_fetch_and_continues_with_the_next_head",
         "tests/ci_lab/test_scheduler_fetch_timeout.py::test_plant_names_a_timed_out_merge_base_and_continues_intake"
       ],
-      "rules": [".semgrep-incidents/lab-scheduler-mirror-without-fetch-timeout.yml"]
+      "rules": ["lab-scheduler-mirror-without-fetch-timeout"]
     },
     {
       "id": "lab-plant-push-intake",
