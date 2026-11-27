@@ -333,6 +333,33 @@ rules in settings still apply to the rewritten input.
 PostToolUse does not fire for tools that fail, so a `post` condition never sees
 failed calls.
 
+## First read for seated sessions
+
+The package supplies `pre-any-first_read.sh`, `post-bash-first_read_mark.py`
+and `start-first_read_reset.py` on Claude Code and Codex. They apply to swarm
+members and quick seats; standalone sessions pass through.
+
+The `first-read` gate defaults to `observe`. Before a session runs
+`agentihooks seat brief`, ordinary calls produce a would-be denial naming that
+command. `enforce` blocks those calls. Seat brief, the mounted profile canary,
+the launch opening prompt Read, ToolSearch and condition tools remain exempt.
+Codex shell names are normalized to Bash before the conditions run.
+
+A completed successful brief writes `AGENTIHOOKS_HOME/first-read/<session-id>`;
+the default home is `~/.agentihooks`. A failed or still-running command leaves
+the session unread. SessionStart with `source=compact` clears only that session's
+marker. The pre condition exits in Bash before starting Python for standalone
+sessions and for sessions whose marker already exists.
+
+SessionStart also caches resolved seat membership under
+`first-read/.members/<session-id>`, so a swarm identity supplied by the session
+registry follows the same fast path as one supplied by environment variables.
+
+Use the existing gate controls to select `first-read-gate=off` on a swarm.
+`AGENTIHOOKS_GATE_FIRST_READ=off` selects off when the swarm configuration does
+not supply a mode. Changing the default to enforce is a separate rollout after
+the observe log is checked.
+
 ## Performance
 
 Which conditions fire is answered from an index cached at

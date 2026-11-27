@@ -7,6 +7,7 @@
 /scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt
 /scripts/ci_lab/checks.py @nestorcolt
+/scripts/ci_lab/discovery_parity.py @nestorcolt
 /scripts/feature_map.py @nestorcolt
 /scripts/feature_checks/ @nestorcolt
 /feature-map.json @nestorcolt

@@ -243,9 +243,9 @@ def _workflow():
 @pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
 def test_dependency_audit_is_a_lint_step_graded_by_the_base() -> None:
     jobs = _workflow()["jobs"]
-    job = jobs["lint"]
+    job = jobs["lint-actions"]
     assert "dependency-audit" not in jobs
-    assert "lint" in jobs["gate-required"]["needs"]
+    assert "lint-actions" in jobs["gate-required"]["needs"]
     assert job["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -272,7 +272,7 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base() -> None:
 
 
 def test_dependency_audit_refuses_a_base_without_its_script(tmp_path):
-    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint"]["steps"]}
+    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint-actions"]["steps"]}
     grade = steps["Fail on known vulnerabilities new against the base"]
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "ci_dependency_audit.py").write_text(

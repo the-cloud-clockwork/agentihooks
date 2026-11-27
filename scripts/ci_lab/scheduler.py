@@ -46,6 +46,7 @@ from scripts.ci_lab import (
     control,
     evidence,
     expand_tests,
+    git_auth,
     interaction,
     lease_api,
     metrics,
@@ -56,16 +57,16 @@ from scripts.ci_lab import (
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output, PostRefused
+from scripts.ci_lab.checks import Checks, MoveRefused, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
-from scripts.ci_lab.intake import GradeRequest, admit
+from scripts.ci_lab.intake import GradeRequest, admit, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
-from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
+from scripts.ci_lab.outcomes import DROPPED, FAILED, PASSED, UNGRADED
 from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
-from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -76,7 +77,7 @@ from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer, Delivery
-from scripts.github_app import GitAuthRefused
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 from scripts.swarm import metrics_outbox
 
 __all__ = [
@@ -120,14 +121,25 @@ TREES = f"{PREFIX}tree:"
 ORIGINS = f"{PREFIX}origins"
 MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
 GROUPS_TIMEOUT_S = 30.0
-UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
+NEUTRAL = "neutral"
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")
 GRADED_EVENTS = frozenset({"merge_group", "pull_request"})
-QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count")
-PULL_REQUIRED = ("select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock")
+QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count", "collect")
+PULL_REQUIRED = (
+    "select",
+    "collect",
+    "test-count",
+    "lint",
+    "lint-actions",
+    "type-gate",
+    "docs",
+    "semgrep",
+    "sonar",
+    "writer-lock",
+)
 SCOPED = {"full": ("split", "unit", "shard-check"), "selected": ("unit-selected",)}
 SCOPES = frozenset({"full", "selected", "none"})
 UNIT_JOBS = ("unit", "unit-lost", "unit-rerun")
@@ -141,7 +153,7 @@ STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
 MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
-PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
+PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "lint-actions", "semgrep", "test-count", "collect"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
@@ -156,7 +168,10 @@ FETCH_MS = 100
 INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+LOOKED_AT_PER_PASS = 24
+DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
+CUT_SHORT_STARTS = 5
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
@@ -339,8 +354,9 @@ class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
     the job outputs and flags the `Gate — Required` rules read, the dev commit of the dependency manifest its test
     units are keyed on, empty when it keys none, the authoritative gates a hotfix or pull request grade runs no unit
-    of, each posted as a skipped check, and the gates the grader's delivery.yaml lists as authoritative for the head's
-    class."""
+    of, each posted as a skipped check, the gates the grader's delivery.yaml lists as authoritative for the head's
+    class, and the merge base of the head and its base that its static units diff against, empty when the base is
+    that merge base."""
 
     tree: str
     grader: str
@@ -351,6 +367,8 @@ class Plan:
     manifest: str = ""
     idle: frozenset[str] = frozenset()
     authoritative: frozenset[str] = frozenset()
+    merge_base: str = ""
+    required: tuple[str, ...] = ()
 
 
 class Inbox(Protocol):
@@ -390,6 +408,10 @@ class Poster(Protocol):
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         ...
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of a check run the grade holds no id of, so its next post creates it."""
+        ...
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
         ...
@@ -419,11 +441,15 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit, the served repositories by slug and
+    how long a settled job's record outlives its settling; with no set of served repositories every repository is
+    served."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    served: frozenset[str] | None = None
+    retention_ms: int = RETENTION_MS
 
 
 @dataclass
@@ -446,8 +472,9 @@ class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
     dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
-    posts as lab/<gate> rather than lab-shadow/<gate>, and the clock before which it posts nothing after GitHub refused
-    one of its posts."""
+    posts as lab/<gate> rather than lab-shadow/<gate>, the clock before which it posts nothing after GitHub refused
+    one of its posts, and the merge base of its head and base that a worker checks out as its base, empty when the
+    base is that merge base."""
 
     run: str
     repo: str
@@ -471,6 +498,8 @@ class State:
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
+    merge_base: str = ""
+    required: list[str] = field(default_factory=list[str])
 
 
 def _parse(raw: str | bytes) -> State:
@@ -478,6 +507,12 @@ def _parse(raw: str | bytes) -> State:
     store."""
     data = json.loads(raw)
     data["flags"] = Flags(**data["flags"])
+    if "required" not in data:
+        data["required"] = (
+            [gate for gate in data["gates"] if gate not in (FAIL_FAST, *UNIT_JOBS)]
+            if data["tier"] < Priority.PROMOTION
+            else []
+        )
     for slot in data["units"].values():
         slot.pop("manifest", None)
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
@@ -574,10 +609,13 @@ def job_id(head: str, unit: Unit) -> str:
 
 
 def _verdict(slots: Sequence[Slot]) -> str | None:
-    """Return success or failure once every slot is final, else None."""
+    """Return a gate's conclusion once every slot is final, else None: success when every unit passed, failure when
+    a unit failed, and neutral when the only units without a pass ended without a verdict."""
     if not all(slot.outcome for slot in slots):
         return None
-    return "success" if all(slot.outcome == PASSED for slot in slots) else "failure"
+    if all(slot.outcome == PASSED for slot in slots):
+        return "success"
+    return NEUTRAL if all(slot.outcome == PASSED or slot.outcome in UNGRADED for slot in slots) else "failure"
 
 
 def _target(state: State, refs: Sequence[str]) -> tuple[str, str | None]:
@@ -600,14 +638,44 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
     return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
+def _scope(state: State) -> str:
+    return state.outputs.get("select", {}).get("scope", "none")
+
+
+def _lost(slots: Sequence[Slot]) -> str:
+    """Return the line the summary of a check that concludes neutral adds for its units that ended without a
+    verdict: how many, their keys and that a rerequest of the check grades them again."""
+    keys = [slot.key for slot in slots if slot.outcome in UNGRADED]
+    listed = ", ".join(keys)
+    return (
+        f"\n{len(keys)} units ended without a verdict, lost by the lab: {listed}. "
+        "A rerequest of this check grades them again."
+    )
+
+
+def _concluded(state: State) -> str:
+    """Return the required check's conclusion over the grade's gates by its tier's rules: success when they pass,
+    neutral when they would pass had each neutral gate passed, and failure otherwise."""
+    event, needs = EVENTS[state.tier], _needs(state)
+    if fold(event, needs, state.flags):
+        return "success"
+    granted = {
+        gate: {**record, "result": "success"} if record["result"] == NEUTRAL else record
+        for gate, record in needs.items()
+    }
+    return NEUTRAL if fold(event, granted, state.flags) else "failure"
+
+
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
+    if not state.superseded and state.required != list(_frame_required(state.tier, _scope(state))):
+        return {}
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
     status, conclusion = _target(state, list(state.units))
     if status == "completed" and not state.superseded:
-        conclusion = "success" if fold(EVENTS[state.tier], _needs(state), state.flags) else "failure"
+        conclusion = _concluded(state)
     targets[REQUIRED] = (status, conclusion)
     return targets
 
@@ -637,6 +705,8 @@ class _Quiet:
     relayed: bool
     hold: int
     final: bool
+    required: tuple[str, ...]
+    scope: str
 
 
 def _quiet(state: State, revision: int) -> _Quiet:
@@ -654,13 +724,22 @@ def _quiet(state: State, revision: int) -> _Quiet:
         relayed=state.ref.startswith(GRADE_REFS),
         hold=state.hold,
         final=all(slot.outcome for slot in slots),
+        required=tuple(state.required),
+        scope=_scope(state),
     )
+
+
+def _revision(revisions: Mapping[str, str], run: str) -> int:
+    """Return a live grade's stored revision, a missing one reading as 0."""
+    return int(revisions.get(run, 0))
 
 
 def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: int) -> bool:
     """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
     start is leased, given their states in waiting then started order, and either a moved check run waits out its
     hold or nothing moved and the grade cannot close."""
+    if quiet.required != _frame_required(quiet.tier, quiet.scope):
+        return False
     if any(state is None or state in FINISHED for state in states) or "leased" in states[: len(quiet.waiting)]:
         return False
     if quiet.moved:
@@ -695,6 +774,11 @@ def summary(state: State) -> dict[str, Any]:
     }
 
 
+class CutShort(ValueError):
+    """A head whose start was begun and not finished `CUT_SHORT_STARTS` times in a row, by a process stopped or
+    killed while it checked or expanded the head."""
+
+
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
@@ -715,14 +799,22 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
+        self._undrained: list[str] = []
+        self._drained = False
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
-        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
-        live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
+        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, drain a batch
+        of the old global done set, refresh the live grade summaries, enqueue the held units the budget admits, then
+        advance every live grade, counting each finished job in the most urgent tier of the live grades holding it."""
         swept = self._sweep()
-        actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._drain(),
+        ]
         self._survey()
         actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
@@ -864,7 +956,7 @@ class Scheduler:
         revisions, *present = pipe.execute()
         quiets: dict[str, _Quiet] = {}
         for run in (run for run, exists in zip(runs, present) if exists):
-            revision = int(revisions.get(run, 0))
+            revision = _revision(revisions, run)
             if (quiet := self._quiets.get(run)) is not None and quiet.revision == revision:
                 quiets[run] = quiet
             elif (state := self.grade(run)) is not None:
@@ -881,6 +973,9 @@ class Scheduler:
         fixes = self.ports.hotfixes() if heads else frozenset[str]()
         actions: list[str] = []
         for head in heads:
+            if not serves(self.settings.served, head.event.repo):
+                actions.append(f"ignored {head.event.head}: {head.event.repo} is not a served repository")
+                continue
             if head.event.action == CLOSED:
                 actions.append(self._close(head.event, head.lane))
                 continue
@@ -894,6 +989,9 @@ class Scheduler:
                     continue
             if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
+            if stale_heads.branchless(request.tier, head.lane, request.head, head.ref):
+                actions.append(f"ignored {request.head}: a push that named no branch asks for no grade")
+                continue
             actions.append(self._hold(request, head.lane, head.ref, now_ms))
         return actions
 
@@ -994,16 +1092,22 @@ class Scheduler:
         return [f"dropped the waiting head {waiting['request']['head']}"]
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
-        the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
-        place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
-        runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
-        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
-        required check run. Each of these takes a place, since its expansion ran on the pass."""
+        """Look at up to `LOOKED_AT_PER_PASS` held heads whose quiet window ended, except one a pause of its class
+        holds: the most urgent class first and the longest waiting first within a class. A head still quiet or paused
+        takes no place among those looked at, and the rest wait for a later pass, so every pass reaches admission.
+        A head whose manifest fetch still runs off the pass keeps its place and its window for the next pass; one
+        whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
+        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
+        the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
+        next waiting head instead of stalling on it. A head keeps its waiting entry while it is checked and
+        expanded, with the count of starts begun and not finished in it, so a pass stopped inside a start finds the
+        head again; a head that already counts `CUT_SHORT_STARTS` such starts is refused instead of started.
+        Starting a head, retiring it, refusing it or dropping it after its last expansion failure each take one of
+        those `STARTS_PER_PASS` places, since each is the pass's last word on that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
+        looked_at = 0
         for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
@@ -1012,36 +1116,52 @@ class Scheduler:
                 pauses, CLASSES[request.tier], request.head, held["lane"]
             ):
                 continue
-            started += 1
-            self.client.hdel(WAITING, name)
+            looked_at += 1
             ref = held.get("ref", "")
-            try:
-                actions.append(self._start(request, held["lane"], ref, now_ms))
-            except FetchPending as error:
-                self.client.hset(WAITING, name, raw)
-                actions.append(f"holding {request.head}: {error}")
-            except FetchUnanswered as error:
-                fetches = held.get("unanswered", 0) + 1
-                if fetches < UNANSWERED_FETCHES:
-                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+            starts = held.get("starts", 0)
+            if starts >= CUT_SHORT_STARTS:
+                started += 1
+                self.client.hdel(WAITING, name)
+                refusal = CutShort(f"{starts} starts of {request.head} in a row were begun and not finished")
+                actions.append(f"cannot expand {request.head}: {refusal}")
+                actions.extend(self._refuse(request, ref, refusal, now_ms))
+            else:
+                self.client.hset(WAITING, name, json.dumps({**held, "starts": starts + 1}))
+                try:
+                    actions.append(self._start(request, held["lane"], ref, now_ms, name))
+                    started += 1
+                except FetchPending as error:
+                    self.client.hset(WAITING, name, raw)
                     actions.append(f"holding {request.head}: {error}")
-                else:
-                    refusal = FetchRefused(
-                        f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
-                    )
-                    actions.append(f"cannot expand {request.head}: {refusal}")
-                    actions.extend(self._refuse(request, ref, refusal, now_ms))
-            except (
-                subprocess.CalledProcessError,
-                ValueError,
-                KeyError,
-                SyntaxError,
-                yaml.YAMLError,
-                jsonschema.ValidationError,
-            ) as error:
-                actions.append(f"cannot expand {request.head}: {error}")
-                actions.extend(self._refuse(request, ref, error, now_ms))
-            if started == STARTS_PER_PASS:
+                except FetchUnanswered as error:
+                    fetches = held.get("unanswered", 0) + 1
+                    if fetches < UNANSWERED_FETCHES:
+                        self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+                        actions.append(f"holding {request.head}: {error}")
+                    else:
+                        started += 1
+                        self.client.hdel(WAITING, name)
+                        refusal = FetchRefused(
+                            f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
+                        )
+                        actions.append(f"cannot expand {request.head}: {refusal}")
+                        actions.extend(self._refuse(request, ref, refusal, now_ms))
+                except (
+                    subprocess.CalledProcessError,
+                    ValueError,
+                    KeyError,
+                    SyntaxError,
+                    yaml.YAMLError,
+                    jsonschema.ValidationError,
+                ) as error:
+                    started += 1
+                    self.client.hdel(WAITING, name)
+                    actions.append(f"cannot expand {request.head}: {error}")
+                    actions.extend(self._refuse(request, ref, error, now_ms))
+                except Exception:
+                    self.client.hdel(WAITING, name)
+                    raise
+            if started == STARTS_PER_PASS or looked_at == LOOKED_AT_PER_PASS:
                 break
         return actions
 
@@ -1057,12 +1177,15 @@ class Scheduler:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade."""
+        retried, since the head keeps no grade. A head already refused or retired once in this pass finds its
+        required check already completed and that is recorded instead of posted again."""
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
         except (GitAuthRefused, PostRefused, OSError) as refusal:
             return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        except MoveRefused:
+            return [f"the failed {REQUIRED} check of {request.head} was already posted in this pass"]
         return []
 
     def _retire(self, request: GradeRequest, now_ms: int) -> str:
@@ -1117,7 +1240,7 @@ class Scheduler:
         for repo in sorted({origin["repo"] for origin in groups.values()}):
             try:
                 carried = self.ports.expander.groups(repo)
-            except subprocess.SubprocessError as error:
+            except (subprocess.SubprocessError, GitAuthRefused) as error:
                 actions.append(f"cannot list the merge groups of {repo}: {error}")
                 continue
             for run, origin in groups.items():
@@ -1132,11 +1255,14 @@ class Scheduler:
         return actions
 
     def _sweep(self) -> list[str]:
-        """Retire the stale pull request grades once, on the first pass of a scheduler that holds a listing of the
-        heads still wanted; the listing port is read on that pass, so a scheduler built with no ports builds."""
+        """Retire, once, on the first pass of a scheduler, the promotion work of pushes that named no branch, then the
+        stale pull request grades when the scheduler holds a listing of the heads still wanted; the listing port is
+        read on that pass, so a scheduler built with no ports builds."""
         swept, self._swept = self._swept, True
-        wanted = None if swept else self.ports.wanted
-        return [] if wanted is None else self._retire_heads(wanted)
+        if swept:
+            return []
+        wanted = self.ports.wanted
+        return [*self._retire_pushes(), *([] if wanted is None else self._retire_heads(wanted))]
 
     def _retire_heads(self, wanted: Callable[[str], frozenset[str]]) -> list[str]:
         """Close every live pull request grade with no grade ref whose head is neither an open pull request head nor
@@ -1164,22 +1290,64 @@ class Scheduler:
             actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
         return [*actions, *(stale_heads.listed(repo, len(heads[repo]), origins, gone, units[repo]) for repo in heads)]
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
+    def _retire_pushes(self) -> list[str]:
+        """Drop every waiting promotion head and close every live promotion grade a push that named no branch asked
+        for, which holds its own head as its lane and no grade ref: the run is forgotten and the pending jobs of its
+        head are dropped unless another live grade grades that head. Nothing is posted. Each promotion grade
+        document is read alone, once: of a grade it retires only the head is kept, and of a grade it keeps the summary
+        at the revision stored before the read. One line counts the waiting heads dropped, the grades retired and the
+        pending units dropped; a pass that finds none adds no line."""
+        held = {name: json.loads(raw) for name, raw in self.client.hgetall(WAITING).items()}
+        waiting = sorted(
+            name
+            for name, entry in held.items()
+            if stale_heads.branchless(
+                entry["request"]["tier"], entry["lane"], entry["request"]["head"], entry.get("ref", "")
+            )
+        )
+        if waiting:
+            self.client.hdel(WAITING, *waiting)
+        origins = self._origins()
+        revisions = self.client.hgetall(REVISIONS)
+        gone: dict[str, str] = {}
+        for run in sorted(origins):
+            grade = self.grade(run) if origins[run]["tier"] == Priority.PROMOTION else None
+            if grade is not None and stale_heads.branchless(grade.tier, grade.lane, grade.head, grade.ref):
+                gone[run] = grade.head
+            elif grade is not None:
+                self._quiets[run] = _quiet(grade, _revision(revisions, run))
+        kept = {origin["head"] for run, origin in origins.items() if run not in gone}
+        dropped = 0
+        for run, head in sorted(gone.items()):
+            dropped += 0 if head in kept else len(self.queue.drop(head))
+            self._forget(run)
+        return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
+
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
-        to a grade ref, which the lab remote serves."""
+        to a grade ref, which the lab remote serves. The waiting field of `name` comes out of the hash only once this
+        start cannot be repeated: before the retirement, and right after the expansion returns, before the first
+        grade write."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
+            self.client.hdel(WAITING, name)
             return self._retire(request, now_ms)
         plan = self.ports.expander.expand(request)
+        self.client.hdel(WAITING, name)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
-        if self.client.exists(GRADES + run):
+        carried: dict[str, str] = {}
+        if existing := self.grade(run):
             if not request.bypass_negative:
-                self._take_lane(request, lane, run)
-                return f"already graded {run}"
+                matching = self._matching(request, lane, run, plan.required)
+                if matching is not None:
+                    self._take_lane(request, lane, matching)
+                    return f"already graded {matching}"
+            if existing.required != list(plan.required):
+                carried = self._replace_frame(existing)
             run = f"{run}-{now_ms}"
-        carried = self._supersede(request, lane)
+        carried.update(self._supersede(request, lane))
         state = State(
             run=run,
             repo=request.repo,
@@ -1196,6 +1364,8 @@ class Scheduler:
             manifest=plan.manifest,
             idle=sorted(plan.idle),
             authoritative=sorted(plan.authoritative),
+            merge_base=plan.merge_base,
+            required=list(plan.required),
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1212,6 +1382,22 @@ class Scheduler:
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
 
+    def _matching(self, request: GradeRequest, lane: str, run: str, required: tuple[str, ...]) -> str | None:
+        latest = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
+        for candidate in dict.fromkeys((run, latest)):
+            if candidate is None or not (candidate == run or candidate.startswith(f"{run}-")):
+                continue
+            state = self.grade(candidate)
+            if state is not None and not state.superseded and state.required == list(required):
+                return candidate
+        return None
+
+    def _replace_frame(self, state: State) -> dict[str, str]:
+        state.superseded = True
+        self.save(state)
+        self._drop(state.run)
+        return {ref: slot.job for ref, slot in state.units.items() if slot.job and not (slot.outcome or slot.held)}
+
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
         """Return the passing merge group grade of the tree a push grade grades, if one exists."""
         if request.tier != Priority.PROMOTION:
@@ -1223,7 +1409,11 @@ class Scheduler:
         """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
-        if old is None or old.head == request.head:
+        if old is None:
+            return {}
+        if old.head == request.head:
+            if old.required != list(_frame_required(old.tier, _scope(old))):
+                return self._replace_frame(old)
             return {}
         dropped = set(self.queue.supersede(old.head))
         old.superseded = True
@@ -1269,11 +1459,29 @@ class Scheduler:
         actions: list[str] = []
         for expired in self.queue.expired(now_ms):
             job = self.queue.job(expired)
-            if job is not None and (state := self.queue.reap(job, now_ms, self.settings.retries.lost)):
+            if job is not None and (
+                state := self.queue.reap(job, now_ms, self.settings.retries.lost, self.settings.retention_ms)
+            ):
                 self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
                 release(self.queue, self.ports.pods, job.worker)
         return actions
+
+    def _drain(self) -> list[str]:
+        """Give the jobs the old global done set names the retention, at most DRAINED_PER_PASS a pass, until a read
+        finds it empty; the set is read whole once its last read is drained, since the lab's Redis user may not pop
+        or scan a set, and is never read again in this process once it reads empty."""
+        if self._drained:
+            return []
+        if not self._undrained:
+            self._undrained = self.queue.undrained()
+        batch = self._undrained[-DRAINED_PER_PASS:]
+        del self._undrained[-DRAINED_PER_PASS:]
+        if not batch:
+            self._drained = True
+            return []
+        settled = self.queue.drain(batch, self.settings.retention_ms)
+        return [f"drained {len(batch)} jobs of the old done set, {settled} settled, {len(self._undrained)} left"]
 
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
@@ -1304,7 +1512,7 @@ class Scheduler:
                     )
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
+                self.queue.enqueue(admitted, state.head, {}, state.merge_base or state.base, state.grader, state.tier)
                 self._keep(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
@@ -1339,6 +1547,13 @@ class Scheduler:
         queued = [slot for slot in state.units.values() if not (slot.outcome or slot.held) and slot.job]
         for slot, job in zip(queued, self.queue.jobs([slot.job for slot in queued])):
             self._collect(slot, job, tiers, state)
+        scope = _scope(state)
+        if not state.superseded and state.required != list(_frame_required(state.tier, scope)):
+            self._keep(state)
+            request = GradeRequest(
+                state.repo, state.head, state.base, Priority(state.tier), "scheduler", False, plant=scope == "full"
+            )
+            return [self._start(request, state.lane, state.ref, now_ms, name="")]
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
@@ -1412,7 +1627,9 @@ class Scheduler:
     def _post(self, state: State, now_ms: int) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
-        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
+        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. One the grade
+        holds no id of is forgotten by the poster first, so a grade started again under the run name of a grade the
+        scheduler forgot opens new check runs instead of meeting the statuses of the forgotten one. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
         head before the relay pushes it. A post the App token or the network refuses holds every post of the
         repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
@@ -1432,6 +1649,8 @@ class Scheduler:
             shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
+            else:
+                poster.forget(state.head, check, state.run, shadow)
             output = self._output(state, check, status)
             try:
                 state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
@@ -1448,13 +1667,17 @@ class Scheduler:
         return actions
 
     def _output(self, state: State, check: str, status: str) -> Output:
-        """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
-        revision, the head's commit page and, on a gate's check run, the stored log of each failed static unit."""
+        """Return a check run's output: its units, none for a skipped authoritative gate, the units a check that
+        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page and, on
+        a gate's check run, the stored log of each failed static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
-        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
+        slots = [state.units[ref] for ref in refs]
+        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in slots)
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
-        logs = () if check == REQUIRED else self._logs([state.units[ref] for ref in refs])
+        if _checks(state)[check][1] == NEUTRAL:
+            summary += _lost(slots)
+        logs = () if check == REQUIRED else self._logs(slots)
         return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)
 
     def _logs(self, slots: Sequence[Slot]) -> tuple[tuple[Unit, str], ...]:
@@ -1560,6 +1783,14 @@ def authoritative_gates(block: Mapping[str, Any], tier: Priority) -> frozenset[s
     return frozenset(block["authoritative"])
 
 
+def _frame_required(tier: int, scope: str) -> tuple[str, ...]:
+    if tier >= Priority.PROMOTION:
+        return ()
+    if tier == Priority.QUEUE:
+        return QUEUE_REQUIRED
+    return (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+
+
 def frame(
     tier: Priority,
     tree: str,
@@ -1579,21 +1810,22 @@ def frame(
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
     backfill grade takes every lab gate, since those rules require no job by name, and lists none.
     """
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = _frame_required(tier, scope)
     if tier >= Priority.PROMOTION:
-        return Plan(tree, grader, dict(gates))
+        return Plan(tree, grader, dict(gates), required=required)
     listed = frozenset(authoritative)
     if tier == Priority.QUEUE:
-        required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
-        queued = {job: gates.get(job, ()) for job in required}
-        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
-    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+        queued = {job: gates.get(job, ()) for job in (*required, FAIL_FAST, UNIT_JOBS[0])}
+        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed, required=required)
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
+    return Plan(
+        tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed, required=required
+    )
 
 
 @dataclass(frozen=True)
@@ -1694,7 +1926,9 @@ class MirrorExpander:
         manifests: Manifests,
         verdicts: Verdicts,
         lab: Lab | None = None,
+        auth: Callable[[str], Token] | None = None,
     ) -> None:
+        self.auth = auth
         self.node = node
         self.root = root
         self.toolchain = toolchain
@@ -1702,9 +1936,16 @@ class MirrorExpander:
         self.verdicts = verdicts
         self.lab = lab
 
+    def _environment(self, repo: str) -> dict[str, str] | None:
+        if self.auth is None or not repo.startswith(git_auth.GITHUB):
+            return None
+        return git_auth.environ(self.auth(repo))
+
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
-        return Mirror(self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab)
+        return Mirror(
+            self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab, environ=self._environment(repo)
+        )
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -1734,7 +1975,11 @@ class MirrorExpander:
         """Return the repository's dev branch head as the remote lists it, fetched into the mirror; git fails when the
         remote lists no dev branch."""
         listing = subprocess.run(
-            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"],
+            env=mirror.environ,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
@@ -1758,7 +2003,11 @@ class MirrorExpander:
         repository names it, or the dev branch head, fetched into the mirror, descends from it. The head itself is
         never fetched, since GitHub may no longer serve a head no ref reaches."""
         listing = subprocess.run(
-            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"],
+            env=self._environment(repo),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         if head in {line.split()[0] for line in listing.stdout.splitlines()}:
             return True
@@ -1772,7 +2021,9 @@ class MirrorExpander:
         """Return the head of every merge group ref the repository lists; git fails when it cannot list them within
         GROUPS_TIMEOUT_S."""
         argv = ["git", "ls-remote", repo, MERGE_GROUPS]
-        listing = subprocess.run(argv, capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S)
+        listing = subprocess.run(
+            argv, env=self._environment(repo), capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S
+        )
         return frozenset(line.split()[0] for line in listing.stdout.splitlines())
 
     def trusted(self, repo: str) -> frozenset[str]:
@@ -1796,18 +2047,30 @@ class MirrorExpander:
             return {}
         return static_exclusions.read(self._git(mirror, "show", f"{grader}:{static_exclusions.PATH}"))
 
+    def _diffed(self, mirror: Mirror, request: GradeRequest, base: dict[str, str]) -> tuple[str, dict[str, str]]:
+        """Return what a head's static units diff against: the merge base of the request's head and base with the
+        files of its tree, or no merge base and the base's own files when the base is that merge base. Git fails
+        when head and base share no history."""
+        found = self._git(mirror, "merge-base", request.head, request.base).strip()
+        if found == request.base:
+            return "", base
+        return found, self._files(mirror, found)
+
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
-        authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
+        authority for jobs with exclusions, keyed by the files each gate reads at head and at the merge base of head
+        and base, the unit job's test
         units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
-        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
+        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on. The plan names
+        the merge base when it is not the base itself.
         """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
             mirror.fetch(sha)
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
+        merge_base, diffed = self._diffed(mirror, request, base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
@@ -1817,7 +2080,7 @@ class MirrorExpander:
             if gate.missing or gate.name in excluded:
                 continue
             inputs = StaticInputs(
-                gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
+                gate.name, _within(head, gate.paths), _within(diffed, gate.base_paths), grader, toolchain
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
@@ -1843,7 +2106,7 @@ class MirrorExpander:
             sorted(listed),
             request.plant,
         )
-        return replace(plan, manifest=commit)
+        return replace(plan, manifest=commit, merge_base=merge_base)
 
     def _tests(
         self,
@@ -1991,12 +2254,22 @@ def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev, its mirrors falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
-    names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
-    the scheduler's registry; without it completed checks are acknowledged unrecorded."""
+    repository's dev, serving the repositories the environment lists or else that one repository, its mirrors
+    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP` names the lab's GitHub App, its
+    bus inbox hands each completed check of the repository to a shadow recorder on the scheduler's registry; without
+    it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))
+    credentials: dict[str, GitHubAppAuth] = {}
+
+    def auth(repo: str) -> Token:
+        if repo not in credentials:
+            credentials[repo] = GitHubAppAuth(f"github.com/{_slug(repo)}", permissions={"contents": "read"})
+        return credentials[repo]
+
+    expander = MirrorExpander(
+        node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ), auth=auth
+    )
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
@@ -2008,7 +2281,8 @@ def build(
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
-    settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
+    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)
     if app:
@@ -2155,6 +2429,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         manifests,
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
+        scheduler.settings.retention_ms,
+        shed=lambda: spending.status().shed,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)

@@ -86,6 +86,9 @@ class GitLabForge:
                 return found
             page += 1
 
+    def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
+        raise ForgeError("GitLab merge requests have no merge queue groups")
+
     def read(self, number: int) -> ChangeRequest:
         raw = self._call("GET", f"{self.api}/{number}")
         diffs = self._diffs(number)
@@ -104,6 +107,9 @@ class GitLabForge:
     def post(self, number: int, body: str) -> str:
         note = self._call("POST", f"{self.api}/{number}/notes", {"body": body})
         return f"{self.web}/-/merge_requests/{number}#note_{note['id']}"
+
+    def release_pull(self, tag: str) -> int:
+        raise ForgeError(f"GitLab has no promotion pull request for tag {tag}")
 
     def state(self, number: int) -> MergeRequestState:
         url = f"{self.web}/-/merge_requests/{number}"

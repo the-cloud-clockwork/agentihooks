@@ -1,0 +1,4 @@
+{
+  "scripts/swarm_ledger/api/errors.py": "shrinks the details of an error reply before it is bounded",
+  "scripts/swarm_ledger/api/mutations.py": "strips the task rows of a mutation acknowledgement before it is bounded"
+}

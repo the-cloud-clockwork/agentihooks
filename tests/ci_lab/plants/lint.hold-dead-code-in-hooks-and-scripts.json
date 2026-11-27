@@ -5,7 +5,7 @@
     {
       "path": "scripts/ci_lab/run_static.py",
       "before": "def run(gate: StaticGate,",
-      "after": "def planted() -> None:\n    \"\"\"Do nothing.\"\"\"\n\n\ndef run(gate: StaticGate,"
+      "after": "def lab_dead_code_plant() -> None:\n    \"\"\"Do nothing.\"\"\"\n\n\ndef run(gate: StaticGate,"
     }
   ]
 }

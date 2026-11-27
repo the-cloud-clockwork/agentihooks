@@ -1338,6 +1338,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_logins": [],
         "master_login_enabled": "no",
         "repos": [],
         "capabilities": [],

@@ -132,6 +132,17 @@ def test_a_restore_over_a_listed_swarm_lists_its_old_style_names_again(store: Re
     assert ("sw-eng-7", "eng-2@sw") in store.seats.agent_seats("sw")
 
 
+@pytest.mark.feature("swarm-learned-scope")
+def test_a_restore_over_a_listed_swarm_loads_learned_notes_a_snapshot_left_out_of_the_index(store: RedisStore) -> None:
+    seed(store, "sw")
+    state = store.export("sw")
+    del state["keys"][store.memory.learned_index("sw")]
+    store.redis.flushall()
+    assert store.memory.scoped("sw", "eng-1@sw") == []
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert [row["text"] for row in store.memory.scoped("sw", "eng-1@sw")] == ["run the gates twice"]
+
+
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     seed(store, "sw")
     seed(store, "sw-b")

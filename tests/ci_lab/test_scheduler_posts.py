@@ -9,7 +9,21 @@ from scripts.ci_lab.checks import Checks, Output, PostRefused
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.github_app import REFUSED, GitAuthRefused
-from tests.ci_lab.test_scheduler import ACTOR, BASE, HEAD_A, HEAD_B, SLUG, Poster, Run, plan, unit
+from tests.ci_lab.test_scheduler import (
+    ACTOR,
+    BASE,
+    CHECK_RUNS,
+    HEAD_A,
+    HEAD_B,
+    SLUG,
+    FixtureToken,
+    Poster,
+    Run,
+    github,
+    plan,
+    restarted,
+    unit,
+)
 from tests.ci_lab.test_scheduler import lab as _lab
 
 lab = _lab
@@ -216,3 +230,22 @@ def test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the
     assert f"cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {refusal}" in actions
     assert poster.moves(HEAD_A, scheduler.REQUIRED) == []
     assert poster.moves(HEAD_B, "lint") == [("queued", None)]
+
+
+@pytest.mark.feature("lab-scheduler-regrade-opens-new-check-runs")
+def test_a_live_grade_advances_the_check_runs_it_created_in_place_within_one_process(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(calls))
+    run = restarted(lab({HEAD_A: plan({"lint": (unit(1),)})}), Checks(SLUG, FixtureToken()))
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease()
+    assert run.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert calls == [
+        ("POST", CHECK_RUNS),
+        ("POST", CHECK_RUNS),
+        ("PATCH", f"{CHECK_RUNS}/1"),
+        ("PATCH", f"{CHECK_RUNS}/2"),
+    ]

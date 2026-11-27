@@ -10,6 +10,10 @@ from scripts.quick.registry import Seat
 MAX_CHARS = 1500
 CHECKBOX = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\](.*)$", re.MULTILINE)
 SEND = 'agentihooks quick send {to} "<text>"'
+BRIEF = (
+    "Run `agentihooks seat brief` before your first command: it prints your seat's handoff, culture, latest recap "
+    "and learned notes from its seat folder."
+)
 HANDOFF = (
     "Near your context limit write your Handoff v2 to {handoff}, put any lesson for the seat in {learned}, "
     "then run `agentihooks quick handoff`; your successor starts in this same pane from it."
@@ -32,7 +36,12 @@ def _reach(sender: Seat, receiver: Seat) -> str:
 
 def _engineer_line(found: Member, seat: Seat) -> str:
     folder = paths.seat_dir(found.folder, seat.seat)
-    return f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
+    authentication = f"named:{seat.account}" if seat.auth == "named" else seat.auth
+    tiers = "automatic tiers" if seat.auth == "routed" else "outside automatic tiers"
+    return (
+        f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
+        f"; authentication {authentication}, {tiers}"
+    )
 
 
 def _master(found: Member) -> str:
@@ -42,6 +51,7 @@ def _master(found: Member) -> str:
         "front door: the operator talks only to you.",
         "Load the quick-swarm-master skill before any other action: it covers how this quick swarm is built, "
         "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
+        BRIEF,
         "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
         "Your engineers, the only agents you contact:",
         *(_engineer_line(found, seat) for seat in engineers),
@@ -71,6 +81,7 @@ def _engineer(found: Member) -> str:
     lines = [
         f"You are {seat.seat} of quick swarm {found.swarm.quick_id}, in herdr pane {seat.position}. The master "
         f"in pane 1 is the sole authority and the operator's front door.",
+        BRIEF,
         "Wait for the operator's instructions. Talk to the operator only while planning your task.",
         f"When briefed, write your plan to {paths.plan(found.folder, seat.seat)} as checkbox stages "
         "(- [ ] stage), then report the plan to the master before you start.",

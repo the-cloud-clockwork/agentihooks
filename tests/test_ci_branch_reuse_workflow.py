@@ -257,7 +257,7 @@ def _plan(
     if bash_env:
         (tmp_path / "bash_env").write_text(bash_env)
         env["BASH_ENV"] = str(tmp_path / "bash_env")
-    run = _step("test-count", "Plan the tests whose inputs did not change")["run"]
+    run = _step("collect", "Plan the tests whose inputs did not change")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     deadline = time.monotonic() + 30
     while not (runner / "plan.status").is_file() and time.monotonic() < deadline:
@@ -324,7 +324,7 @@ def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path
 
 
 def test_the_planners_run_unbuffered_so_their_lines_reach_the_log_as_written():
-    assert _step("test-count", "Plan the tests whose inputs did not change")["env"]["PYTHONUNBUFFERED"] == "1"
+    assert _step("collect", "Plan the tests whose inputs did not change")["env"]["PYTHONUNBUFFERED"] == "1"
 
 
 @pytest.mark.wall_clock
@@ -338,7 +338,7 @@ def test_the_wait_prints_each_planner_line_while_the_planner_still_runs(tmp_path
         planner = subprocess.Popen(["bash", "-c", script], stdout=log, stderr=subprocess.STDOUT)
     (runner / "plan.pid").write_text(str(planner.pid))
     env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(tmp_path / "outputs")}
-    run = _step("test-count", "Wait for the test plan")["run"]
+    run = _step("collect", "Wait for the test plan")["run"]
     wait = subprocess.Popen(["bash", "-e", "-c", run], env=env, stdout=subprocess.PIPE, text=True)
     lines: queue.Queue[str] = queue.Queue()
     threading.Thread(target=lambda: [lines.put(line) for line in wait.stdout], daemon=True).start()
@@ -363,7 +363,7 @@ def test_the_wait_prints_each_planner_line_while_the_planner_still_runs(tmp_path
     ],
 )
 def test_the_branch_plan_is_published_only_when_it_reuses_a_test(event, branch, uploaded):
-    upload = _step("test-count", "Upload the pull request runs' test plan")
+    upload = _step("collect", "Upload the pull request runs' test plan")
     assert upload["with"]["name"] == "reused-branch-${{ matrix.python-version }}"
     assert upload["with"]["path"] == "${{ runner.temp }}/reused-branch.json"
     values = {"github.event_name": event, "steps.plan.outputs.branch": branch}
@@ -374,7 +374,7 @@ def test_the_branch_plan_is_published_only_when_it_reuses_a_test(event, branch, 
 def test_the_deselect_and_its_upload_run_when_either_plan_reuses_a_test(reused, branch, deselects):
     values = {"steps.plan.outputs.reused": reused, "steps.plan.outputs.branch": branch}
     for name in ("Deselect the reused tests", "Upload the deselected tests"):
-        assert _evaluate(_step("test-count", name)["if"], values) is deselects
+        assert _evaluate(_step("collect", name)["if"], values) is deselects
 
 
 def _deselect(tmp_path: Path, dev: bool) -> dict:
@@ -395,7 +395,7 @@ def _deselect(tmp_path: Path, dev: bool) -> dict:
         "DEV_PLAN": str(workspace / "reused-tests.json") if dev else "",
         "BRANCH_PLAN": str(runner / "reused-branch.json"),
     }
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     return json.loads((runner / "reused.json").read_text())
 

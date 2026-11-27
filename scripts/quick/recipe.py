@@ -4,7 +4,7 @@ import json
 import os
 import shlex
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -127,3 +127,17 @@ def alive(seat_dir: Path, proc_root: Path = Path("/proc")) -> bool:
     if not mark.exists():
         mark.write_text(seen)
     return mark.read_text() == seen
+
+
+def record(pid_file: Path, pid: int) -> None:
+    pass
+
+
+def execute_native(
+    harness: str,
+    command: list[str],
+    environ: Mapping[str, str],
+    *,
+    execvpe: Callable[[str, list[str], Mapping[str, str]], object] = os.execvpe,
+) -> None:
+    pass

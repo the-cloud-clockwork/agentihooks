@@ -1,0 +1,42 @@
+rules:
+  - id: feature-ledger-op-context-typed
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A function of a registered ledger op module that takes the op context names it by the Protocol:
+      ctx: OpContext, from scripts.swarm_ledger.op_context. A ctx left untyped, or typed Any, object or the
+      concrete class, lets an op read or write a member no context promises it.
+    patterns:
+      - pattern: |
+          def $FUNCTION(..., ctx, ...):
+              ...
+      - pattern-not: |
+          def $FUNCTION(..., ctx: OpContext, ...):
+              ...
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_alerts.py
+        - /scripts/swarm_ledger/ledger_answer.py
+        - /scripts/swarm_ledger/ledger_blockers.py
+        - /scripts/swarm_ledger/ledger_close.py
+        - /scripts/swarm_ledger/ledger_enhancement.py
+        - /scripts/swarm_ledger/ledger_events_ack.py
+        - /scripts/swarm_ledger/ledger_freezes.py
+        - /scripts/swarm_ledger/ledger_groups.py
+        - /scripts/swarm_ledger/ledger_names.py
+        - /scripts/swarm_ledger/ledger_notifications.py
+        - /scripts/swarm_ledger/ledger_orders.py
+        - /scripts/swarm_ledger/ledger_phases.py
+        - /scripts/swarm_ledger/ledger_plans.py
+        - /scripts/swarm_ledger/ledger_priorities.py
+        - /scripts/swarm_ledger/ledger_rank.py
+        - /scripts/swarm_ledger/ledger_relay.py
+        - /scripts/swarm_ledger/ledger_size.py
+        - /scripts/swarm_ledger/ledger_sources.py
+        - /scripts/swarm_ledger/ledger_splits.py
+        - /scripts/swarm_ledger/ledger_tasks.py
+        - /scripts/swarm_ledger/ledger_time_left.py
+        - /scripts/swarm_ledger/ledger_title.py
+        - /scripts/swarm_ledger/ledger_verdict.py
+        - /scripts/swarm_ledger/ledger_watchdog_copy.py
+        - ledger-op-context-typed.test.py

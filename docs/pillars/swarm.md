@@ -44,14 +44,14 @@ panes to its right, ordered left to right: three engineers by default and four a
 at most with the master (`--agents 2` to `--agents 5`). Every
 agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
 says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a seat with no
-account free, fails `quick up`, which names it and leaves it pending for the next round. A seat's agent starts only
-on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
+account free, fails `quick up`, which names it and leaves it pending for the next round. Without an authentication
+option, an engineer starts on a routed account: a quick seat never falls back to bare Claude, the router reads the operator's token block even
 when the shell left in a reused pane never loaded it, and a launch whose agent was not routed fails and leaves the
 seat pending instead of ready.
 
 | Piece | Where it lives |
 |---|---|
-| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state |
+| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state, authentication mode and safe account reference |
 | Seat notes | `seats/<seat>/` holds `plan.md` (checkbox stages), `notes.md`, `learned.md` and `handoff.md` |
 | Culture | `culture.md`, read into every seat's injected block |
 | Room | `room/chat.jsonl`, chat between seats that share no native channel |
@@ -91,6 +91,26 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   from a live session, records that session and its pane as the seat's occupant; it never takes a launching seat,
   a seat whose recorded pane herdr shows running an agent, or another seat's pane.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
+
+### Native quick authentication
+
+`quick up --auth default` starts native engineers on each CLI's ordinary local
+login outside automatic quota tiers. `--auth named:reference` chooses an existing
+account suffix or token environment variable name for that harness. Pass a
+reference, never a credential value. A missing or incompatible named reference
+is refused before panes are created.
+
+One choice applies to every engineer. A comma separated list gives one choice
+per engineer in pane order, including mixed Claude and Codex seats. Omitted
+`--auth` keeps routed behavior. The master keeps its current authentication;
+engineer selection changes no global login.
+
+The registry and `quick status` retain the safe `auth` mode and `account`
+reference. The master context identifies explicit modes as outside automatic
+tiers. Handoff, forced relaunch and automatic retry reuse the saved choice even
+when the caller's environment changes. Default and named engineers keep native
+sign in and session binding checks; unavailable authentication leaves a seat
+pending. Quota driven switching remains active for routed seats.
 
 ## Event driven engine
 
@@ -1317,7 +1337,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
-| `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
+| `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, in the pane herdr restored for it when that pane waits at a bare shell with the agent's conversation and in a new pane otherwise, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
@@ -1371,7 +1391,7 @@ In every mode the cutoff publishes a final handoff as a Handoff v2 body: window 
 ### Templates
 
 A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`
-(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lane templates are `eng`, `ci`, `plan` and `review`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`; `agentihooks claude` then passes `--allow-dangerously-skip-permissions`, since `--dangerously-skip-permissions` would override the named mode) and leaves it with no pane prompt: the PermissionRequest hook allows its `ExitPlanMode` with the plan as the updated input and sets the session back to bypass, because Claude Code keeps the proceed prompt for a bare allow and would otherwise fall back to manual mode. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner launches under a `planner` permissions profile instead (`-c permissions.planner=…` with `-c default_permissions="planner"`): it extends `:read-only`, turns network on and grants write only to the ledger folder (`LEDGER_DIR`, default `~/development-ledger`), `~/.agentihooks/swarm` and `~/scratchpad`. The repository stays read only while `agentihooks ledger` and Redis calls work; `ledger task add` needs the ledger folder because it takes a lock file there. The `trace-plan` and `build` gates stay the second line. Per lane:
+(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lane templates are `eng`, `ci`, `plan` and `review`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`; `agentihooks claude` then passes `--allow-dangerously-skip-permissions`, since `--dangerously-skip-permissions` would override the named mode) and leaves it with no pane prompt: the PermissionRequest hook allows its `ExitPlanMode` with the plan as the updated input and sets the session back to bypass, because Claude Code keeps the proceed prompt for a bare allow and would otherwise fall back to manual mode. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner launches under a `planner` permissions profile instead (`-c permissions.planner=…` with `-c default_permissions="planner"`): it extends `:read-only`, turns network on and grants write only to the ledger folder (`LEDGER_DIR`, default `~/development-ledger`), `~/.agentihooks/swarm`, `~/scratchpad`, the ledger exports folder, the launch checkout's git common dir, the worktree root (`WORKTREE_ROOT`, default `~/dev/worktrees`) and the launch temp folder. The checkout working tree stays read only while `agentihooks ledger`, Redis calls, `wt.sh new` and temp files work; `ledger task add` needs the ledger folder because it takes a lock file there. The managed agentibrain server carries `default_tools_approval_mode = "approve"`, so brain tools answer under approval `never`. The `trace-plan` and `build` gates stay the second line. Per lane:
 
 | Field | Meaning |
 |---|---|
@@ -2562,6 +2582,21 @@ The test that an old offender outside the diff passes failed before the fix
 ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39044563913))
 and passed after it
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39045831977)).
+
+## First read before seated work
+
+The `first-read` gate applies to swarm members and quick seats on Claude Code
+and Codex. It defaults to `observe`, recording a would-be denial until the
+session runs `agentihooks seat brief`. The successful command sets a local
+session marker; compaction clears it. Standalone sessions are outside the gate.
+Seat brief, the profile canary, the opening prompt Read, ToolSearch and condition
+tools stay available before the marker exists.
+
+The gate catalogue exposes `first-read-gate` through the normal swarm gate
+controls. `observe` permits calls and records denials, `enforce` blocks them
+with a reason naming seat brief, and `off` disables the check. The package
+conditions and marker lifecycle are described in
+[First read for seated sessions](../hooks/conditions.md#first-read-for-seated-sessions).
 
 ## One push per pull request
 
@@ -8919,15 +8954,23 @@ make that visible.
   every focus record with `target`, `by`, `at`, `reason`, `claimable`, `done` (the ids of done tasks under it),
   `tasks` (every other task under it with its `lane`, `state` and `verdict`) and `unclaimed_minutes`: the minutes
   since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
-  `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
-  exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+  `get focus/<target>` (`GET .../focus/<target>`) answers one target in the same shape, or `404 resource_missing`
+  when the target does not exist. `get focus/<target>/tasks` (`GET .../focus/<target>/tasks`) lists the tasks under
+  one target that are not done, each with its `id`, `lane`, `state` and `verdict`, through the cursor paging every
+  collection uses (`cursor`, `limit`, `next_cursor`), and the command line reads it to its end. A list that changes
+  between two pages answers `409 revision_conflict` and is read again from its first page. A name that is itself a
+  plan node, such as a task whose id is `tasks`, keeps its one reply read. Each reply is held to the reply limit:
+  past it the focus list answers `413 resource_too_large` and names `get freezes` for the records and
+  `get focus/<target>/tasks` for the tasks of one, and the read of one target names its own paged read. A ledger
+  server on a release older than the paged read answers it `404 resource_missing`. The swarm's Doctor fix phase is
+  read from the swarm store; without one the read uses no fix phase.
 - **One orders read.** `agentihooks api --slug <id> get orders` (ledger API `GET /api/v1/ledgers/<id>/orders`) lists
   every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first:
   `item`, `title`, `by`, `at`, his `quote` or the `request` entry id, `claimable`, `busy` (the count claimed or in a
   pull request), `done` (the ids of done tasks under it), `tasks` (every task under it that is neither done nor out
   of scope, with its `lane`, `state` and `verdict`) and `line`, one plain line. The reply is one page: when the open
-  orders pass the reply limit the read answers `413 resource_too_large` and names `focus/<item>`, which lists the
-  tasks of one order.
+  orders pass the reply limit the read answers `413 resource_too_large` and names the command line read
+  `agentihooks api --slug <id> get focus/<item>/tasks`, which lists the tasks of one order in pages.
 - **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
   whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
   ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the
@@ -9186,7 +9229,7 @@ Two commands publish one:
 | Command | What it sends |
 |---|---|
 | `agentihooks api --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
-| `agentihooks api --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+| `agentihooks api --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. With `--task <id>` in place of `--phase` it publishes the plan for one task that has no phase: the plan carries one slice marker, the task gets the stored plan link and that slice, and `plan read` prints its chunk; it prints `"task"` and `"plan_slice"` in place of `"phases"`. |
 
 ### Where the artifact check runs
 

@@ -24,6 +24,8 @@ COMPLETED = "completed"
 CHECK_COMPLETED = "check_completed"
 CHECK_PREFIX = "lab"
 BRANCHES = "refs/heads/"
+DEV = "dev"
+DEV_REF = f"{BRANCHES}{DEV}"
 PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
 CLOSED = "closed"
 PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened", CLOSED})
@@ -35,8 +37,8 @@ NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 @dataclass(frozen=True)
 class HeadEvent:
     """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor.
-    A pull request head also names its lane, the pull request's head branch, and a closed pull request names the lane
-    whose work ends."""
+    A pull request head also names its lane, the pull request's head branch, a push to dev names dev, and a closed
+    pull request names the lane whose work ends."""
 
     event: str
     repo: str
@@ -60,14 +62,17 @@ class CheckEvent:
 
 
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
-    if payload["deleted"] or not str(payload["ref"]).startswith(BRANCHES):
+    ref = str(payload["ref"])
+    if payload["deleted"]:
         return []
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
-    if str(payload["ref"]).startswith(PLANT_PREFIX):
+    if ref.startswith(PLANT_PREFIX):
         return [HeadEvent(PLANT, repo, payload["after"], "", actor, PUSHED)]
+    if ref != DEV_REF:
+        return []
     if payload["before"] == "0" * 40:
         return []
-    return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
+    return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED, DEV)]
 
 
 def pull_lane(pull: Mapping[str, Any]) -> str:
@@ -132,8 +137,9 @@ def head_events(name: str | None, payload: Mapping[str, Any]) -> Sequence[HeadEv
     sender reopening an untrusted author's pull request admits nothing; every other head's actor is
     the delivery's sender. A rerequested check run with no pull request has no base. A push to a
     branch under `PLANT_PREFIX` names a plant head with no base, whatever its before, which the
-    scheduler bases on the head's merge base with dev. A completed check run of any name is a
-    `CheckEvent`, never a head.
+    scheduler bases on the head's merge base with dev. Any other push names a head only on the dev
+    branch, with dev as its lane, so a newer push to dev replaces it; a push to another branch names
+    none. A completed check run of any name is a `CheckEvent`, never a head.
     """
     if name is None or name not in HEADS:
         return []

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-SEAT_LINE = "SEAT NOTES: run `agentihooks swarm demo-swarm learned`"
+SEAT_LINE = "SEAT NOTES: run `agentihooks seat brief`"
 TARGETS = ("claude", "codex", "copilot")
 
 
@@ -73,12 +73,13 @@ def test_a_swarm_without_an_agent_name_is_not_a_seat() -> None:
     assert reminder({"AGENTIHOOKS_AGENT_NAME": "engineer@323133-4958"}) == ""
 
 
-def test_the_line_names_the_learned_command_for_the_seats_swarm() -> None:
+@pytest.mark.feature("seat-brief")
+def test_the_line_names_the_seat_brief_command() -> None:
     from hooks.context.seat_notes import reminder
 
     line = reminder({"AGENTIHOOKS_SWARM": "demo-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0001"})
 
     assert line == (
-        "SEAT NOTES: run `agentihooks swarm demo-swarm learned` before any tool call for context "
-        "your seat may already hold."
+        "SEAT NOTES: run `agentihooks seat brief` before your first command: it prints the handoff, culture, latest "
+        "recap and learned notes your seat holds."
     )

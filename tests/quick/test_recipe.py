@@ -3,11 +3,13 @@ import os
 import shlex
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from scripts.quick import launch, paths, recipe, registry, tick
+from hooks import proc
+from scripts.quick import launch, member, paths, recipe, registry, seeds, tick
 from scripts.quick.guard import QuickError
 
 pytestmark = pytest.mark.unit
@@ -323,3 +325,127 @@ def test_a_saved_command_round_trips_through_the_registry_as_literal_arguments(t
     saved = _swarm(tmp_path, ("my tool", "a;b", "$HOME"))
     assert registry.load(tmp_path) == saved
     assert _seat(tmp_path).command == ("my tool", "a;b", "$HOME")
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("auth", ["routed", "default", "named"])
+def test_native_wrappers_use_the_saved_authentication_launcher(tmp_path: Path, harness: str, auth: str) -> None:
+    import dataclasses
+
+    swarm = _swarm(tmp_path, (TOOL, "literal;$HOME"), harness)
+    seat = dataclasses.replace(swarm.seats[1], auth=auth, account="alpha" if auth == "named" else "")
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def start(arguments: list[str], environ: dict[str, str]) -> int:
+        calls.append((arguments, environ))
+        return 0
+
+    assert launch.start_seat(tmp_path, swarm, seat, {"AGENTIHOOKS_ROUTE_ACCOUNT": "other"}, start) == 0
+    [(arguments, environ)] = calls
+    assert arguments == launch.argv(swarm, seat, paths.opening(tmp_path, seat.seat))
+    if auth == "routed":
+        assert "--routed-only" in arguments
+    else:
+        assert arguments[-2:] == ["--auth", "named:alpha" if auth == "named" else "default"]
+        assert "--routed-only" not in arguments
+    assert environ[member.SEAT_ENV] == seat.seat
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_native_exec_preserves_routed_environment_and_literal_wrapper_prefix(tmp_path: Path, harness: str) -> None:
+    command = (TOOL, "two words", "$HOME;literal")
+    swarm = _swarm(tmp_path, command, harness)
+    environ = launch.environ(
+        {
+            "AGENTIHOOKS_ROUTE_ACCOUNT": "alpha",
+            "AGENTIHOOKS_PROFILE_REPORT": "/profile/report",
+            "CLAUDE_CONFIG_DIR": "/native/claude",
+            "CODEX_HOME": "/native/codex",
+        },
+        tmp_path,
+        swarm,
+        swarm.seats[1],
+    )
+    received: list[tuple[str, list[str], dict[str, str]]] = []
+
+    def execute(binary: str, argv: list[str], child: Mapping[str, str]) -> None:
+        received.append((binary, argv, dict(child)))
+
+    native = ["native", "--model", "chosen", "opening prompt"]
+    recipe.execute_native(harness, native, environ, execvpe=execute)
+    [(binary, argv, child)] = received
+    assert binary == TOOL and argv == [*command, *native[1:]]
+    assert child[recipe.PROMPT_ENV] == str(paths.opening(tmp_path, "eng-1"))
+    for name, value in environ.items():
+        assert child[name] == value
+    assert swarm.seats[1].command == command
+
+
+@pytest.mark.feature("quick-local-command")
+def test_the_program_launcher_stops_when_its_directory_is_missing(tmp_path: Path) -> None:
+    import subprocess
+
+    result = tmp_path / "must not run"
+    launcher = tmp_path / "launcher.sh"
+    command = (sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(result))
+    launcher.write_text(recipe.script(command, {}, tmp_path / recipe.PID, str(tmp_path / "missing")))
+    completed = subprocess.run(["bash", str(launcher)], capture_output=True, check=False)
+    assert completed.returncode != 0
+    assert not result.exists()
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("state", ["Z", "X"])
+def test_a_dead_program_process_is_never_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
+    (tmp_path / recipe.PID).write_text("7")
+    (tmp_path / recipe.SEEN).write_text("7 123")
+    process = proc.Process(pid=7, ppid=1, pgid=7, sid=7, start_time=123, state=state, comm="tool", argv=("tool",))
+    monkeypatch.setattr(recipe.proc, "processes", lambda root: {7: process})
+    assert not recipe.alive(tmp_path)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_a_program_cannot_claim_a_reused_pid_on_its_first_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / recipe.PID).write_text("7")
+    process = proc.Process(pid=7, ppid=1, pgid=7, sid=7, start_time=123, state="S", comm="tool", argv=("tool",))
+    monkeypatch.setattr(recipe.proc, "processes", lambda root: {7: process})
+    assert not recipe.alive(tmp_path)
+    assert not (tmp_path / recipe.SEEN).exists()
+
+
+@pytest.mark.feature("quick-local-command")
+def test_a_program_identity_is_recorded_before_the_first_observer(tmp_path: Path) -> None:
+    recipe.record(tmp_path / recipe.PID, os.getpid())
+    assert (tmp_path / recipe.PID).read_text() == str(os.getpid())
+    seen = (tmp_path / recipe.SEEN).read_text()
+    assert seen.startswith(f"{os.getpid()} ")
+    assert recipe.alive(tmp_path)
+    (tmp_path / recipe.SEEN).write_text(f"{os.getpid()} 0")
+    assert not recipe.alive(tmp_path)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_command_lookup_is_saved_from_the_selected_directory_and_path(tmp_path: Path) -> None:
+    target = tmp_path / "target folder"
+    target.mkdir()
+    executable = target / "wrapper"
+    executable.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
+    executable.chmod(0o700)
+    environ = {"PWD": str(target), "PATH": "."}
+    assert recipe.recipes('["./wrapper","two words"]', [], ["claude"], environ) == [(str(executable), "two words")]
+    assert recipe.recipes('["wrapper"]', [], ["claude"], environ) == [(str(executable),)]
+
+
+@pytest.mark.feature("quick-local-command")
+def test_master_context_reports_command_identity_and_capabilities(tmp_path: Path) -> None:
+    swarm = _swarm(tmp_path, (TOOL, "--private-argument"))
+    text = seeds.opening(member.Member(tmp_path, swarm, swarm.seats[0]))
+    assert "--private-argument" not in text
+    assert "program env" in text
+    assert "agent hooks unavailable" in text
+    assert "automatic handoff unavailable" in text
+    assert "prompt typing unavailable" in text

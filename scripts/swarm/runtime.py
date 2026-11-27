@@ -7,10 +7,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -69,12 +70,23 @@ TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
-def codex_plan_mode(environ):
+def codex_plan_mode(environ: Mapping[str, str], checkout: str) -> list[str]:
+    from scripts.hive import daemon
+
     home = Path(environ.get("HOME") or Path.home())
     ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
-    grants = ", ".join(
-        f'{json.dumps(str(root))}="write"' for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad")
+    exports = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-exports"
+    worktrees = Path(environ.get("WORKTREE_ROOT") or home / "dev" / "worktrees")
+    roots = (
+        ledger,
+        home / ".agentihooks" / "swarm",
+        home / "scratchpad",
+        exports,
+        daemon.common_gitdir(Path(checkout)).resolve(),
+        worktrees,
+        Path(tempfile.gettempdir()),
     )
+    grants = ", ".join(f'{json.dumps(str(root))}="write"' for root in roots)
     return [
         "-c",
         f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{grants}}}}}',
@@ -526,7 +538,7 @@ class HerdrRuntime:
             requirements[lane] = options
         return requirements
 
-    def _quota_successor_accounts(self, requirements):
+    def _quota_successor_accounts(self, requirements: Any) -> Any:
         from scripts.swarm import quota_handoff
 
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
@@ -545,7 +557,9 @@ class HerdrRuntime:
             accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
             if first is None:
                 task = self._quota_ready_ids[lane][index]
-                self._quota_held[task] = quota_handoff.refusal(predecessor, harnesses, rows, reason)
+                self._quota_held[task] = quota_handoff.refusal(
+                    predecessor, harnesses, rows, reason, master=lane == MASTER
+                )
         return accounts
 
     def _quota_preferring(self, requirements):
@@ -602,9 +616,10 @@ class HerdrRuntime:
         self._quota_accounts = read(environ, time.time(), refresh=False)
         self._quota_spawn_owned = True
 
-    def _quota_refresh(self, environ: dict[str, str]) -> None:
-        """Read the spawn owned quota rows again, so a long running process never decides on an earlier spawn's rows."""
-        if self._quota_spawn_owned:
+    def _quota_refresh(self, environ: dict[str, str], fresh: bool) -> None:
+        """Read the spawn owned quota rows again, so a long running process never decides on an earlier spawn's rows;
+        ``fresh``, a hub admitted task with no saved launch, reads them first when no pass gave any."""
+        if self._quota_spawn_owned or (fresh and not hasattr(self, "_quota_accounts")):
             with self._reserving:
                 self._quota_read(environ)
 
@@ -643,7 +658,9 @@ class HerdrRuntime:
             or quota_handoff.successor(candidates, order, thresholds)
         )
         if account is None:
-            raise SpawnError(quota_handoff.refusal(predecessor, harnesses, rows, blocked), "unavailable")
+            raise SpawnError(
+                quota_handoff.refusal(predecessor, harnesses, rows, blocked, master=lane == MASTER), "unavailable"
+            )
         return {
             **saved,
             "harness": account.harness,
@@ -790,10 +807,12 @@ class HerdrRuntime:
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
     def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
+        from scripts.hive import daemon
+
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        self._quota_refresh(environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
+        self._quota_refresh(environ, bool(task.get("admitted_execution_id")) and not saved)
         decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
@@ -891,7 +910,13 @@ class HerdrRuntime:
         picked = replace(picked, model=model_pick.suited(agent, _set(picked.model) or harness_model, harness_model))
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         picked = expert_launch.pin(lane, picked, agent, task.get(expert_launch.EFFORT_KEY))
-        mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
+        mode = (
+            []
+            if lane != "plan"
+            else PLAN_MODE
+            if agent == "claude"
+            else codex_plan_mode(environ, daemon.local_checkout(config.repo))
+        )
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = bool(forced)
         repick = route_kind != "interactive" and (hasattr(self, "_quota_accounts") or (admitted and quota_transfer))
@@ -954,7 +979,8 @@ class HerdrRuntime:
         return placed
 
     def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
-        """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        """Reopen the agent's own conversation in the pane herdr restored for it, else in a new pane of the same name;
+        SpawnError unless herdr shows it there."""
         if live_binding.managed(agent):
             raise SpawnError(MANAGED_RESUME, "unsupported")
         if not agent.profile:
@@ -979,7 +1005,7 @@ class HerdrRuntime:
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
         title = _titled(config.slug, agent.lane, agent.seat)
         forced = front_door_route.check(agent.profile, masters.title(config.slug, agent.seat), [], agent.harness)
-        argv += title
+        argv += title + self._restored(agent)
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             model_pick.suited(agent.harness, agent.model or defaults.model, defaults.model),
@@ -1023,6 +1049,22 @@ class HerdrRuntime:
             remote_control=remote_control.landed(rc, placed.placement),
             desired_route_kind=agent.desired_route_kind,
         )
+
+    def _restored(self, agent: AgentRecord) -> list[str]:
+        """The init-agent arguments that reopen the agent in its recorded pane when herdr shows that pane holding the
+        agent's conversation at a bare shell, as after a restore; empty otherwise."""
+        if not agent.pane_id or not agent.conversation_id:
+            return []
+        from scripts.herdr_gc import bare_shell
+        from scripts.herdr_host import HerdrError
+
+        try:
+            pane = self.herdr(["pane", "get", agent.pane_id]).get("pane") or {}
+            info = self.herdr(["pane", "process-info", "--pane", agent.pane_id]).get("process_info") or {}
+        except (HerdrError, subprocess.SubprocessError):
+            return []
+        held = _conversation_id(pane.get("agent_session")) == agent.conversation_id
+        return ["--pane", agent.pane_id] if held and bare_shell(info) else []
 
     def operator(self, config, name, profile, text):
         """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""

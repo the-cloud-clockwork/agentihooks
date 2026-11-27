@@ -5,8 +5,11 @@ awaiting merge approval and follow-up flagged for the operator, and drops it onc
 """
 
 import re
+from typing import Any
 
 import ledger_comments
+
+from scripts.swarm_ledger.op_context import OpContext
 
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -32,7 +35,7 @@ def check(op):
         raise ValueError("priority_clear reason must be text")
 
 
-def _add(doc, op, ctx):
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     name, item_id = op["item"].split("/")
     item = next((i for i in doc.get(name, []) if i["id"] == item_id), None)
     if item is None:
@@ -47,7 +50,7 @@ def _add(doc, op, ctx):
     return True
 
 
-def _clear(doc, op, ctx):
+def _clear(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     rows, target = doc.setdefault("priorities", []), op["target"]
     gone = rows if target == "all" else [p for p in rows if target in (p["id"], p["item"])]
     found, dismissed = wanted(doc), ctx.meta.setdefault("priorities_dismissed", {})
@@ -66,7 +69,7 @@ def _clear(doc, op, ctx):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     return _add(doc, op, ctx) if op["op"] == "priority" else _clear(doc, op, ctx)
 
 
@@ -113,7 +116,7 @@ def wanted(doc):
     return found
 
 
-def _derived_row(item, text, old, ctx):
+def _derived_row(item: str, text: str, old: dict[str, Any] | None, ctx: OpContext) -> dict[str, Any]:
     if old and old["text"] == text:
         return old
     return {
@@ -126,7 +129,7 @@ def _derived_row(item, text, old, ctx):
     }
 
 
-def derive(doc, ctx):
+def derive(doc: dict[str, Any], ctx: OpContext) -> None:
     rows = doc.setdefault("priorities", [])
     out_of_scope = {
         f"{name}/{item['id']}"

@@ -49,7 +49,7 @@ from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import LocalObjects, flakes_path, manifest_folder, unit_path, upload_path
-from scripts.ci_lab.outcomes import CRASH
+from scripts.ci_lab.outcomes import CANNOT_RUN, CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
@@ -60,6 +60,7 @@ from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
 from tests.ci_lab.gate_required_cases import load, materialize
+from tests.ci_lab.scheduler_fixtures import Expander as Expander
 
 REPO = "/the-cloud-clockwork/agentihooks"
 SLUG = "the-cloud-clockwork/agentihooks"
@@ -115,7 +116,7 @@ def test_a_tier_frame_requires_the_jobs_its_rules_name_and_keeps_only_the_lab_ga
         scheduler.Flags(),
     )
     queued = scheduler.frame(Priority.QUEUE, TREE, BASE, {**gates, "unit": other})
-    required = ("select", "split", "shard-check", "test-count", "queue-fail-fast", "unit")
+    required = ("select", "split", "shard-check", "test-count", "collect", "queue-fail-fast", "unit")
     assert queued.gates == {job: other if job == "unit" else () for job in required}
     assert (queued.tree, queued.grader, queued.skipped, queued.outputs) == (
         TREE,
@@ -137,29 +138,13 @@ class Inbox:
 
 
 @dataclass
-class Expander:
-    plans: dict[str, scheduler.Plan]
-    seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
-
-    def expand(self, request: GradeRequest) -> scheduler.Plan:
-        self.seen.append(request)
-        return self.plans[request.head]
-
-    def merge_base(self, repo: str, head: str) -> str:
-        return self.plans[head].grader
-
-    def reachable(self, repo: str, head: str) -> bool:
-        return True
-
-    def groups(self, repo: str) -> frozenset[str]:
-        return frozenset(self.plans)
-
-
-@dataclass
 class Poster:
     posts: list[Post] = field(default_factory=list[Post])
 
     def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        pass
+
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
         pass
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
@@ -416,7 +401,7 @@ def test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects
     run.tick(1100)
     grade = run.grade(HEAD_A)
     text, missing = evidence.show(run.lab.objects, [grade.run])
-    assert grade.conclusion == "failure"
+    assert grade.conclusion == "neutral"
     assert missing == [unit_path(item.kind, item.key, "report"), unit_path(item.kind, item.key, "log")]
     assert f"\nunit static {item.key} run {grade.run}\n" in text
     assert run.lab.objects.keys(evidence.head_prefix(HEAD_A)) == [evidence.head_prefix(HEAD_A) + grade.run]
@@ -460,7 +445,7 @@ def test_a_newer_head_drops_pending_units_and_reuses_carried_verdicts(lab: Calla
 
 
 @pytest.mark.feature("lab-scheduler-grade")
-def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Callable[..., Run]) -> None:
+def test_a_lost_worker_requeues_once_then_its_unit_leaves_the_grade_without_a_verdict(lab: Callable[..., Run]) -> None:
     item = unit(1)
     run = lab({HEAD_A: plan({"lint": (item,)})})
     run.push(HEAD_A)
@@ -473,8 +458,8 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     second = run.lease(ttl_ms=100)[0]
     assert second.job == first.job
     assert f"reaped {second.job} lost" in run.tick(1300)
-    assert run.grade(HEAD_A).conclusion == "failure"
-    assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "failure")
+    assert run.grade(HEAD_A).conclusion == "neutral"
+    assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "neutral")
     assert run.store.get(item.kind, item.key) is None
 
 
@@ -554,7 +539,7 @@ def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> Non
     run.tick(1000)
     grant = run.lease(ttl_ms=100)[0]
     assert f"reaped {grant.job} lost" in run.tick(1100)
-    assert run.grade(HEAD_A).conclusion == "failure"
+    assert run.grade(HEAD_A).conclusion == "neutral"
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")
@@ -574,21 +559,21 @@ def test_the_reap_pass_clears_the_pod_cost_of_a_worker_only_once_its_last_lease_
 
 
 @pytest.mark.feature("lab-scheduler-grade")
-def test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict(lab: Callable[..., Run]) -> None:
+def test_a_unit_that_cannot_run_leaves_the_grade_without_a_verdict_and_stores_none(lab: Callable[..., Run]) -> None:
     item = unit(1)
     run = lab({HEAD_A: plan({"lint": (item,)})})
     run.push(HEAD_A)
     run.tick(1000)
-    run.finish(run.lease()[0], scheduler.CANNOT_RUN, {"error": "bwrap is not installed"})
+    run.finish(run.lease()[0], CANNOT_RUN, {"error": "bwrap is not installed"})
     run.tick(1100)
-    assert run.grade(HEAD_A).conclusion == "failure"
-    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
+    assert run.grade(HEAD_A).conclusion == "neutral"
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "neutral")
     assert run.store.get(item.kind, item.key) is None
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
 @pytest.mark.parametrize(("retries", "runs"), [(Policy(), 2), (Policy(lost=0), 1), (Policy(lost=2), 3)])
-def test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red(
+def test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_leaves_the_grade_without_a_verdict(
     lab: Callable[..., Run], retries: Policy, runs: int
 ) -> None:
     item = unit(1)
@@ -607,8 +592,8 @@ def test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade
         assert (record.state, record.attempts) == ("done" if final else "pending", attempt if final else attempt + 1)
         assert run.grade(HEAD_A).units[ref(item)].outcome == (CRASH if final else "")
     assert run.lease() == []
-    assert run.grade(HEAD_A).conclusion == "failure"
-    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
+    assert run.grade(HEAD_A).conclusion == "neutral"
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "neutral")
     assert run.store.get(item.kind, item.key) is None
 
 
@@ -913,7 +898,7 @@ def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., R
 
 def test_the_same_head_is_graded_once_unless_a_rerun_bypasses_negative_verdicts(lab: Callable[..., Run]) -> None:
     item = unit(1)
-    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run = lab({HEAD_A: pull_plan({"lint": (item,)})})
     run.cache(item, passed=False)
     run.push(HEAD_A, event="pull_request", action="synchronize")
     run.tick(1000)
@@ -1729,6 +1714,7 @@ class Delivery:
 class Consumer:
     deliveries: list[bus.Delivery]
     asked: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+    created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[bus.Delivery]:
         self.asked.append((batch, timeout_ms))
@@ -1978,10 +1964,7 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
             expected.setdefault(gate.job, []).append(gate.name)
     assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
     assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
-    assert ungraded == [
-        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading",
-        "lint/artifact-sanity-checks",
-    ]
+    assert ungraded == []
 
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"

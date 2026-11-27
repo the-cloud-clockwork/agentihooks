@@ -75,7 +75,7 @@ def _deselect_in_test_count(
         "PYTHON_PATH": sys.executable,
         "DEV_PLAN": str(workspace / "reused-tests.json"),
     }
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
@@ -329,7 +329,7 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
 
 
-def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it():
+def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_it() -> None:
     job = _job("dep-manifest")
     assert set(job["needs"]) == {"unit", "select", "reuse", "admission"}
     assert "sonar" not in job["needs"]
@@ -346,7 +346,7 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     assert "python -m scripts.dep_manifest build" in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
-    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
+    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
     assert build["run"].index(contexts) < build["run"].index("python -m scripts.dep_manifest build")
     upload = _step("dep-manifest", "Upload the test dependency manifest")
@@ -355,6 +355,74 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     sonar = [step.get("name") for step in _job("sonar")["steps"]]
     assert not any("dependency manifest" in (name or "") for name in sonar)
     assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
+
+
+@pytest.mark.feature("manifest-build-storage")
+def test_the_manifest_job_preserves_records_and_releases_coverage(tmp_path: Path) -> None:
+    source = tmp_path / "hooks" / "sample.py"
+    source.parent.mkdir()
+    source.write_text("def double(value):\n    return value * 2\n\n\ndef increment(value):\n    return value + 1\n")
+    config = tmp_path / ".github" / "coverage" / "coverage.ini"
+    config.parent.mkdir(parents=True)
+    config.write_text((ROOT / ".github" / "coverage" / "coverage.ini").read_text())
+    first = "tests/test_fixture.py::test_first"
+    second = "tests/test_fixture.py::test_second"
+    shards = tmp_path / ".coverage-shards"
+    reports = []
+    databases = []
+    for name, test, line in [
+        ("coverage-3.12-0", first, 2),
+        ("coverage-3.12-1/reused-coverage", second, 6),
+        ("coverage-3.12-2", first, 2),
+    ]:
+        folder = shards / name
+        folder.mkdir(parents=True)
+        database = folder / ".coverage"
+        data = CoverageData(str(database))
+        data.set_context(f"{test}|run")
+        data.add_arcs({str(source): [(-1, line), (line, -1)]})
+        data.write()
+        databases.append(database)
+        report = folder / "dep-inputs" / "inputs.jsonl"
+        report.parent.mkdir()
+        report.write_text(json.dumps({"test": test, "files": ["docs/input.json"], "escapes": False}) + "\n")
+        reports.append(report)
+    sentinel = shards / "unrelated.txt"
+    sentinel.write_text("keep")
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    build = _step("dep-manifest", "Build the test dependency manifest")
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", build["run"]],
+        cwd=tmp_path,
+        env=dict(
+            os.environ,
+            PYTHONPATH=str(ROOT),
+            RUNNER_TEMP=str(runner),
+            GITHUB_SHA="fixture",
+            ENVIRONMENT="py3.12-fixture",
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = {
+        "version": 2,
+        "commit": "fixture",
+        "environment": "py3.12-fixture",
+        "units": ["hooks/sample.py::<module>", "hooks/sample.py::double", "hooks/sample.py::increment"],
+        "tests": {
+            first: {"units": [0, 1], "files": ["docs/input.json"], "escapes": False},
+            second: {"units": [0, 2], "files": ["docs/input.json"], "escapes": False},
+        },
+        "lines": {first: {"hooks/sample.py": [2]}, second: {"hooks/sample.py": [6]}},
+    }
+    output = runner / "dep-manifest"
+    assert (output / "manifest.json").read_text() == json.dumps(expected, separators=(",", ":"))
+    assert dep_manifest.unpack(json.loads((output / "packed.json").read_text())) == expected
+    assert sentinel.read_text() == "keep"
+    assert all(report.is_file() for report in reports)
+    assert not any(database.exists() for database in databases), "Consumed coverage databases remain"
 
 
 @pytest.mark.parametrize("torn", ["", "line", "database"])
@@ -630,16 +698,16 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("test-count", "Plan the tests whose inputs did not change")
+    plan = _step("collect", "Plan the tests whose inputs did not change")
     assert plan["env"]["GRADER"] == (
         "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("test-count", "Wait for the test plan")["id"] == "plan"
+    assert _step("collect", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
-    deselected = _step("test-count", "Deselect the reused tests")
+    deselected = _step("collect", "Deselect the reused tests")
     assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m scripts.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
@@ -706,8 +774,8 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
                         step["name"],
                     )
     assert calls == {
-        ("test-count", "Plan the tests whose inputs did not change"),
-        ("test-count", "Deselect the reused tests"),
+        ("collect", "Plan the tests whose inputs did not change"),
+        ("collect", "Deselect the reused tests"),
         ("dep-manifest", "Build the test dependency manifest"),
     }
 
@@ -754,7 +822,7 @@ def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests
         (legacy / package / "__init__.py").write_text("")
     (legacy / "tests" / "dep_manifest.py").write_text("raise SystemExit('the tests package manifest ran')\n")
     env = {**os.environ, "RUNNER_TEMP": str(legacy.parent), "PYTHON_PATH": sys.executable}
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     result = subprocess.run(
         ["bash", "-eo", "pipefail", "-c", run], env=env, capture_output=True, text=True, check=False
     )

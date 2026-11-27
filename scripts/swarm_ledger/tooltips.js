@@ -31,6 +31,7 @@
     ['[data-autonomy="delegate"]', "Delegate autonomy. The master approves or sends back phase plans; you decide after {send_backs} send backs."],
     ['[data-autonomy="full"]', "Full autonomy. The master approves phase plans and turns agents' follow ups into tasks without asking you."],
     ["#layout-reset", "Restore the default panel sizes on every ledger."],
+    ['[data-gate-name="first-read"]', "Checks that a seated session ran seat brief before its other tool calls; compaction resets the read marker."],
     ['[data-gate-name="identity"]', "Checks the session identity on commands against the pinned agent identity."],
     ['[data-gate-name="subagents"]', "Counts subagent launches and continuations per task against its budget."],
     ['[data-gate-name="intent"]', "Checks changes against task, phase and project intent, including failed or pending tick verdicts."],

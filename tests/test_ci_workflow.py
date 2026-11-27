@@ -421,12 +421,12 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
 def test_records_name_the_test_environment_when_a_self_hosted_runner_skips_its_restore() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
-    for name in ("test-count", "unit", "unit-selected"):
+    for name in ("collect", "test-count", "unit", "unit-selected"):
         restore = next(step for step in jobs[name]["steps"] if step.get("id") == "venv")
         assert restore["if"] == "runner.environment != 'self-hosted'"
     environments = [
         value
-        for job in (jobs["test-count"], jobs["unit"], jobs["unit-selected"])
+        for job in (jobs["collect"], jobs["test-count"], jobs["unit"], jobs["unit-selected"])
         for step in job.get("steps", [])
         for name, value in step.get("env", {}).items()
         if name in ("ENVIRONMENT", "TEST_COUNT_ENVIRONMENT")
@@ -526,7 +526,7 @@ def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs()
         "--constraint test-requirements.lock",
     ]
     assert "${{ hashFiles('.github/test-constraints.txt') }}" in _test_env_key_step()["env"]["KEY_INPUTS"]
-    for job in ("test-count", "split", "unit"):
+    for job in ("collect", "test-count", "split", "unit"):
         assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
         cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
         day = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "day")
@@ -600,7 +600,16 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> Non
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    expected = {"count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"}
+    expected = {
+        "collect",
+        "count-record",
+        "split",
+        "test-count",
+        "type-gate-tree",
+        "unit",
+        "unit-rerun",
+        "unit-selected",
+    }
     assert set(callers) == expected | ({"type-gate"} if "type-gate" in jobs else set())
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
@@ -610,6 +619,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> Non
         ]
         guards = {
             "unit-selected": "github.event_name == 'pull_request'",
+            "collect": "github.event_name != 'push'",
             "test-count": "github.event_name != 'push'",
             "type-gate": "github.event_name != 'push'",
         }
@@ -760,7 +770,7 @@ def _browser_setup_steps(steps):
 
 
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
-    steps = _workflow()["jobs"]["lint"]["steps"]
+    steps = _workflow()["jobs"]["lint-actions"]["steps"]
     install = _browser_install(steps)
     check = next(s for s in steps if s.get("name") == "Artifact sanity checks")
     assert steps.index(install) < steps.index(check)
@@ -768,7 +778,7 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
 
 
 def test_queued_merges_select_artifact_checks_against_the_queue_base():
-    select = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "artifacts")
+    select = next(s for s in _workflow()["jobs"]["lint-actions"]["steps"] if s.get("id") == "artifacts")
     assert select["env"]["BASE"] == (
         "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
@@ -830,7 +840,7 @@ def test_mutation_browser_dependencies_use_the_responsive_mirror():
 
 
 def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
-    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
         "ledger-equivalence"
     ]["steps"]
@@ -839,7 +849,7 @@ def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
 
 
 def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
-    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
         "ledger-equivalence"
     ]["steps"]
@@ -968,7 +978,7 @@ def test_equivalence_runs_only_on_ledger_pull_requests_without_a_body_marker():
 
 
 def test_mutation_gate_plants_itself_whenever_its_code_changes():
-    steps = _workflow()["jobs"]["lint"]["steps"]
+    steps = _workflow()["jobs"]["lint-actions"]["steps"]
     [changed] = [step for step in steps if step.get("id") == "self-plant"]
     assert changed["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
     listed = changed["run"].split("for path in ", 1)[1].split("; do", 1)[0].replace("\\\n", " ").split()
@@ -1011,15 +1021,12 @@ def test_shards_wait_only_on_the_durations_lookup():
 
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     jobs = _workflow()["jobs"]
-    assert "collect" not in jobs
-    collect = jobs["test-count"]
-    assert collect["needs"] == [*jobs["select"]["needs"], "lab-verdict"]
+    collect = jobs["collect"]
+    assert collect["needs"] == jobs["select"]["needs"]
     assert "needs.select" not in collect["if"]
     assert collect["strategy"]["matrix"] == {"python-version": ["3.12"]}
     assert jobs["split"]["strategy"]["matrix"] == collect["strategy"]["matrix"]
-    command = next(
-        step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
-    )
+    command = next(step["run"] for step in collect["steps"] if step.get("name") == "Collect the head's tests")
     assert "tests.duration_coverage import collected_tests" in command
     assert "collected_tests(Path.cwd())" in command
     upload = next(step for step in collect["steps"] if step.get("name") == "Upload the early collection")
@@ -1035,6 +1042,7 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     assert "--collection collected.json" in adopt["run"]
     assert "test-count" in jobs["gate-required"]["needs"]
     assert "split" in jobs["gate-required"]["needs"]
+    assert "collect" in jobs["gate-required"]["needs"]
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
@@ -1043,7 +1051,7 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
     download = next(step for step in steps if step.get("name") == "Download the early collection")
     assert guard["if"] == download["if"]
-    assert guard["env"]["COLLECTION_JOB"] == "test-count (${{ matrix.python-version }})"
+    assert guard["env"]["COLLECTION_JOB"] == "collect (${{ matrix.python-version }})"
     assert guard["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in steps if step.get("id") == "app-token")
     assert steps.index(mint) < steps.index(guard)
@@ -1065,7 +1073,7 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
             CALLS=str(tmp_path / "calls"),
             RESULT=result,
             GH_TOKEN="app",
-            COLLECTION_JOB="test-count (3.12)",
+            COLLECTION_JOB="collect (3.12)",
         ),
         capture_output=True,
         text=True,
@@ -1077,7 +1085,7 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
 @pytest.mark.parametrize("status", ["in_progress", "completed"])
 @pytest.mark.parametrize("upload", ["success", "failure", "skipped", None])
-def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
+def test_split_starts_once_the_early_collection_upload_succeeds_while_the_collect_job_runs(
     tmp_path: Path, status: str, upload: str | None
 ) -> None:
     steps = _workflow()["jobs"]["split"]["steps"]
@@ -1087,7 +1095,7 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
     decoy = {"name": "select", "status": "completed", "conclusion": "success", "steps": [{**held, "name": named}]}
     first = (status, None) if status == "in_progress" else (status, "failure")
     for poll, (state, conclusion) in enumerate([first, ("completed", "failure")], start=1):
-        count = {"name": "test-count (3.12)", "status": state, "conclusion": conclusion}
+        count = {"name": "collect (3.12)", "status": state, "conclusion": conclusion}
         count["steps"] = [held, {"name": named, "conclusion": upload}]
         (tmp_path / f"{poll}.json").write_text(json.dumps({"jobs": [decoy, count]}))
     binary = tmp_path / "bin"
@@ -1107,7 +1115,7 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
             CALLS=str(tmp_path / "calls"),
             PAGES=str(tmp_path),
             GH_TOKEN="app",
-            COLLECTION_JOB="test-count (3.12)",
+            COLLECTION_JOB="collect (3.12)",
             COLLECTION_STEP=named,
         ),
         capture_output=True,
@@ -1119,12 +1127,12 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
 
 
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
-def test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads() -> None:
+def test_split_waits_on_the_collect_step_that_uploads_the_collection_it_downloads() -> None:
     jobs = _workflow()["jobs"]
     steps = jobs["split"]["steps"]
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
     download = next(step for step in steps if step.get("name") == "Download the early collection")
-    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == guard["env"]["COLLECTION_STEP"])
+    upload = next(step for step in jobs["collect"]["steps"] if step.get("name") == guard["env"]["COLLECTION_STEP"])
     assert upload["uses"] == "./.github/actions/retry-upload"
     assert upload["with"]["name"] == download["with"]["name"]
     assert '\\"$COLLECTION_STEP\\"' in guard["run"]
@@ -1140,7 +1148,7 @@ def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_toke
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
     download = next(step for step in steps if step.get("name") == "Download the early collection")
     fork = next(step for step in steps if step.get("name") == "Wait for the early collection on a fork")
-    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == "Upload the early collection")
+    upload = next(step for step in jobs["collect"]["steps"] if step.get("name") == "Upload the early collection")
     mint = next(step for step in steps if step.get("id") == "app-token")
     same = " && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
     assert mint["if"] in (guard["if"], f"({guard['if']}) || needs.select.outputs.source != ''")
@@ -1177,7 +1185,7 @@ def test_the_collection_wait_outlasts_the_count_job_timeout(tmp_path):
         )
     slept = sum(int(line) for line in (tmp_path / "slept").read_text().split())
     jobs = _workflow()["jobs"]
-    assert jobs["test-count"]["timeout-minutes"] * 60 <= slept <= (jobs["split"]["timeout-minutes"] - 5) * 60
+    assert jobs["collect"]["timeout-minutes"] * 60 <= slept <= (jobs["split"]["timeout-minutes"] - 5) * 60
 
 
 @pytest.mark.parametrize("ready", [0, 25, 400, None])
@@ -1213,8 +1221,8 @@ def test_the_collection_wait_downloads_once_the_artifact_lands_and_stays_red_whe
         assert len(tried) == 1 or tried[-2] < ready
 
 
-@pytest.mark.parametrize("collection,floor", [(0, 0), (1, 0), (0, 1), (1, 1)])
-def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, floor):
+@pytest.mark.parametrize("floor", [0, 1], ids=["success", "failure"])
+def test_the_count_floor_step_ends_with_the_exit_code_of_the_floor(tmp_path: Path, floor: int) -> None:
     base = tmp_path / "base" / "tests"
     base.mkdir(parents=True)
     (base / "count_floor.py").touch()
@@ -1222,14 +1230,7 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
     binary = tmp_path / "bin"
     binary.mkdir()
     python = binary / "python"
-    python.write_text(
-        '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
-        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\n'
-        'if [[ -n "${TEST_COUNT_HEAD_COLLECTION:-}" ]]; then\n'
-        '  [[ "$COLLECTION_EXIT" == 0 ]] || exit "$COLLECTION_EXIT"\n'
-        '  printf "[]" > "$TEST_COUNT_HEAD_COLLECTION"\n'
-        'fi\nexit "$FLOOR_EXIT"\n'
-    )
+    python.write_text('#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\nexit "$FLOOR_EXIT"\n')
     python.chmod(0o755)
     step = next(
         step
@@ -1244,18 +1245,13 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
             GITHUB_WORKSPACE=str(tmp_path),
             PATH=f"{binary}:{os.environ['PATH']}",
             CALLS=str(commands),
-            COLLECTION_EXIT=str(collection),
             FLOOR_EXIT=str(floor),
-            TEST_COUNT_HEAD_COLLECTION=(
-                str(tmp_path / "collected.json") if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ""
-            ),
         ),
         capture_output=True,
         text=True,
     )
-    assert (outcome.returncode == 0) == (collection == floor == 0)
-    expected = ["-m"] if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ["-c", "-m"]
-    assert sorted(commands.read_text().splitlines()) == expected
+    assert outcome.returncode == floor
+    assert commands.read_text().splitlines() == ["-m"]
 
 
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
@@ -2887,7 +2883,7 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
 
 @pytest.mark.parametrize("failure", ["", "revision", "archive"])
 def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_path, failure):
-    step = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "antoncore-checkout")
+    step = next(s for s in _workflow()["jobs"]["lint-actions"]["steps"] if s.get("id") == "antoncore-checkout")
     source = tmp_path / "source"
     inputs = {
         "scripts/swarm_dashboard_columns.py": "checker",
@@ -2954,7 +2950,7 @@ def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_p
 
 
 def test_lint_keeps_the_pinned_archive_on_the_same_antoncore_app():
-    steps = _workflow()["jobs"]["lint"]["steps"]
+    steps = _workflow()["jobs"]["lint-actions"]["steps"]
     checkout = next(s for s in steps if s.get("id") == "antoncore-checkout")
     assert "steps.app-token.outcome == 'success'" in checkout["if"]
     assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"

@@ -1932,7 +1932,7 @@ Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `ho
 | Mutation line selection proof | `mutation-line-selection-proof.yml` | every run |
 | Mutation refinement proof | `mutation-refinement-proof.yml` | every run |
 | Published Helm chart in kind | `helm-kind-published.yml` | runs under its own name |
-| Queue retry | `queue-retry.yml`, job `retry` | every run |
+| Queue retry | `queue-retry.yml`, job `retry` | every run, at most five minutes; queued pulls resume after dequeue |
 | Startup stages | `startup-stages.yml` | `workflow_dispatch` runs |
 | Swarm container smoke | `swarm-smoke.yml` | runs under its own name |
 | Swarm worker image | `swarm-node-image.yml` | `workflow_dispatch` runs |

@@ -129,8 +129,8 @@ scan database for that build would lose those associations.
 ### Taking coverage as shards land
 
 The `sonar` job needs only `select`, `reuse`, `admission`, `lab-verdict` and
-`test-count`, so it starts beside the unit shards on a standard runner, after
-`test-count` has uploaded both reused test plan artifacts that its pattern
+`collect`, so it starts beside the unit shards on a standard runner, after
+`collect` has uploaded both reused test plan artifacts that its pattern
 download fetches by one listing of the run. Its runner wait, checkout
 and carried coverage finish while the shards run. The job holds that runner
 while it waits, because a light runner requests a quarter CPU and ran the scan
@@ -142,6 +142,15 @@ with the job's runtime token. It holds no GitHub token, so it spends no REST
 quota. It downloads each shard's coverage artifact into
 `.coverage-shards/<artifact name>` when the artifact is listed. While shards
 still run, it flattens each database it holds into `flat-<name>` beside it.
+
+A push to `dev` runs the analysis in `sonar-after-unit`, which also needs
+`unit` and shows as `sonar` on that push. It runs the same steps once every unit
+leg has finished, so the coverage wait lists all twenty legs on its first poll
+and the analysis never holds a runner while the legs wait for one. The `sonar`
+job still runs on that push as `sonar hand off`: it skips its checkout and
+evidence upload, marks the run test only and ends in seconds. Promotion reads
+the analysis of `sonar-after-unit`. Pull requests and dispatches keep the
+`sonar` job starting beside the unit shards.
 
 A shard ends when its coverage is taken, or when its flake report is listed with
 no coverage of it beside. `unit` and `unit-selected` upload the flake report after

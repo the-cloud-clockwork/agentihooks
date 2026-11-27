@@ -4,6 +4,9 @@ from scripts.quick.guard import QuickError
 
 
 def _named(reference: str, harness: str, environ: Mapping[str, str]) -> str:
+    prefix = "AH_CC_TOKEN_" if harness == "claude" else "AH_CX_TOKEN_"
+    name = f"{prefix}{reference.removeprefix(prefix)}"
+    environ = {key: value for key, value in environ.items() if key == name}
     if harness == "claude":
         from scripts.claude_quota_balancer import RoutingError, credential_for_slug, discover_credentials
 
@@ -30,10 +33,10 @@ def selections(value: str, harnesses: list[str], environ: Mapping[str, str]) -> 
     active = dict(environ)
     operator_env.fill(active)
     result: list[tuple[str, str]] = []
-    for choice, harness in zip(values, harnesses, strict=True):
+    for choice, harness in zip(values, harnesses):
         if choice in ("routed", "default"):
             result.append((choice, ""))
-        elif choice.startswith("named:") and choice.removeprefix("named:"):
+        elif choice.startswith("named:") and choice != "named:":
             result.append(("named", _named(choice.removeprefix("named:"), harness, active)))
         else:
             raise QuickError("authentication must be routed, default or named:reference")
