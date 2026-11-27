@@ -1,43 +1,34 @@
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
 from scripts.ci_mutation import stats_candidates
 
+pytest_plugins = ["pytester"]
 
-def select(tmp_path: Path, source: str, *, narrow: bool = True) -> dict[str, list[str]]:
-    (tmp_path / "app.py").write_text("def target(value):\n    return value + 1\n")
-    (tmp_path / "test_sample.py").write_text("import pytest\nfrom app import target\n" + source)
-    (tmp_path / "conftest.py").write_text(
+
+def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[str, list[str]]:
+    root = pytester.path
+    pytester.makepyfile(app="def target(value):\n    return value + 1\n")
+    pytester.makepyfile(test_sample="import pytest\nfrom app import target\n" + source)
+    pytester.makeconftest(
         "import json\nfrom pathlib import Path\n"
         f"from {stats_candidates.__name__} import candidate_tests\n"
         "result = {}\n"
         "def pytest_collection_modifyitems(config, items):\n"
         "    result['original'] = [item.name for item in items]\n"
-        + ("    items[:] = candidate_tests(items, Path.cwd(), {'app.py': [2]})\n" if narrow else "")
-        + "    result['selected'] = [item.name for item in items]\n"
+        "    items[:] = candidate_tests(items, Path.cwd(), {'app.py': [2]})\n"
+        "    result['selected'] = [item.name for item in items]\n"
         "def pytest_sessionfinish(session):\n"
-        "    Path('selection.json').write_text(json.dumps(result))\n"
+        "    Path('selection.json').write_text(json.dumps(result))\n" + plugin
     )
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "test_sample.py", "-q", "-p", "no:cacheprovider"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
-        },
-        text=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    return json.loads((tmp_path / "selection.json").read_text())
+    result = pytester.runpytest_inprocess("test_sample.py", "-q", "-p", "no:cacheprovider")
+    assert result.ret == pytest.ExitCode.OK, result.stdout.str()
+    return json.loads((root / "selection.json").read_text())
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")
@@ -99,6 +90,39 @@ def select(tmp_path: Path, source: str, *, narrow: bool = True) -> dict[str, lis
             "    assert request.getfixturevalue(name) == 2\n",
             ["test_dynamic_fixture"],
         ),
+        (
+            "from pathlib import Path\n"
+            "from importlib import import_module as load\n"
+            "Path('boot.py').write_text('from app import target\\ntarget(1)\\n')\n"
+            "def test_loader_alias():\n"
+            "    name = ''.join(['bo', 'ot'])\n"
+            "    load(name)\n",
+            ["test_loader_alias"],
+        ),
+        (
+            "@pytest.fixture\n"
+            "def hidden():\n    return target(1)\n"
+            "def test_fixture_alias(request):\n"
+            "    resolve = request.getfixturevalue\n"
+            "    name = ''.join(['hid', 'den'])\n"
+            "    assert resolve(name) == 2\n",
+            ["test_fixture_alias"],
+        ),
+        (
+            "from pathlib import Path\n"
+            "Path('boot.py').write_text(\"from app import target\\ndef __getattr__(name):\\n    if name == 'missing':\\n        return target(1)\\n    raise AttributeError(name)\\n\")\n"
+            "from boot import missing\n"
+            "def test_dynamic_export():\n    assert missing == 2\n",
+            ["test_dynamic_export"],
+        ),
+        (
+            "def setup_module():\n    assert target(1) == 2\ndef test_module_setup():\n    assert True\n",
+            ["test_module_setup"],
+        ),
+        (
+            "def teardown_function():\n    assert target(1) == 2\ndef test_function_teardown():\n    assert True\n",
+            ["test_function_teardown"],
+        ),
     ],
     ids=[
         "direct",
@@ -109,13 +133,57 @@ def select(tmp_path: Path, source: str, *, narrow: bool = True) -> dict[str, lis
         "import",
         "dynamic-import",
         "dynamic-fixture",
+        "loader-alias",
+        "fixture-alias",
+        "dynamic-export",
+        "module-setup",
+        "function-teardown",
     ],
 )
 def test_statistics_candidates_preserve_indirect_reach_and_order(
-    tmp_path: Path, source: str, expected: list[str]
+    pytester: pytest.Pytester, source: str, expected: list[str]
 ) -> None:
-    result = select(tmp_path, source)
+    result = select(pytester, source)
     assert result["selected"] == expected
+
+
+@pytest.mark.feature("mutation-stats-trace-candidates")
+def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester) -> None:
+    result = select(
+        pytester,
+        "def test_first():\n    assert True\ndef test_second():\n    assert True\n",
+        plugin="def pytest_pyfunc_call(pyfuncitem):\n    from app import target\n    assert target(1) == 2\n",
+    )
+    assert result["selected"] == ["test_first", "test_second"]
+
+
+@pytest.mark.feature("mutation-stats-trace-candidates")
+def test_stats_bucket_registers_candidate_selection_for_its_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.chdir(tmp_path)
+    scope = tmp_path / "changed-lines.json"
+    scope.write_text("{}")
+    arguments: list[str] = []
+
+    class Runner:
+        _pytest_add_cli_args: list[str] = []
+
+        def run_stats(self, *, tests: list[str]) -> int:
+            arguments.extend(self._pytest_add_cli_args)
+            return 0
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["test_sample.py"], tmp_path / "out.json", "base")
+    index = arguments.index("scripts.ci_mutation.stats_candidates")
+    assert arguments[index - 1 : index + 2] == [
+        "-p",
+        "scripts.ci_mutation.stats_candidates",
+        f"--mutation-stats-scope={scope}",
+    ]
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")

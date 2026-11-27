@@ -16340,7 +16340,9 @@
       "tests": [
         "tests/test_ci_mutation_selection.py::test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant",
         "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_preserve_indirect_reach_and_order",
-        "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_retain_items_without_source"
+        "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_retain_items_without_source",
+        "tests/test_ci_mutation_stats_candidates.py::test_statistics_candidates_keep_runtime_hook_reach",
+        "tests/test_ci_mutation_stats_candidates.py::test_stats_bucket_registers_candidate_selection_for_its_scope"
       ]
     },
     {
