@@ -121,7 +121,7 @@ def test_branch_guard_refuses_a_push_after_any_arithmetic_shift(command: str) ->
         ),
         (
             "cat <<OUTER > notes.md\n$(cat <<INNER\ninner\nINNER\n)\nOUTER\ngit status",
-            "cat  > notes.md\ngit status",
+            "cat  > notes.md\ncat \n\ngit status",
         ),
         ("cat <<EOF > notes.md\n\ud800\nEOF\ngit status", "cat  > notes.md\ngit status"),
         ("cat <<EOF > out.txt\n${HOME}/notes\nEOF\ngit status", "cat  > out.txt\ngit status"),
@@ -148,3 +148,64 @@ def test_stripping_keeps_exact_text_around_heredocs(command: str, stripped: str)
 )
 def test_stripping_keeps_a_heredoc_the_parse_cannot_close(command: str) -> None:
     assert strip_non_command_content(command) == command
+
+
+UNQUOTED_BODY_PUSHES = [
+    "cat <<EOF > notes.md\n$(git push origin main)\nEOF",
+    "cat <<-EOF > notes.md\n\t$(git push origin main)\n\tEOF",
+    "cat <<EOF > notes.md\nsee `git push origin main` here\nEOF",
+]
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+@pytest.mark.parametrize(
+    ("command", "stripped"),
+    [
+        *(
+            (f"{push}\ngit status", "cat  > notes.md\ngit push origin main\ngit status")
+            for push in UNQUOTED_BODY_PUSHES
+        ),
+        (
+            "cat <<EOF > notes.md\n$(date) and $(git push origin main)\nEOF\ngit status",
+            "cat  > notes.md\ndate\ngit push origin main\ngit status",
+        ),
+        (
+            "cat <<OUTER > notes.md\n$(cat <<INNER\n$(git push origin main)\nINNER\n)\nOUTER\ngit status",
+            "cat  > notes.md\ncat \ngit push origin main\n\ngit status",
+        ),
+    ],
+)
+def test_stripping_keeps_the_substitutions_of_an_unquoted_body(command: str, stripped: str) -> None:
+    assert strip_non_command_content(command) == stripped
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+def test_stripping_keeps_a_lone_surrogate_inside_an_unquoted_body_substitution() -> None:
+    stripped = strip_non_command_content("cat <<EOF > notes.md\n$(echo \ud800)\nEOF\ngit status")
+    assert stripped.encode("utf-8", "surrogatepass") == b"cat  > notes.md\necho \xed\xa0\x80\ngit status"
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<'EOF' > notes.md\n$(git push origin main)\nEOF\ngit status",
+        "cat <<EOF > notes.md\nsee \\`git push origin main\\` here\nEOF\ngit status",
+        "cat <<EOF > notes.md\nsee \\$(git push origin main) here\nEOF\ngit status",
+        "cat <<EOF > notes.md\ndiff <(git push origin main) here\nEOF\ngit status",
+    ],
+)
+def test_stripping_drops_a_quoted_body_and_body_text_bash_never_runs(command: str) -> None:
+    assert strip_non_command_content(command) == "cat  > notes.md\ngit status"
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+@pytest.mark.parametrize("command", UNQUOTED_BODY_PUSHES)
+def test_branch_guard_refuses_a_push_to_main_in_an_unquoted_body_substitution(command: str) -> None:
+    with pytest.raises(BlockAction, match="directly to main"):
+        check_branch_guard(_payload(command))
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+def test_branch_guard_lets_a_push_substitution_in_a_quoted_body_pass() -> None:
+    check_branch_guard(_payload("cat <<'EOF' > notes.md\n$(git push origin main)\nEOF"))

@@ -1,0 +1,15 @@
+rules:
+  - id: hive-marker-only-master-login
+    languages: [python]
+    severity: ERROR
+    message: Advertise every stored master login before deriving the best legacy login; the marker can name an exhausted account while another slot is open.
+    paths:
+      include:
+        - /scripts/hive/daemon.py
+        - hive-marker-only-master-login.py
+    patterns:
+      - pattern-inside: |
+          def beat(...):
+              ...
+      - pattern: |
+          $FIELDS["master_login"] = {"claude": master_claude_login.signed_in()}

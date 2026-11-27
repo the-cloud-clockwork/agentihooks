@@ -44,6 +44,7 @@ from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
 from scripts import review
 from scripts.doctor import priming
+from scripts.forge.remote import CHANGE_LINK
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
@@ -217,6 +218,7 @@ SETTABLE = {
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
     "focus-weight": "focus_weight",
+    "review-share": "review_share",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -259,7 +261,11 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {
+    "wrapper phases": frozenset({"doc"}),
+    "wrapper relay": frozenset({"judged"}),
+    "wrapper view": frozenset({"agents"}),
+}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
@@ -688,6 +694,7 @@ def run_tick(
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
+        _hold_view(beating, slug, ledger)
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,
@@ -698,14 +705,12 @@ def run_tick(
         budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
-            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
-        _hold_view(beating, slug, ledger)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
@@ -1308,11 +1313,11 @@ def run_control(store, args, who, handler):
         clearance.record(LedgerClient(), args.slug, cleared, before, after)
 
 
-def scaling_value(key, value):
+def scaling_value(key: str, value: str) -> str | int | float:
     if key == "scaling":
         return value
     if key in ("memory-per-agent", "swap-floor"):
-        if not value.isdigit():
+        if not (value.isascii() and value.isdigit()):
             raise SwarmError(f"{key} takes a whole number of MB")
         return int(value)
     try:
@@ -1333,7 +1338,7 @@ def api_address(value: str, refusal: str) -> str:
     return value
 
 
-def config_value(key, value):
+def config_value(key: str, value: str) -> str | bool | int | float:
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
@@ -1343,7 +1348,7 @@ def config_value(key, value):
     if key == HIVE_PLACEMENT:
         return on_off(value)
     if key == PLACEMENT_NODES:
-        if not value.isdigit():
+        if not (value.isascii() and value.isdigit()):
             raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         return int(value)
     if key == LAB_URL:
@@ -1434,7 +1439,7 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
             except ValueError as exc:
                 raise SwarmError(str(exc)) from exc
             continue
-        if key not in SETTABLE or not value.isdigit():
+        if key not in SETTABLE or not (value.isascii() and value.isdigit()):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
@@ -1461,6 +1466,7 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "focus_weight": config.focus_weight,
+                "review_share": config.review_share,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
@@ -2088,7 +2094,7 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
     head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
-    if not keeps_main:
+    if not keeps_main and not pull_head.gitlab_link(args.url):
         linked_issues.refuse_unnamed(args.url, body, row, lambda member: ledger.task(args.slug, member))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
@@ -2136,10 +2142,7 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
-PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
-
-
-def _pull_scope(row, args):
+def _pull_scope(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     scopes = row.get("pull_scopes") or {}
     kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
     if not kind:
@@ -2147,8 +2150,8 @@ def _pull_scope(row, args):
     scope = getattr(args, kind).strip()
     if not scope:
         raise SwarmError(f"--{kind} needs the scope this pull request delivers")
-    if not PULL_URL.fullmatch(args.url):
-        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    if not CHANGE_LINK.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request or GitLab merge request URL, not {args.url}")
     return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
 
 
@@ -2690,11 +2693,13 @@ def cmd_masters_channel(store, args):
     print(json.dumps([asdict(post) for post in posts]))
 
 
-def _read(path, what):
+def _read(path: str, what: str) -> str:
     try:
         return Path(path).expanduser().read_text(encoding="utf-8")
     except OSError as exc:
         raise SwarmError(f"cannot read the {what} {path}: {exc.strerror}") from exc
+    except UnicodeDecodeError as exc:
+        raise SwarmError(f"cannot read the {what} {path}: it is not UTF-8 text") from exc
 
 
 def _seat(agent):

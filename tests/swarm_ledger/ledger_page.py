@@ -4,6 +4,7 @@ import re
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ ORDER = (
     "frozen_view",
     "state",
     "sync",
+    "seed",
     "phase_review",
     "markdown",
     "media",
@@ -50,15 +52,15 @@ ORDER += (
     "architecture",
     "status_note",
     "controls",
+    "orders",
     "events",
     "main",
 )
 
 
-def serve_modules(target, ledger=None, swarm=None):
+def serve_modules(target: Any, ledger: dict | None = None, swarm: dict | None = None) -> None:
     """Answer every /static/<version>/ asset the shells load, and with a ledger the event stream that carries it."""
     if ledger is not None:
-        snapshot_body(ledger, swarm)
         target.route(lambda url: is_events(url), lambda route: fulfill_events(route, ledger, swarm))
     from scripts.swarm_ledger import ledger_core
 
@@ -88,9 +90,25 @@ def ledger_state(doc, rev=1):
     return {**doc, "_meta": {"rev": rev, **doc.get("_meta", {})}}
 
 
-def snapshot_body(ledger=None, swarm=None):
-    data = {"ledger": served_ledger(ledger), "swarm": swarm}
-    return f"id: c0\nevent: snapshot\ndata: {json.dumps(data)}\n\n"
+def open_body(ledger: dict | None = None, swarm: dict | None = None) -> str:
+    view = served_ledger(ledger)
+    rev = view.get("_meta", {}).get("rev") if isinstance(view, dict) else None
+    return f"id: c0\nevent: open\ndata: {json.dumps({'rev': rev, 'swarm': swarm})}\n\n"
+
+
+def summary_of(view: dict) -> dict:
+    """The summary read of a served page view: every part but the paged sections, with their open counts."""
+    from scripts.swarm_ledger.api import summary
+
+    data = {key: value for key, value in view.items() if key not in summary.PAGED}
+    data["sections"] = {name: summary.section(name, view.get(name) or []) for name in summary.PAGED}
+    return data
+
+
+def view_page(view: dict, name: str) -> dict:
+    """Every row a served page view holds for one section, in stored order, as one open read page."""
+    rows = [{**row, "position": at} for at, row in enumerate(view.get(name) or []) if isinstance(row, dict)]
+    return {"data": rows, "revision": "r", "total": len(rows), "next_offset": None}
 
 
 def served_ledger(ledger):
@@ -108,14 +126,26 @@ def served_ledger(ledger):
     return {"marks": {"frozen": [], "held": []}, "phase_status": status, **ledger, "_meta": meta}
 
 
-def is_events(url):
-    path = urlsplit(url).path
-    return path.startswith("/api/v1/ledgers/") and path.endswith("/events")
+def is_events(url: str) -> bool:
+    """Whether url is a ledger feed request of the page: the event stream, the summary or an open section read."""
+    parts = urlsplit(url)
+    if not parts.path.startswith("/api/v1/ledgers/"):
+        return False
+    return parts.path.endswith(("/events", "/summary")) or "state=open" in parts.query
 
 
-def fulfill_events(route, ledger=None, swarm=None):
-    """Answer the page's event stream with one snapshot; the page reconnects after the body ends."""
-    route.fulfill(body=snapshot_body(ledger, swarm), content_type="text/event-stream")
+def fulfill_events(route: Any, ledger: dict | None = None, swarm: dict | None = None) -> None:
+    """Answer the event stream with one open frame, after which the page reconnects, and the summary and open
+    section reads from the served ledger."""
+    parts = urlsplit(route.request.url)
+    if parts.path.endswith("/events"):
+        return route.fulfill(body=open_body(ledger, swarm), content_type="text/event-stream")
+    if ledger is None:
+        return route.fulfill(status=404, body="no ledger")
+    view = served_ledger(ledger)
+    if parts.path.endswith("/summary"):
+        return route.fulfill(json={"data": summary_of(view), "revision": "r"})
+    return route.fulfill(json=view_page(view, parts.path.rsplit("/", 1)[1]))
 
 
 def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):

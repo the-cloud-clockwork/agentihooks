@@ -61,13 +61,7 @@ GUARD = threading.Lock()
 
 
 def read(repository: object, slug: str, query: dict[str, Any]) -> dict[str, Any]:
-    with GUARD:
-        held = HELD.pop(slug, None)
-        if held is None or held.repository is not repository:
-            held = Tasks(repository)
-        HELD[slug] = held
-        while len(HELD) > LEDGERS_KEPT:
-            HELD.pop(next(iter(HELD)))
+    held = holder(repository, slug)
     with held.lock:
         held.refresh(slug)
         if "targets" in query:
@@ -75,6 +69,24 @@ def read(repository: object, slug: str, query: dict[str, Any]) -> dict[str, Any]
         if query.keys() & set(SELECTION):
             return selecting(held.stored[2], query)  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript, reportUnknownArgumentType]
         return held.page(query)
+
+
+def holder(repository: object, slug: str) -> Tasks:
+    with GUARD:
+        held = HELD.pop(slug, None)
+        if held is None or held.repository is not repository:
+            held = Tasks(repository)
+        HELD[slug] = held
+        while len(HELD) > LEDGERS_KEPT:
+            HELD.pop(next(iter(HELD)))
+    return held
+
+
+def rows(repository: object, slug: str) -> tuple[Any, ...]:
+    held = holder(repository, slug)
+    with held.lock:
+        held.refresh(slug)
+        return held.stored  # pyright: ignore[reportReturnType]
 
 
 def targeting(rows: list[Any], url: str) -> dict[str, Any]:

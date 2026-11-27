@@ -13,9 +13,10 @@ from pathlib import Path
 
 from scripts.ci_lab.remote import checkout
 
-__all__ = ["Lab", "Mirror", "Worktrees", "lab"]
+__all__ = ["Lab", "Mirror", "Worktrees", "empty", "lab"]
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+OWNED = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
 
 
 def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None) -> None:
@@ -46,6 +47,25 @@ def lab(environ: Mapping[str, str]) -> Lab | None:
     """Return the lab remote AGENTIHOOKS_LAB_REMOTE names, holding AGENTIHOOKS_LAB_REMOTE_TOKEN, or None without one."""
     url = environ.get(checkout.URL_ENV)
     return Lab(url, environ.get(checkout.TOKEN_ENV, "")) if url else None
+
+
+def empty(folder: Path) -> None:
+    """Remove every entry of the folder, sealed trees and folders without owner access included, leaving the folder
+    itself in place; a symlink's target stays untouched, and a missing folder is not an error. A folder's mode is
+    changed only when it lacks an owner bit, so an open folder of another user is emptied as it is."""
+    if not folder.is_dir():
+        return
+    mode = folder.stat().st_mode
+    if mode & OWNED != OWNED:
+        folder.chmod(mode | OWNED)
+    for entry in folder.iterdir():
+        if entry.is_symlink():
+            entry.unlink()
+        elif entry.is_dir():
+            empty(entry)
+            entry.rmdir()
+        else:
+            entry.unlink()
 
 
 def _owned(tree: Path) -> list[Path]:

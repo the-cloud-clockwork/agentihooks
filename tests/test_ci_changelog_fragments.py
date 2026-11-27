@@ -155,7 +155,7 @@ def test_the_sections_are_the_ones_the_release_notes_order() -> None:
 
 def test_lint_grades_the_pull_request_branch_with_the_protected_grader() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
-    step = next(step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == STEP)
+    step = next(step for step in workflow["jobs"]["lint-actions"]["steps"] if step.get("name") == STEP)
     assert step["if"] == "${{ !cancelled() }}"
     assert step["env"] == {"BRANCH": "${{ github.head_ref || github.ref_name }}"}
     assert step["run"] == (

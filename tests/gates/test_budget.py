@@ -1,4 +1,7 @@
 import threading
+from pathlib import Path
+
+import pytest
 
 from scripts.gates.budget import Budget
 
@@ -47,3 +50,38 @@ def test_parallel_spends_never_pass_the_cap(tmp_path):
         thread.join()
     assert sum(1 for allowed, _ in results if allowed) == 5
     assert budget.spent("t1", "launches") == 5
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_refund_gives_back_once_each_spend_listed_under_its_call(tmp_path: Path) -> None:
+    budget = Budget("demo", "reruns", tmp_path)
+    budget.spend("h1", "reruns", 2, "toolu_1")
+    budget.spend("h2", "reruns", 2, "toolu_1")
+    budget.spend("h1", "reruns", 2, "toolu_2")
+    assert (tmp_path / "demo" / "gates" / "reruns" / "calls" / "toolu_1").read_text() == "h1\treruns\nh2\treruns\n"
+    budget.refund("toolu_1")
+    budget.refund("toolu_1")
+    assert (budget.spent("h1", "reruns"), budget.spent("h2", "reruns")) == (1, 0)
+    budget.refund("toolu_2")
+    assert budget.spent("h1", "reruns") == 0
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_refund_never_counts_below_zero_and_leaves_spends_without_a_call(tmp_path: Path) -> None:
+    budget = Budget("demo", "reruns", tmp_path)
+    budget.spend("h1", "reruns", 2, "toolu_1")
+    budget.path("h1", "reruns").write_text("0")
+    budget.spend("h2", "reruns", 2)
+    budget.refund("toolu_1")
+    budget.refund("toolu_9")
+    budget.refund("")
+    assert (budget.spent("h1", "reruns"), budget.spent("h2", "reruns")) == (0, 1)
+    assert list((tmp_path / "demo" / "gates" / "reruns" / "calls").iterdir()) == []
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_refund_gives_back_a_spend_whose_subject_holds_a_tab(tmp_path: Path) -> None:
+    budget = Budget("demo", "reruns", tmp_path)
+    budget.spend("h1\th2", "reruns", 2, "toolu_1")
+    budget.refund("toolu_1")
+    assert budget.spent("h1\th2", "reruns") == 0

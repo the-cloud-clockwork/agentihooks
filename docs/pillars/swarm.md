@@ -1296,6 +1296,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N max-review-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
 | `agentihooks swarm <id> set focus-weight=N` | Share of a lane, as a whole percent from 0 to 100 (default 50), past which the dispatcher stops sorting focused tasks first. Claims ignore it: focused tasks take every free seat while any is open. |
+| `agentihooks swarm <id> set review-share=N` | Share of the autoscale ceiling held for the review lane while review tasks wait, as a whole percent from 0 to 100 (default 20). The review ceiling holds one seat above its live reviewers when a review harness has a free seat, never more than the waiting review tasks or the free seats of the review lane's harnesses; with no review task waiting the share goes back to the other lanes. |
 | `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the unfinished engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
 | `agentihooks swarm <id> set master-per=N\|hive\|off` | Overrides `masters-step`. The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) hands sizing back to `masters-step`. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
 | `agentihooks swarm <id> set load-high=N load-low=N memory-per-agent=MB swap-full-share=N swap-floor=MB` | The local host budget behind host room; see [Local host room](#local-host-room). |
@@ -1316,7 +1317,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
-| `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
+| `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, in the pane herdr restored for it when that pane waits at a bare shell with the agent's conversation and in a new pane otherwise, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
@@ -1383,9 +1384,13 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 
 The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`, also for a swarm created without
 a template. Existing swarm configurations without `max_review` load a review cap of `0`; autoscale preserves that
-cap while sizing the other worker lanes, and `swarm <id> set max-review-agents=N` raises it. See
+cap while sizing the other worker lanes unless review tasks wait or a reviewer is live.
+`swarm <id> set max-review-agents=N` raises the stored cap. See
 [Review lane configuration](../reference/swarm-review-lane.md#configure-a-new-swarm) for a template example, new
-swarm usage, the review cap setting and the lane's limits.
+swarm usage, the review cap setting and the lane's limits,
+[Pin the review harness, model and effort](../reference/swarm-review-lane.md#pin-the-review-harness-model-and-effort)
+for a Codex reviewer at xhigh, and [Reserved review share](../reference/swarm-review-lane.md#reserved-review-share)
+for the seats autoscale holds for review.
 
 `links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
 `ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
@@ -4413,8 +4418,9 @@ Work it end to end, then stop:
 ```
 
 The commands carry the planner's own prefixes: `agentihooks api --slug <slug> --as <planner>` for ledger reads and
-writes, and `agentihooks swarm <slug>` for `done`. The phase in step 4 is the enhancement task's own phase, or the
-literal `<phase id>` when the task has none, so an enhancement task belongs in its target's phase.
+writes, and `agentihooks swarm <slug>` for `done`. The phase in step 4 is the enhancement task's own phase, which is
+its target's phase: the thin task check gives a target with no phase a manual planning phase of its own, named like its
+enhancement task, in the same ledger write that queues the enhancement.
 
 Each step leaves this behind:
 
@@ -8913,15 +8919,23 @@ make that visible.
   every focus record with `target`, `by`, `at`, `reason`, `claimable`, `done` (the ids of done tasks under it),
   `tasks` (every other task under it with its `lane`, `state` and `verdict`) and `unclaimed_minutes`: the minutes
   since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
-  `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
-  exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+  `get focus/<target>` (`GET .../focus/<target>`) answers one target in the same shape, or `404 resource_missing`
+  when the target does not exist. `get focus/<target>/tasks` (`GET .../focus/<target>/tasks`) lists the tasks under
+  one target that are not done, each with its `id`, `lane`, `state` and `verdict`, through the cursor paging every
+  collection uses (`cursor`, `limit`, `next_cursor`), and the command line reads it to its end. A list that changes
+  between two pages answers `409 revision_conflict` and is read again from its first page. A name that is itself a
+  plan node, such as a task whose id is `tasks`, keeps its one reply read. Each reply is held to the reply limit:
+  past it the focus list answers `413 resource_too_large` and names `get freezes` for the records and
+  `get focus/<target>/tasks` for the tasks of one, and the read of one target names its own paged read. A ledger
+  server on a release older than the paged read answers it `404 resource_missing`. The swarm's Doctor fix phase is
+  read from the swarm store; without one the read uses no fix phase.
 - **One orders read.** `agentihooks api --slug <id> get orders` (ledger API `GET /api/v1/ledgers/<id>/orders`) lists
   every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first:
   `item`, `title`, `by`, `at`, his `quote` or the `request` entry id, `claimable`, `busy` (the count claimed or in a
   pull request), `done` (the ids of done tasks under it), `tasks` (every task under it that is neither done nor out
   of scope, with its `lane`, `state` and `verdict`) and `line`, one plain line. The reply is one page: when the open
-  orders pass the reply limit the read answers `413 resource_too_large` and names `focus/<item>`, which lists the
-  tasks of one order.
+  orders pass the reply limit the read answers `413 resource_too_large` and names the command line read
+  `agentihooks api --slug <id> get focus/<item>/tasks`, which lists the tasks of one order in pages.
 - **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
   whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
   ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the

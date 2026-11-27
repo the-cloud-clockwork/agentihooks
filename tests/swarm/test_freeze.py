@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -127,6 +128,63 @@ def test_an_enhancement_task_passes_the_focus_when_its_target_is_admitted(target
     work = [task("t2", phase="p2", depends_on=["t3"]), task("t3")]
     enhancement = task("enhance-t3", lane="plan", kind="plan", enhances="t3")
     assert not held(enhancement, record(target, "focus"), tasks=work)
+
+
+@pytest.mark.parametrize("target", ["tasks/t1", "phases/p1", "plans/a", "lane:eng", "kind:code"])
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_holds_a_plan_enhancing_frozen_work(target: str) -> None:
+    work = task(kind="code")
+    plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    found = doc(record(target), tasks=[work, plan])
+    assert freeze.claim_gate(plan, found, hierarchy.project(found)[0], "")
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen(explicit: bool) -> None:
+    work = task()
+    if explicit:
+        work["frozen"] = True
+    plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    found = doc(record("tasks/t1"), tasks=[work, plan])
+    graph = hierarchy.project(found)[0]
+    assert freeze.claim_gate(plan, found, graph, "", None)
+    found["freezes"] = []
+    if explicit:
+        work["frozen"] = False
+    assert not freeze.claim_gate(plan, found, graph, "", None)
+
+
+@pytest.mark.parametrize(
+    "fields", [{}, {"lane": "eng", "enhances": "t1"}, {"enhances": ""}, {"enhances": "missing"}, {"enhances": None}]
+)
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_keeps_an_unfrozen_enhancement_claimable(fields: dict[str, Any]) -> None:
+    class TaskRows(list[dict[str, Any]]):
+        scans = 0
+
+        def __iter__(self) -> Iterator[dict[str, Any]]:
+            self.scans += 1
+            return super().__iter__()
+
+    frozen_work, free_work = task(), task("t2")
+    held_plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    free_plan = {**task("enhance-t2", lane="plan", kind="plan", phase="p2", enhances="t2"), **fields}
+    found = doc(record("tasks/t1"), tasks=[frozen_work, free_work, held_plan, free_plan])
+    graph = hierarchy.project(found)[0]
+    rows = TaskRows(found["tasks"])
+    found["tasks"] = rows
+    assert freeze.claim_gate(held_plan, found, graph, "", None)
+    assert freeze.claim_gate(held_plan, found, graph, "", None)
+    assert not freeze.claim_gate(free_plan, found, graph, "", None)
+    assert rows.scans == 1
+    new_plan = task("enhance-t3", lane="plan", kind="plan", phase="p2", enhances="t3")
+    found["tasks"].extend([task("t3", frozen=True), new_plan])
+    assert freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
+    found["tasks"] = [dict(row) for row in found["tasks"]]
+    assert freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
+    found["tasks"][-2]["frozen"] = False
+    assert not freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
 
 
 @pytest.mark.feature("swarm-focus-plan-work")
@@ -434,6 +492,30 @@ def test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it(monk
     without_queue = freeze.held(row, found, graph, "")
     assert calls == [1]
     assert with_queue == without_queue is True
+
+
+@pytest.mark.feature("ledger-page-marks-admission-once")
+@pytest.mark.parametrize("open_tasks", [2, 40])
+def test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count(
+    open_tasks: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        task(f"t{index}", phase=f"p{index % 2 + 1}", lane="eng" if index % 3 else "ci") for index in range(open_tasks)
+    ]
+    found = doc(record("lane:ci", "focus"), tasks=rows)
+    graph = hierarchy.project(found)[0]
+    calls: list[int] = []
+    original = freeze.admitted
+
+    def counting(ledger: dict[str, Any], nodes: dict[str, Any]) -> frozenset[str] | None:
+        calls.append(1)
+        return original(ledger, nodes)
+
+    monkeypatch.setattr(freeze, "admitted", counting)
+    marked = freeze.marks(found, graph, "", False)
+    assert sorted(marked["held"]) == sorted(f"tasks/t{index}" for index in range(open_tasks) if index % 3)
+    assert marked["frozen"] == []
+    assert calls == [1]
 
 
 @pytest.mark.feature("ready-ordered-offer-first")

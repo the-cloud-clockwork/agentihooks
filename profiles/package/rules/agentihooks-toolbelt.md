@@ -19,6 +19,8 @@ not name.
   decisions: do what they say.
 - Work and questions for another session go through `agentihooks msg`; close
   every item with where its work went.
+- Live sessions — also "claude-ai", live login, live agent, interactive
+  agent, "launch it in claude-ai" — are `--agent claude -- --route claude-ai`.
 
 ## Swarm, small ledger or nothing
 

@@ -1,4 +1,3 @@
-import fcntl
 import hashlib
 import json
 import os
@@ -6,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.context import master_coding, worker_mode
 from scripts.swarm_ledger import plan_read

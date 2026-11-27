@@ -142,7 +142,16 @@ NOT_HIS = "refused: the quote is not in an operator prompt or answer any master 
 ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+ITEM_ID = "[A-Za-z0-9][A-Za-z0-9._-]*"
+FOCUS_TARGET = f"(?:(?:plans|phases|slices|tasks)/{ITEM_ID}|(?:lane|kind):{ITEM_ID})"
+FOCUS_TASKS = re.compile(f"focus/{FOCUS_TARGET}/tasks")
+LEDGER_ITEM = re.compile(
+    f"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/{ITEM_ID}|focus/{FOCUS_TARGET}(?:/tasks)?"
+)
+ITEM_FORMS = (
+    "tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, focus/<target>, focus/<target>/tasks, "
+    "tasks, freezes, focus or orders"
+)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -221,10 +230,11 @@ def launch_token(slug: str, name: str) -> str:
 
 
 def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
-    """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
-    from scripts.tick.adapters import database_ledger
+    """The ledger API client for slug: this host's warm writer first, else the ledger API route code run in this
+    process over the shared database."""
+    from scripts.tick.adapters import writer_client
 
-    return database_ledger.client(base(slug), timeout)
+    return writer_client.client(base(slug), timeout)
 
 
 def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
@@ -417,7 +427,8 @@ def cmd_tree(args):
 
 
 def cmd_get(args: argparse.Namespace) -> None:
-    print(SHOW_JSON(resource(args.slug, args.item, collection="/" not in args.item)))
+    listed = "/" not in args.item or bool(FOCUS_TASKS.fullmatch(args.item))
+    print(SHOW_JSON(resource(args.slug, args.item, collection=listed)))
 
 
 def cmd_tasks(args):
@@ -800,9 +811,7 @@ def _duration(value):
 
 def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
-        raise argparse.ArgumentTypeError(
-            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders"
-        )
+        raise argparse.ArgumentTypeError(f"name {ITEM_FORMS}")
     return value
 
 
@@ -1083,12 +1092,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser(
         "get",
-        help="print one task, phase, follow up or priority, or every task, freeze or focus, through the ledger API",
-    ).add_argument(
-        "item",
-        type=_ledger_item,
-        help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders",
-    )
+        help=(
+            "print one task, phase, follow up, priority or focus target, the tasks of a focus target, "
+            "or every task, freeze or focus, through the ledger API"
+        ),
+    ).add_argument("item", type=_ledger_item, help=ITEM_FORMS)
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
         tasks.add_argument(flag)

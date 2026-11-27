@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.ci_lab.units import Priority, priority_of
-from scripts.ci_lab.webhooks import NOTICE, PLANT, HeadEvent
+from scripts.ci_lab.webhooks import NOTICE, PLANT, HeadEvent, pull_lane
 from scripts.ci_runner_trust import ACTORS, validate_actors
 
 __all__ = ["GradeRequest", "admit", "answered", "reconcile", "request_from", "trusted_actors"]
@@ -69,5 +69,6 @@ def reconcile(open_pull_requests: Iterable[Mapping[str, Any]], graded: Callable[
     for pull in open_pull_requests:
         repo, head = pull["base"]["repo"]["html_url"], pull["head"]["sha"]
         if not graded(repo, head):
-            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], pull["user"]["login"], RECONCILE))
+            author, lane = pull["user"]["login"], pull_lane(pull)
+            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, lane))
     return heads

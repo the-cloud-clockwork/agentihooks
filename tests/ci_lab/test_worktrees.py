@@ -1,4 +1,5 @@
 import base64
+import errno
 import os
 import stat
 import subprocess
@@ -382,6 +383,107 @@ def test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head(tmp
     assert _git(owned, "rev-parse", "HEAD").strip() == later
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder(
+    tmp_path: Path, origin: Path
+) -> None:
+    head = _commit(origin, "a", "a")
+    folder = tmp_path / "root"
+    folder.mkdir()
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=folder / "trees", capacity=1)
+    trees.lease(head)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("x")
+    locked.chmod(locked.stat().st_mode & ~(stat.S_IWUSR | stat.S_IXUSR))
+    (folder / "plain.txt").write_text("y")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    kept_dir = tmp_path / "kept-dir"
+    kept_dir.mkdir()
+    (kept_dir / "file").write_text("kept too")
+    (folder / "dirlink").symlink_to(kept_dir)
+
+    worktrees.empty(folder)
+
+    assert folder.exists()
+    assert list(folder.iterdir()) == []
+    assert outside.read_text() == "kept"
+    assert (kept_dir / "file").read_text() == "kept too"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
+    worktrees.empty(tmp_path / "absent")
+
+
+def _recorded_chmod(monkeypatch: pytest.MonkeyPatch, refused: Path | None = None) -> list[tuple[Path, int]]:
+    changed: list[tuple[Path, int]] = []
+    chmod = Path.chmod
+
+    def record(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if path == refused:
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+        changed.append((path, stat.S_IMODE(mode)))
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", record)
+    return changed
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_removes_every_entry_of_an_open_folder_whose_mode_change_the_system_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    sealed = folder / "trees" / "head"
+    sealed.mkdir(parents=True)
+    (sealed / "file").write_text("x")
+    sealed.chmod(0o555)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("y")
+    locked.chmod(0)
+    (folder / "plain.txt").write_text("z")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    folder.chmod(0o777)
+    _recorded_chmod(monkeypatch, refused=folder)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o777
+    assert outside.read_text() == "kept"
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_changes_the_mode_only_of_a_folder_that_lacks_an_owner_bit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    open_folder = folder / "open"
+    open_folder.mkdir(parents=True)
+    modes = {"no-read": 0o355, "no-write": 0o555, "no-search": 0o655, "none": 0}
+    for name, mode in modes.items():
+        (folder / name).mkdir()
+        (folder / name).chmod(mode)
+    folder.chmod(0o700)
+    changed = _recorded_chmod(monkeypatch)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert sorted(changed) == [
+        (folder / "no-read", 0o755),
+        (folder / "no-search", 0o755),
+        (folder / "no-write", 0o755),
+        (folder / "none", 0o700),
+    ]
+
+
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")
 def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path, origin: Path) -> None:
     fork = _commit(origin, "a", "a")
@@ -399,3 +501,26 @@ def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path,
     known, fetched = trees.own(head, later)
     assert fetched is False
     assert _git(known, "merge-base", later, head).strip() == fork
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed(
+    tmp_path: Path, origin: Path
+) -> None:
+    base = _commit(origin, "a", "a")
+    _commit(origin, "a", "changed")
+    head = _commit(origin, "b", "new")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, base), root=tmp_path / "trees", capacity=1)
+    shared, _ = trees.lease(head)
+    own, _ = trees.own(head, base)
+
+    _git(own, "reset", "-q", "--hard", base)
+    assert (own / "a").read_text() == "a"
+    assert not (own / "b").exists()
+    _git(own, "reset", "-q", "--hard", head)
+
+    assert ((own / "a").read_text(), (own / "b").read_text()) == ("changed", "new")
+    assert _git(own, "status", "--porcelain") == ""
+    assert ((shared / "a").read_text(), (shared / "b").read_text()) == ("changed", "new")
+    assert _git(shared, "rev-parse", "HEAD").strip() == head
+    assert _writable(shared) == []

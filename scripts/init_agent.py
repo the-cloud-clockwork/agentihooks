@@ -3,6 +3,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -56,6 +57,13 @@ def _runtime_dir(environ: dict[str, str]) -> Path:
 
 def _started_marker(launcher: Path) -> Path:
     return launcher.with_suffix(".started")
+
+
+def _started_at(marker: Path, environ: dict[str, str]) -> int:
+    started_at = int(marker.stat().st_mtime * 1000)
+    if not environ.get("AGENTIHOOKS_QUICK_SWARM"):
+        marker.unlink(missing_ok=True)
+    return started_at
 
 
 def _route_report(launcher: Path) -> Path:
@@ -520,6 +528,22 @@ def _opening_prompt(prompt: str, path: Path) -> str:
     return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
 
 
+def _replace_quick_launchers(launcher: Path, safe_name: str) -> None:
+    from scripts.herdr_gc import _alive, _launch_pid
+
+    for previous in launcher.parent.glob(f"{safe_name}-*.sh"):
+        if (
+            previous == launcher
+            or re.fullmatch(r"\d{6}-\d{6}-\d+\.sh", previous.name.removeprefix(f"{safe_name}-")) is None
+        ):
+            continue
+        pid = _launch_pid(previous)
+        if pid is None or _alive(pid):
+            continue
+        for suffix in (".sh", ".prompt", ".opening", ".route", ".started"):
+            previous.with_suffix(suffix).unlink(missing_ok=True)
+
+
 def _write_launcher(
     directory: Path,
     name: str,
@@ -565,14 +589,15 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
+    quick = bool(environ.get("AGENTIHOOKS_QUICK_SWARM"))
+    cleanup = [] if quick else [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
         "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
-        f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f'echo "$$" > {shlex.quote(str(_started_marker(launcher)))}\n'
         f"{operator_env.source_line(environ)}"
         f"{_access_export()}"
         f"{_predecessor_export(environ)}"
@@ -599,6 +624,8 @@ def _write_launcher(
         encoding="utf-8",
     )
     launcher.chmod(0o700)
+    if quick:
+        _replace_quick_launchers(launcher, safe_name)
     return launcher, prompt_file
 
 
@@ -662,13 +689,16 @@ def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     return environ.get(binding.HOMES[agent])
 
 
-def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
+def _binding_request(args: Any, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
     from scripts.profiles import binding
 
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
+    root = _runtime_dir(environ)
+    if agent == "codex" and args.profile == "planner":
+        root = Path(environ.get("HOME") or Path.home()) / ".agentihooks" / "swarm" / "profile-reports"
+    report = root / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     if not args.defer_canary:
@@ -951,22 +981,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _herdr_enabled(environ: dict[str, str]) -> bool:
-    home = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
-    try:
-        state = json.loads((home / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True
-    herdr = state.get("herdr") if isinstance(state, dict) else None
-    return not (isinstance(herdr, dict) and herdr.get("enabled") is False)
-
-
 def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
-    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed and enabled."""
+    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed."""
     choice = requested or environ.get("AGENTIHOOKS_TERMINAL_HOST", "")
     if choice:
         return choice, True
-    return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
+    return ("herdr" if herdr_host.binary() else "native"), False
 
 
 def _start_herdr(
@@ -1152,10 +1172,15 @@ def main(
         active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
+        rotation_default = args.agent or ("claude" if _flag_value(claude_args, ("--route",)) == "claude-ai" else "")
         agent, reason = (
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
+            else (
+                (args.agent or "claude", "interactive")
+                if args.auth
+                else agent_choice.choose(rotation_default, active_env)
+            )
         )
         agent = agent or "claude"
         if args.handoff:
@@ -1272,8 +1297,7 @@ def main(
             )
             return 2
         time.sleep(0.25)
-    launcher_at = int(marker.stat().st_mtime * 1000)
-    marker.unlink(missing_ok=True)
+    launcher_at = _started_at(marker, active_env)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
     if _detached(args, active_env):

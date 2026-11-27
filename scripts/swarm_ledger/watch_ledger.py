@@ -3,7 +3,7 @@
 
 Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
-Follows the ledger server's event stream, one snapshot then only changes, and prints each event logged after
+Follows the ledger server's event stream, reading the ledger in process when it opens or names a newer revision, and prints each event logged after
 rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
 too). A dropped stream reconnects after --interval seconds and replays from its cursor. On a remote host, such
 as a hive worker, it reads the ledger in process every --interval seconds instead:
@@ -140,11 +140,17 @@ class Watch:
             say(f"WARNING {message}")
         self.warned = meta.get("warnings") or []
 
-    def take(self, name, data):
+    def take(self, name: str, data: dict[str, Any]) -> None:
         if name == "snapshot":
             self.show(data["ledger"])
-        elif name == "ledger":
+        elif name == "ledger" and "from" not in data:
             self.show(patch.apply(self.state, data["patch"]))
+        elif name in ("open", "ledger") and self.behind(data.get("rev")):
+            for _, read, _ in polled(self.args.slug):
+                self.show(read["ledger"])
+
+    def behind(self, rev: int | None) -> bool:
+        return self.state is None or rev is None or rev > self.state["_meta"]["rev"]
 
 
 def line(event, rules=""):

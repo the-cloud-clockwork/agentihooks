@@ -12,6 +12,7 @@ class Call:
     cwd: str = ""
     session: str = ""
     agent: str = ""
+    tool_use_id: str = ""
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "Call":
@@ -21,6 +22,7 @@ class Call:
             cwd=str(payload.get("cwd") or ""),
             session=str(payload.get("session_id") or ""),
             agent=str(payload.get("agent_id") or ""),
+            tool_use_id=str(payload.get("tool_use_id") or ""),
         )
 
     @property

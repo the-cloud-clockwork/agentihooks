@@ -62,6 +62,8 @@ ledger:
   persistence:
     size: 1Gi
     storageClassName: ""
+  cache:
+    sizeLimit: 512Mi
   env: {}
   # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
   secretEnv: []
@@ -71,7 +73,7 @@ ledger:
       memory: 512Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 2Gi
+      memory: 2560Mi
       ephemeral-storage: 256Mi
 
 api:
@@ -232,13 +234,15 @@ controller:
       limits:
         memory: 128Mi
         ephemeral-storage: 64Mi
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 250m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Event hub: reactors on the swarm event bus. Two replicas share each reactor's durable consumer; a singleton
@@ -264,13 +268,15 @@ hub:
   # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
   # [{name, secretName, key, optional}].
   secretEnv: []
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
@@ -329,6 +335,9 @@ nats:
 workers:
   replicas: 0
   maxAgents: 20
+  sandboxProfiles:
+    seccomp: ""
+    apparmor: ""
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
   rollout:

@@ -2,6 +2,7 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -1057,3 +1058,141 @@ def test_launch_names_the_hive_slot_for_a_secret_key_account(setup, monkeypatch)
     ack = setup.consumer.launch(order, agent, {"id": order.task})
     assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["account"] == slot
     assert ack.status == "live"
+
+
+@pytest.fixture
+def failed_master(setup: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    from scripts import master_claude_login
+    from scripts.hive.orders import Consumer, carried
+    from scripts.swarm import commands, runtime
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import SpawnError
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    agent = setup.store.start_execution(
+        "fixture",
+        AgentRecord(
+            setup.store.next_name("fixture", "master"),
+            "master",
+            "master",
+            seat="master@fixture",
+            state="launching",
+            harness="claude",
+            profile="master",
+            account="account",
+            hive="host",
+            runtime_target={"host_id": "host"},
+        ),
+    )
+    order = replace(
+        setup.order,
+        execution_id=agent.execution_id,
+        generation=agent.generation,
+        profile="master",
+        lane="master",
+        task="master",
+        harness="claude",
+    )
+    setup.redis.set("prompt", json.dumps(carried("fixture", {"id": "master"}, "master opening")))
+    state = SimpleNamespace(open=True, owner=agent.name, refused=False, closed=[])
+    pane = "w5M:p3VA"
+
+    def pane_command(argv: list[str]) -> dict[str, Any]:
+        if argv == ["agent", "get", pane]:
+            if not state.open:
+                raise RuntimeError("pane not found")
+            return {"name": state.owner}
+        assert argv == ["pane", "close", pane]
+        assert setup.orders.ack(order) is None
+        if state.refused:
+            raise RuntimeError("pane close refused")
+        state.open = False
+        state.closed.append(pane)
+        return {}
+
+    herdr = runtime.HerdrRuntime(home=tmp_path, herdr=pane_command)
+    monkeypatch.setattr(
+        herdr, "spawn", Mock(side_effect=SpawnError("exited before canary", pane_id=pane, harness="claude"))
+    )
+    monkeypatch.setattr(herdr, "end", Mock(return_value=SimpleNamespace(refusal="", process=0)))
+    monkeypatch.setattr(herdr, "live_names", Mock(return_value=set()))
+    monkeypatch.setattr(runtime, "_pane_process", Mock(return_value=None))
+    monkeypatch.setattr(commands, "hive_id", Mock(return_value="host"))
+    monkeypatch.setattr(master_claude_login, "unusable", Mock(return_value=""))
+    adapter = LocalHerdrRuntime(herdr)
+    consumer = Consumer(setup.redis, "host", adapter)
+    return SimpleNamespace(
+        setup=setup, agent=agent, order=order, state=state, pane=pane, herdr=herdr, adapter=adapter, consumer=consumer
+    )
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+def test_a_failed_master_launch_closes_its_shell_before_acknowledging(failed_master: Any) -> None:
+    launch = failed_master
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.state.closed == ["w5M:p3VA"]
+    assert launch.state.open is False
+    ack = launch.setup.orders.ack(launch.order)
+    assert ack.status == "failed"
+    assert ack.failure == "refused: exited before canary"
+    assert ack.target == {"host_id": "host"}
+    assert ack.execution == {"pane_id": "w5M:p3VA"}
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.setup.orders.ack(launch.order) == ack
+    assert launch.herdr.spawn.call_count == 1
+    assert launch.state.closed == ["w5M:p3VA"]
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+def test_a_failed_master_without_a_pane_keeps_its_failure(failed_master: Any) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    launch = failed_master
+    launch.herdr.spawn.side_effect = SpawnError("exited before canary", harness="claude")
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    ack = launch.setup.orders.ack(launch.order)
+    assert (ack.status, ack.failure, ack.target, ack.execution) == ("failed", "refused: exited before canary", {}, {})
+    assert launch.state.closed == []
+    assert launch.herdr.spawn.call_count == 1
+
+
+@pytest.mark.feature("hive-failed-master-launch-pane")
+@pytest.mark.parametrize("blocker", ["foreign", "refused", "raised"])
+def test_failed_master_cleanup_retries_after_restart_and_expiry_without_spawning(
+    failed_master: Any, monkeypatch: pytest.MonkeyPatch, blocker: str
+) -> None:
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import lease
+
+    launch = failed_master
+    terminate = launch.adapter.terminate
+    if blocker == "foreign":
+        launch.state.owner = "a-successor"
+    elif blocker == "refused":
+        launch.state.refused = True
+    else:
+        monkeypatch.setattr(launch.adapter, "terminate", Mock(side_effect=RuntimeError("cleanup unavailable")))
+    launch.setup.orders.send("host", launch.order)
+    launch.consumer.poll()
+    assert launch.setup.orders.ack(launch.order) is None
+    assert launch.state.open is True
+    assert launch.state.closed == []
+    assert launch.herdr.spawn.call_count == 1
+    launch.state.owner = launch.agent.name
+    launch.state.refused = False
+    monkeypatch.setattr(launch.adapter, "terminate", terminate)
+    monkeypatch.setattr(lease, "now_ms", Mock(return_value=launch.order.expires_at + 1))
+    restarted = Consumer(launch.setup.redis, "host", launch.adapter, pod="replacement-pod")
+    restarted.poll()
+    assert launch.state.closed == ["w5M:p3VA"]
+    ack = launch.setup.orders.ack(launch.order)
+    assert (ack.status, ack.failure, ack.target, ack.execution) == (
+        "failed",
+        "refused: exited before canary",
+        {"host_id": "host"},
+        {"pane_id": "w5M:p3VA"},
+    )
+    assert launch.herdr.spawn.call_count == 1

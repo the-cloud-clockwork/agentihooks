@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
@@ -295,7 +296,9 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.parametrize("route", ["subscription", "api", "interactive"])
-def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(setup, lane, route, monkeypatch):
+def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(
+    setup: Any, lane: str, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dataclasses import replace
     from types import SimpleNamespace
 
@@ -337,7 +340,9 @@ def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(setup,
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = orders.Consumer(setup.store.redis, "remote", runtime)
-    assert consumer.launch(order, admitted, task).status == "live"
+    ack = consumer.launch(order, admitted, task)
+    assert ack is not None
+    assert ack.status == "live"
     sent = runtime.spawn.call_args.args[0]
     assert sent.config == replace(request.config, lanes={lane: {"agent": "claude", "role": "master"}})
     assert sent.task["route_kind"] == route
@@ -558,7 +563,9 @@ def test_a_forced_master_order_hands_forced_to_the_hive_runtime(setup: Any, monk
     runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
-    assert orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task).status == "live"
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack is not None
+    assert ack.status == "live"
     assert runtime.spawn.call_args.args[0].task["forced"] is True
 
 
@@ -1011,8 +1018,8 @@ def headless_front_door_order(setup, route=""):
     ],
 )
 def test_a_headless_hive_with_master_login_disabled_refuses_the_front_door_launch(
-    setup, monkeypatch, tmp_path, enabled, reason, route
-):
+    setup: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool | str, reason: str, route: str
+) -> None:
     from hooks import config as hooks_config
     from scripts.hive import orders
 
@@ -1021,11 +1028,14 @@ def test_a_headless_hive_with_master_login_disabled_refuses_the_front_door_launc
     order, admitted, task = headless_front_door_order(setup, route)
     runtime = Mock()
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack is not None
     assert (ack.status, ack.target, ack.failure) == ("failed", {}, reason)
     runtime.spawn.assert_not_called()
 
 
-def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(setup, monkeypatch):
+def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts import master_claude_login
     from scripts.hive import orders
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1035,11 +1045,12 @@ def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(
     runtime = Mock()
     runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack is not None
     assert ack.failure == "unavailable: spawned"
     runtime.spawn.assert_called_once()
 
 
-def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
+def test_empty_native_sessions_reach_front_door_recovery(setup: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts import master_claude_login
     from scripts.hive import orders
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1050,6 +1061,7 @@ def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
     runtime = Mock()
     runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="recovery reached")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack is not None
     assert ack.failure == "unavailable: recovery reached"
     runtime.spawn.assert_called_once()
 
@@ -1153,7 +1165,9 @@ def test_master_browser_wait_fits_the_launch_order_lifetime(setup, monkeypatch):
 
 
 @pytest.mark.parametrize(("route", "failure"), [("subscription", "unavailable: spawned"), ("", "refused")])
-def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, monkeypatch, route, failure):
+def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, route: str, failure: str
+) -> None:
     from scripts import master_claude_login
     from scripts.hive import orders
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1164,11 +1178,14 @@ def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, 
     runtime = Mock()
     runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack is not None
     assert ack.failure == failure
     assert runtime.spawn.called is (failure != "refused")
 
 
-def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check(setup, monkeypatch):
+def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dataclasses import replace
 
     from scripts import master_claude_login
@@ -1181,6 +1198,7 @@ def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check
     runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
     secondary = replace(admitted, seat="master-2@fixture")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
+    assert ack is not None
     assert ack.failure == "unavailable: spawned"
 
 

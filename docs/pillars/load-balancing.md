@@ -119,7 +119,7 @@ from both taking the last free place.
 `agenti --route <slug>` skips all of this and uses `AH_CC_TOKEN_<slug>`.
 `agenti --route claude-ai` skips it too and runs on a stored claude ai login
 instead of a token; see
-[Standalone sessions on a claude ai login](../reference/account-login.md#standalone-sessions-on-a-claude-ai-login).
+[Live sessions on a claude ai login](../reference/account-login.md#live-sessions-on-a-claude-ai-login).
 
 ```text
 [agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/6 source=cached

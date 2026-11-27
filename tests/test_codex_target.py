@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -458,6 +459,40 @@ class TestSharedSkillsDir:
         assert (shared / "SKILL.md").read_text() == "REAL SKILL"
 
 
+class TestOwnCodexHomeSkills:
+    """A CODEX_HOME of its own keeps its skills, so another Codex on the machine never sees them."""
+
+    def test_layer_skills_go_into_the_codex_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from scripts.targets._common import agents_skills_home
+
+        home = tmp_path / "own-codex"
+        monkeypatch.setenv("CODEX_HOME", str(home))
+        layer = tmp_path / "layer"
+        (layer / "helper").mkdir(parents=True)
+        (layer / "helper" / "SKILL.md").write_text("---\nname: helper\ndescription: Helps.\n---\n")
+        CodexAdapter().install_features("skills", [("skill", layer)], lambda p: (p / "SKILL.md").is_file())
+        assert (home / "skills" / "helper" / "SKILL.md").is_file()
+        assert not (agents_skills_home() / "helper").exists()
+
+    def test_hand_placed_skills_and_commands_go_into_the_codex_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from scripts.targets._common import agents_skills_home
+
+        home = tmp_path / "own-codex"
+        monkeypatch.setenv("CODEX_HOME", str(home))
+        skill = install.CLAUDE_HOME / "skills" / "proxy-analyst"
+        _hand_placed(skill / "SKILL.md", "---\nname: proxy-analyst\ndescription: Reads the proxy.\n---\n")
+        text = "---\ndescription: Deploys the agent.\n---\n\nRun the deploy.\n"
+        _hand_placed(install.CLAUDE_HOME / "commands" / "deploy-agent.md", text)
+        CodexAdapter().install_features("skills", [("skill", tmp_path / "none")], lambda p: (p / "SKILL.md").is_file())
+        CodexAdapter().install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (home / "skills" / "proxy-analyst").resolve() == skill.resolve()
+        assert (home / "skills" / "deploy-agent" / "SKILL.md").read_text() == text
+        assert not (agents_skills_home() / "proxy-analyst").exists()
+        assert not (agents_skills_home() / "deploy-agent").exists()
+
+
 def _is_md(path: Path) -> bool:
     return path.suffix == ".md"
 
@@ -769,6 +804,26 @@ class TestPersona:
         )
         assert backups, "legacy managed AGENTS.md without a footer marker must be backed up once"
 
+    def test_codex_only_profile_persona_comes_from_dot_codex_agents_md(self, adapter, tmp_path):
+        prof = tmp_path / "donna"
+        (prof / ".codex").mkdir(parents=True)
+        (prof / ".codex" / "AGENTS.md").write_text("# Donna persona\n")
+        adapter.install_persona([("donna", prof)], ["donna"], None)
+        text = (codex_home() / "AGENTS.md").read_text()
+        assert "<!-- profile: donna -->" in text
+        assert "# Donna persona" in text
+
+    def test_claude_md_wins_when_a_profile_has_both(self, adapter, tmp_path):
+        prof = tmp_path / "mixed"
+        prof.mkdir()
+        (prof / "CLAUDE.md").write_text("claude persona")
+        (prof / ".codex").mkdir()
+        (prof / ".codex" / "AGENTS.md").write_text("codex persona")
+        adapter.install_persona([("mixed", prof)], ["mixed"], None)
+        text = (codex_home() / "AGENTS.md").read_text()
+        assert "codex persona" in text
+        assert "claude persona" not in text
+
 
 class TestPrompts:
     def _commands(self, tmp_path):
@@ -1034,6 +1089,24 @@ class TestMcp:
 
         assert (agents_skills_home() / "my-skill").exists()
 
+    def test_native_key_reference_forwards_without_a_shell(self, adapter):
+        import tomllib
+
+        adapter.register_mcp({"loc": {"command": "/py", "env": {"GOOGLE_API_KEY": "${GOOGLE_API_KEY}"}}})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["loc"]
+        assert entry == {"command": "/py", "env_vars": ["GOOGLE_API_KEY"]}
+
+    def test_renamed_reference_uses_cmd_exe_when_bash_is_missing(self, adapter, monkeypatch):
+        import tomllib
+
+        monkeypatch.setattr(shutil, "which", lambda name: None if name == "bash" else f"/usr/bin/{name}")
+        adapter.register_mcp({"pw": {"command": "node", "args": ["srv.js"], "env": {"TOKEN": "${SRC_TOKEN}"}}})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["pw"]
+        assert entry["command"] == "cmd.exe"
+        assert entry["args"] == ["/d", "/s", "/c", 'set "TOKEN=${SRC_TOKEN}" && "node" "srv.js"']
+        assert entry["env_vars"] == ["SRC_TOKEN"]
+        assert "env" not in entry
+
 
 @pytest.fixture
 def said(monkeypatch):
@@ -1237,6 +1310,30 @@ class TestCodexEntry:
         empty = {"env_vars": [], "env_http_headers": {}, "cwd": "", "enabled": False}[key]
         assert codex_mcp_entry("a", {"command": "/a", key: empty}) == ({"command": "/a", key: empty}, "")
         assert codex_mcp_entry("a", {"command": "/a", key: None}) == ({"command": "/a"}, "")
+
+    def test_oauth_client_id_carried_to_the_entry(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"url": "https://gmail.example/mcp", "oauth": {"client_id": "abc123.apps.googleusercontent.com"}}
+        assert codex_mcp_entry("google-gmail", spec) == (
+            {"url": "https://gmail.example/mcp", "oauth": {"client_id": "abc123.apps.googleusercontent.com"}},
+            "",
+        )
+
+    def test_claude_shaped_oauth_client_id_is_mapped(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"command": "/py", "oauth": {"clientId": "abc123.apps.googleusercontent.com"}}
+        entry, _ = codex_mcp_entry("google-drive", spec)
+        assert entry is not None
+        assert entry["oauth"] == {"client_id": "abc123.apps.googleusercontent.com"}
+
+    def test_oauth_without_a_client_id_is_dropped(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        entry, _ = codex_mcp_entry("gw", {"command": "/py", "oauth": {}})
+        assert entry is not None
+        assert "oauth" not in entry
 
 
 class TestPersonaIdentityNaming:

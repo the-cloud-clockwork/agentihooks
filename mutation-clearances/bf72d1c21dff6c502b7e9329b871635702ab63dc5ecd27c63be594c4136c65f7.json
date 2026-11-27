@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x_sweep:09e1fd7978548166d8269f8f0ab3ab605bdbd6d0452d09c3766c30b0c9ecfad6": {
+    "reader": "/root/standards_reader",
+    "reason": "Equivalent: the exception path observes landed only through the queued if landed else failed expression. False and None both select failed; neither value escapes the function. Error lines, counts and continuation are identical."
+  }
+}

@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.ci_lab import control, lease_api, leases, queue
+from scripts.ci_lab import control, lease_api, leases, pods, queue
 from scripts.ci_lab.units import Unit
 
 TOKEN = "control-token"
@@ -107,6 +107,34 @@ def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, job
     }
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_lease_ignores_a_request_field_it_does_not_know(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1")
+
+    status, body = post(
+        lab,
+        signer,
+        "/lease",
+        {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0, "priority": "high"},
+    )
+
+    assert status == 200
+    grant = body["leases"][0]
+    token = grant.pop("token")
+    assert isinstance(token, str) and len(token) == 32
+    assert grant == {
+        "job": "h1:test:a",
+        "head": "h1",
+        "base": "b1",
+        "grader": "g1",
+        "kind": "test",
+        "key": "a",
+        "members": ["tests/a.py::t"],
+        "slots": 1,
+        "expires_ms": 1500,
+    }
+
+
 def test_lease_passes_capabilities_and_caps_the_wait(
     lab: leases.Leases, signer: Signer, jobs: queue.Queue, clock: Clock
 ) -> None:
@@ -189,6 +217,58 @@ def test_upload_url_needs_the_token(lab: leases.Leases, signer: Signer, jobs: qu
         400,
         {"error": "upload name must be report or log"},
     )
+
+
+def staled_lab(jobs: queue.Queue, clock: Clock, stale_workers: frozenset[str]) -> leases.Leases:
+    running = pods.Images("repo/lab-worker:dev", "repo/lab-worker@sha256:running")
+
+    def reader(worker: str) -> pods.Images | None:
+        return running if worker in stale_workers else None
+
+    return leases.Leases(
+        jobs,
+        ttl_ms=500,
+        clock=clock,
+        sleep=clock.sleep,
+        poll_ms=50,
+        image="repo/lab-worker@sha256:wanted",
+        images=reader,
+    )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_stale_workers_lease_is_answered_426_with_no_grant_and_records_no_offer(
+    jobs: queue.Queue, signer: Signer, clock: Clock
+) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
+    stale = staled_lab(jobs, clock, frozenset({"w1"}))
+
+    assert post(stale, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0}) == (
+        426,
+        {"error": "stale worker"},
+    )
+    assert jobs.offers(0) == {}
+    assert found(jobs, "h1:test:a").state == "pending"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_malformed_body_from_a_stale_worker_is_still_400(jobs: queue.Queue, signer: Signer, clock: Clock) -> None:
+    stale = staled_lab(jobs, clock, frozenset({"w1"}))
+    assert post(stale, signer, "/lease", {"worker": "w1", "free_slots": "x", "capabilities": [], "wait_ms": 0}) == (
+        400,
+        {"error": "bad request"},
+    )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_worker_that_is_not_stale_is_answered_200_as_today(jobs: queue.Queue, signer: Signer, clock: Clock) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
+    stale = staled_lab(jobs, clock, frozenset({"w2"}))
+
+    status, body = post(stale, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+
+    assert status == 200
+    assert [grant["job"] for grant in body["leases"]] == ["h1:test:a"]
 
 
 @pytest.mark.parametrize(

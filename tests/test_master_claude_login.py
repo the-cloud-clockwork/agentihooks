@@ -1196,6 +1196,44 @@ def _spare_slot(rendered: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
 
 
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize(("used", "number"), [(97.9, 1), (98.0, 2), (100.0, 2)])
+def test_a_drained_login_cannot_outrank_a_failed_login_with_room(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, used: float, number: int
+) -> None:
+    from scripts import master_logins
+
+    _spare_slot(rendered, monkeypatch)
+    login.mark_failed(2)
+    monkeypatch.setattr(
+        master_logins, "usage", lambda account, now: (0.0, used if account == "masteratexample_com" else 5.0, now)
+    )
+    monkeypatch.setattr(
+        master_logins, "week_left", lambda account, now: 100.0 - (used if account == "masteratexample_com" else 5.0)
+    )
+    target, found = login.prepare(_environ(rendered), tmp_path)
+    assert (target, found) == (login.home(number), "masteratexample_com" if number == 1 else "spareatexample_com")
+    assert login.holders(login.root(number)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(3 - number)) == {}
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+def test_a_single_drained_login_is_not_claimed(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_logins
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0, now))
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 0.0)
+    monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
+    with pytest.raises(login.LoginRefused) as refused:
+        login.prepare(_environ(rendered), tmp_path)
+    assert str(refused.value) == login.ALL_HELD.format(held="masteratexample_com drained")
+    assert login.holders(login.root()) == {}
+
+
 @pytest.mark.feature("master-login-limit-recovery")
 def test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_check(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/freeze.py:scripts.swarm.freeze.x_marks:224baae7c4e470adebd31df51eef3ea4655db6333ba62758bcff2552ca23a99f": {
+    "reader": "standards_reader",
+    "reason": "Replaces graph with None in the unfocused call that already receives the admitted queue. unfocused reads graph only in its admitted(doc, graph) branch, taken when admitted_queue is the UNCACHED sentinel; marks passes the result of admitted, a frozenset or None, so the branch is dead and marks output cannot change."
+  }
+}

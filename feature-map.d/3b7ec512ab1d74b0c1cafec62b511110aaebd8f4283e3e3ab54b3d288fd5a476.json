@@ -1,0 +1,13 @@
+{
+  "id": "thin-phaseless-enhance-publish",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-phaseless-enhance-publish",
+  "behaviour": "A thin task with no phase gets from the thin task pass a manual planning phase of its own, named like its enhancement task and holding the task and that enhancement task, so the enhancement planner publishes its plan into that phase with publish-plan, points the task at its section and closes its plan task with done, which marks the task planned and releases its claim hold.",
+  "seam": "scripts.tick.steps.thin.enhance through the thin task pass, then the ledger publish-plan command and swarm done --slice on the enhancement plan task",
+  "rules": [
+    "thin-enhancement-without-phase"
+  ],
+  "tests": [
+    "tests/swarm/test_enhance_close.py::test_the_planner_of_a_thin_task_with_no_phase_publishes_into_its_own_phase_and_closes"
+  ]
+}

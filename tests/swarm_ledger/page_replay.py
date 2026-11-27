@@ -90,6 +90,40 @@ CAPTURE = """() => {
 }"""
 
 
+FEED = {f"/api/v1/ledgers/{SLUG}", f"/api/v1/ledgers/{SLUG}/summary", f"/api/v1/ledgers/{SLUG}/swarm"}
+PAGED = ("tasks", "phases", "followups", "alerts", "notifications", "slices", "freezes")
+
+
+def open_state(name: str, row: dict) -> str | None:
+    if row.get("deleted") or closed_row(name, row):
+        return None
+    if row.get("out_of_scope"):
+        return "out"
+    return (row.get("state") or "open") if name == "tasks" else "open"
+
+
+def closed_row(name: str, row: dict) -> bool:
+    if name not in ("phases", "tasks", "questions", "followups", "alerts") or row.get("out_of_scope"):
+        return False
+    if name == "questions":
+        return any(not answer.get("deleted") for answer in row.get("answers") or [])
+    if name == "alerts":
+        return row.get("state") == "done"
+    return bool(row.get("done")) or row.get("state") == "done"
+
+
+def summary_of(state: dict) -> dict:
+    data = {key: value for key, value in state.items() if key not in PAGED}
+    data["sections"] = {}
+    for name in PAGED:
+        states: dict[str, int] = {}
+        for row in state.get(name) or []:
+            if (found := open_state(name, row)) is not None:
+                states[found] = states.get(found, 0) + 1
+        data["sections"][name] = {"open": sum(states.values()), "states": states}
+    return data
+
+
 class FakeApi:
     def __init__(self, limits, phase_status):
         self.requests = []
@@ -105,7 +139,10 @@ class FakeApi:
         return doc
 
     def note(self, request):
-        path = urllib.parse.urlsplit(request.url).path
+        parts = urllib.parse.urlsplit(request.url)
+        path = parts.path
+        if request.method == "GET" and (path in FEED or "state=open" in parts.query):
+            return path
         raw = request.post_data_buffer
         body = None if raw is None else f"{len(raw)} bytes"
         if raw and request.headers.get("content-type", "").startswith("application/json"):
@@ -134,10 +171,18 @@ class FakeApi:
         if path == f"/api/v1/ledgers/{SLUG}/swarm/controls":
             return route.fulfill(json=INPUTS["swarm"])
         if path == f"/api/v1/ledgers/{SLUG}/events":
+            state = self.state()
             body = (
-                f"id: c0\nevent: snapshot\ndata: {json.dumps({'ledger': self.state(), 'swarm': INPUTS['swarm']})}\n\n"
+                f"id: c0\nevent: snapshot\ndata: {json.dumps({'ledger': state, 'swarm': INPUTS['swarm']})}\n\n"
+                f"id: c0\nevent: open\ndata: {json.dumps({'rev': self.rev, 'swarm': INPUTS['swarm']})}\n\n"
             )
             return route.fulfill(body=body, content_type="text/event-stream")
+        if path == f"/api/v1/ledgers/{SLUG}/summary":
+            return route.fulfill(json={"data": summary_of(self.state()), "revision": "r"})
+        if "state=open" in urllib.parse.urlsplit(request.url).query:
+            rows = self.state().get(path.rsplit("/", 1)[1]) or []
+            data = [{**row, "position": at} for at, row in enumerate(rows)]
+            return route.fulfill(json={"data": data, "revision": "r", "total": len(data), "next_offset": None})
         if path == "/api/v1/layout":
             return route.fulfill(json={"data": {}})
         if path == f"/api/v1/ledgers/{SLUG}/uploads/media":
@@ -260,11 +305,15 @@ def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], di
 
 def removal(selectors: Collection[str]) -> str:
     hidden = json.dumps(",".join(selectors) + "{display:none !important}")
+    matches = json.dumps(",".join(selectors))
     return f"""(() => {{
   window.__removed = {json.dumps(list(selectors))};
   const sheet = new CSSStyleSheet();
   sheet.replaceSync({hidden});
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  const hide = () => {{ for (const el of document.querySelectorAll({matches})) if (!el.hidden) el.hidden = true; }};
+  new MutationObserver(hide).observe(document, {{ childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] }});
+  hide();
 }})();"""
 
 

@@ -51,14 +51,17 @@ def test_a_revision_read_of_a_non_record_path_reads_only_its_rows(
     assert routes.ledger_read(over(stored), "ledger", path, {}) == whole
 
 
-def test_a_paged_members_read_still_reads_the_whole_ledger(
+def test_a_paged_members_read_also_skips_the_whole_ledger(
     stored: sqlite.SQLiteLedgerRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reads: list[str] = []
     current = stored.current
     monkeypatch.setattr(stored, "current", lambda slug: reads.append(slug) or current(slug))
-    routes.ledger_read(over(stored), "ledger", "members", {"limit": 1})
-    assert reads == ["ledger"]
+    entry = stored.current("ledger")
+    whole = resources.read(entry.state, "members", {"limit": 1}, entry.views)
+    reads.clear()
+    assert routes.ledger_read(over(stored), "ledger", "members", {"limit": 1}) == whole
+    assert reads == []
 
 
 def test_a_thread_read_of_a_missing_record_is_missing(stored: sqlite.SQLiteLedgerRepository) -> None:

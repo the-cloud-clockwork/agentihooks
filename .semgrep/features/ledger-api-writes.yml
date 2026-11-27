@@ -4,7 +4,7 @@ rules:
     severity: ERROR
     message: >-
       Ordered 2026-11-16, every swarm ledger write goes through the ledger API to the database and the ledger server
-      write path is gone: the database ledger client sends every request through the ledger API route code over
+      write path is gone: the writer client sends every request through the ledger API route code over
       the shared database, on this host's warm writer first and in process otherwise, and a hosted hub, whose
       admission claims write the ledger in process, refuses to start without the shared database setting.
     patterns:
@@ -31,5 +31,6 @@ rules:
     paths:
       include:
         - /scripts/tick/adapters/database_ledger.py
+        - /scripts/tick/adapters/writer_client.py
         - /scripts/hub/runner.py
         - '*.test.py'

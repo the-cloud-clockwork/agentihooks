@@ -11,7 +11,7 @@ from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger as remote
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_v2.runtime import process
-from scripts.tick.adapters import database_ledger
+from scripts.tick.adapters import database_ledger, writer_client
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
@@ -76,7 +76,7 @@ def remote_taker(taker, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(remote.repository, "token", _operator_token)
     monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: taker[0].redis)
     sent = []
-    monkeypatch.setattr(database_ledger, "ResourceClient", _hive_client(sent))
+    monkeypatch.setattr(writer_client, "ResourceClient", _hive_client(sent))
     monkeypatch.setattr(database_ledger, "exchanged", _hive_exchanged(sent))
     return (*taker, sent)
 

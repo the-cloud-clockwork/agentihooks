@@ -268,7 +268,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert "type-gate" in workflow["jobs"]["gate-required"]["needs"]
-    assert steps in [
+    unsplit = [
         ci_reuse.typing_required(
             ci_reuse.test_only_sonar(
                 diagnostic(
@@ -299,6 +299,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         for finish in (list, ci_reuse.pipefail_summary)
         for lab in (list, ci_reuse.lab_verdict)
     ]
+    assert steps in [ci_reuse.split_required(rendering) for rendering in unsplit if ci_reuse.split_lists(rendering)]
     [collected, *collected_rest] = ci_reuse.collected_stats(steps)
     assert collected == {**steps[0], "run": ci_reuse.COLLECTED_STATS + steps[0]["run"]}
     assert collected_rest == steps[1:]
@@ -1265,7 +1266,7 @@ def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(wat
     jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     assert SELF in jobs
     assert SELF in jobs["gate-required"]["needs"]
-    required = {"select", "split", "unit", "shard-check", "test-count"}
+    required = {"select", "split", "unit", "shard-check", "test-count", "collect"}
     needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
     if watcher is None:
         del needs[SELF]

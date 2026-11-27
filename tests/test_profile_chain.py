@@ -225,7 +225,7 @@ def test_persona_identity_skips_profiles_reached_through_extends(tmp_path, monke
             (directory / "profile.yml").write_text(yaml.safe_dump({"extends": parents[name]}))
         dirs.append((name, directory))
     monkeypatch.setattr(_common, "linked_profile_names", lambda: {"brain"})
-    text = _common.build_persona(dirs, [name for name, _ in dirs], None, [], "HEAD", "FOOT")
+    text = _common.build_persona(dirs, [name for name, _ in dirs], None, [], ("HEAD", "FOOT"))
     assert f"You are **{identity}**" in text
     assert f"answer as **{identity}**" in text
     assert layers in text

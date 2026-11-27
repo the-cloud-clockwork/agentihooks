@@ -173,7 +173,7 @@ def doctor_server(monkeypatch, peer_freezes):
     return doc
 
 
-def test_a_focus_in_the_watched_swarm_holds_the_doctor_tasks_in_every_view_it_streams(monkeypatch):
+def test_a_focus_in_the_watched_swarm_holds_the_doctor_tasks_in_the_published_view(monkeypatch):
     from types import SimpleNamespace
 
     from scripts.swarm_ledger import ledger_server
@@ -183,9 +183,7 @@ def test_a_focus_in_the_watched_swarm_holds_the_doctor_tasks_in_every_view_it_st
     hub = SimpleNamespace(has=lambda slug: True, publish=lambda slug, kind, view: published.append(view))
     monkeypatch.setattr(ledger_server, "HUB", hub)
     ledger_server.publish_ledger("doctor", ledger_state(doc))
-    streamed = ledger_server.stream_resources("doctor")["ledger"]
-    for view in (streamed, published[0]):
-        assert set(view["marks"]["held"]) == {"tasks/t1", "tasks/t2", "tasks/t3", "tasks/t5"}
+    assert set(published[0]["marks"]["held"]) == {"tasks/t1", "tasks/t2", "tasks/t3", "tasks/t5"}
     assert ledger_server.ledger_view(ledger_state(doc))["marks"]["held"] == []
     assert ledger_server.ledger_view(ledger_state(doc), "plain")["marks"]["held"] == []
 

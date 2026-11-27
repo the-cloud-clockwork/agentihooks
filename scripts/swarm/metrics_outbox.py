@@ -2,6 +2,7 @@ import http.client
 import json
 import logging
 import math
+import os
 import re
 import sqlite3
 import time
@@ -126,8 +127,9 @@ def settings(environ):
     return Settings(url, user, environ.get(PASSWORD_ENV, ""))
 
 
-def spool_path():
-    return Path.home() / ".agentihooks" / "swarm" / "metrics-outbox.sqlite"
+def spool_path() -> Path:
+    home = Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+    return home / "swarm" / "metrics-outbox.sqlite"
 
 
 def read_recent(name: str, now_ms: int) -> list[dict] | None:

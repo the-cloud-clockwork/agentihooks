@@ -123,7 +123,7 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("rsync -a ~/scratchpad/a/ build/", "build/"),
         ("unlink app.py", "app.py"),
         ("dd if=~/scratchpad/a of=app.py", "app.py"),
-        ("patch -p1 < fix.diff", UNKNOWN),
+        ("patch -p1 < fix.diff", "./"),
         ("sed -i 's/a/b/' app.py", "app.py"),
         ("sed -i.bak 's/a/b/' app.py", "app.py"),
         ("sed --in-place=.bak 's/a/b/' app.py", "app.py"),
@@ -229,21 +229,21 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("wget https://example.com/a", UNKNOWN),
         ("wget -O app.py https://example.com", "app.py"),
         ("wget --output-document app.py https://example.com", "app.py"),
-        ("tar -C /repo -xf x.tar", UNKNOWN),
-        ("tar xf x.tar", UNKNOWN),
-        ("tar -czf out.tgz src", UNKNOWN),
-        ("tar -rf a.tar f", UNKNOWN),
-        ("tar -uf a.tar f", UNKNOWN),
-        ("tar -Af a.tar b.tar", UNKNOWN),
-        ("tar --extract -f x.tar", UNKNOWN),
-        ("tar --get -f x.tar", UNKNOWN),
-        ("tar --create -f x.tar src", UNKNOWN),
-        ("tar --append -f x.tar f", UNKNOWN),
-        ("tar --update -f x.tar f", UNKNOWN),
-        ("tar --delete -f x.tar f", UNKNOWN),
-        ("tar --concatenate -f a.tar b.tar", UNKNOWN),
-        ("unzip x.zip", UNKNOWN),
-        ("unzip -d /repo x.zip", UNKNOWN),
+        ("tar -C /repo -xf x.tar", "/repo/"),
+        ("tar xf x.tar", "./"),
+        ("tar -czf out.tgz src", "out.tgz"),
+        ("tar -rf a.tar f", "a.tar"),
+        ("tar -uf a.tar f", "a.tar"),
+        ("tar -Af a.tar b.tar", "a.tar"),
+        ("tar --extract -f x.tar", "./"),
+        ("tar --get -f x.tar", "./"),
+        ("tar --create -f x.tar src", "x.tar"),
+        ("tar --append -f x.tar f", "x.tar"),
+        ("tar --update -f x.tar f", "x.tar"),
+        ("tar --delete -f x.tar f", "x.tar"),
+        ("tar --concatenate -f a.tar b.tar", "a.tar"),
+        ("unzip x.zip", "./"),
+        ("unzip -d /repo x.zip", "/repo/"),
         ("touch ~nosuchuser9/x", "~nosuchuser9/x"),
         ("touch a\x00b", "a\x00b"),
         ("find . -exec rm {} \\;", UNKNOWN),
@@ -278,7 +278,7 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("echo `rm app.py", "app.py"),
         ("A=b=c rm app.py", "app.py"),
         ("dd of=app.py if=~/scratchpad/a", "app.py"),
-        ("tar x", UNKNOWN),
+        ("tar x", "./"),
         ("git status\nrm -rf app.py", "app.py"),
         ("echo ok\ntouch app.py", "app.py"),
         ('echo $(rm "app.py', '"app.py'),
@@ -482,7 +482,7 @@ def test_a_placeholder_never_counts_as_a_seat_folder(home: Path) -> None:
 
     assert _found(home, "find /repo -exec rm {} \\;", scratch) == f"writes {UNKNOWN}"
     assert _found(home, "git ls-files | xargs rm", scratch) == f"writes {UNKNOWN}"
-    assert _found(home, "patch -p1 < fix.diff", scratch) == f"writes {UNKNOWN}"
+    assert _found(home, "git ls-files | xargs chmod 755", scratch) == f"writes {UNKNOWN}"
 
 
 @pytest.mark.feature("read-only-roles-refuse-shell-writes")
@@ -539,3 +539,177 @@ def test_edit_tool_payloads_keep_the_edit_path(home: Path, role: str) -> None:
 
     assert no_code_edits.deny_reason(edit, role, home) == refusal
     assert no_code_edits.deny_reason(scratch, role, home) == ""
+
+
+@pytest.mark.feature("read-only-roles-tool-writes-inside-own-folders")
+@pytest.mark.parametrize("role", READ_ONLY)
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        ("chmod 755 run.sh", "run.sh"),
+        ("truncate -s 0 app.py", "app.py"),
+        ("mkdir -m 755 build", "build"),
+        ("tar -xf ~/scratchpad/a.tar -C build", "build/"),
+        ("tar -czf out.tgz -C ~/scratchpad src", "out.tgz"),
+        ("unzip ~/scratchpad/a.zip -d build", "build/"),
+        ("patch -d build -p1 -i ~/scratchpad/fix.diff", "build/"),
+        ("patch -d ~/scratchpad -o /repo/out.py -i fix.diff", "/repo/out.py"),
+    ],
+)
+def test_a_read_only_seat_refuses_each_tool_writing_outside_its_folders(
+    tmp_path: Path, role: str, command: str, target: str
+) -> None:
+    refused = _shim(tmp_path, role, command)
+
+    assert refused.returncode == 2
+    assert f"{role} cannot write through the shell: the command writes {target}{TAIL}" in refused.stderr
+
+
+@pytest.mark.feature("read-only-roles-tool-writes-inside-own-folders")
+@pytest.mark.parametrize("role", READ_ONLY)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "chmod 755 ~/scratchpad/run.sh",
+        "truncate -s 0 ~/scratchpad/notes.md",
+        "mkdir -m 700 ~/scratchpad/out",
+        "tar -xzf ~/scratchpad/a.tgz -C ~/scratchpad/out",
+        "unzip -q ~/scratchpad/a.zip -d ~/scratchpad/out",
+        "patch -d ~/scratchpad/copy -p1 -i ~/scratchpad/fix.diff",
+        "tar -czf {task}/proof.tgz -C ~/scratchpad out",
+    ],
+)
+def test_a_read_only_seat_runs_each_tool_inside_its_folders(tmp_path: Path, role: str, command: str) -> None:
+    allowed = _shim(tmp_path, role, command.format(task=_task_folder(tmp_path)))
+
+    assert (allowed.returncode, allowed.stderr) == (0, "")
+
+
+@pytest.mark.feature("read-only-roles-tool-writes-inside-own-folders")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "chmod -R a+x ~/scratchpad/d",
+        "chmod -Rv u+x ~/scratchpad/d",
+        "chmod -w ~/scratchpad/f",
+        "chmod --reference=app.py ~/scratchpad/f",
+        "chmod --reference app.py ~/scratchpad/f",
+        "chmod -- 755 ~/scratchpad/f",
+        "truncate --size 0 ~/scratchpad/n.md",
+        "truncate --size=0 ~/scratchpad/n.md",
+        "truncate -cs0 ~/scratchpad/n.md",
+        "truncate -r app.py ~/scratchpad/n.md",
+        "mkdir -pm 700 ~/scratchpad/d",
+        "mkdir -m700 ~/scratchpad/d",
+        "mkdir --mode 700 ~/scratchpad/d",
+        "tar xfC ~/scratchpad/a.tar ~/scratchpad/out",
+        "tar -C ~/scratchpad -C out -C deeper -xf a.tar",
+        "tar -C ~/scratchpad/out -xf ~/scratchpad/a.tar member",
+        "tar --extract --file ~/scratchpad/a.tar --directory ~/scratchpad/out",
+        "tar -xOf a.tar member",
+        "tar -xf a.tar --to-stdout",
+        "tar -czf ~/scratchpad/out.tgz src",
+        "tar --checkpoint -czf ~/scratchpad/out.tgz src",
+        "tar -czf ~/scratchpad/x:y.tgz src",
+        "tar -czf ~/scratchpad/a:b/x.tgz src",
+        "tar -C /repo -czf ~/scratchpad/a.tgz src",
+        "tar -cf - src | gzip > ~/scratchpad/src.tar.gz",
+        "tar --create --file={task}/proof.tar src",
+        "unzip -qd ~/scratchpad/out a.zip",
+        "unzip -d ~/scratchpad/out/ a.zip",
+        "unzip a.zip -x junk -d ~/scratchpad/out",
+        "unzip -P secret a.zip -d ~/scratchpad/out",
+        "patch -d ~/scratchpad -d copy -p1 -i x.diff",
+        "patch -d ~/scratchpad app.py /repo/fix.diff",
+        "patch -d ~/scratchpad -o out.py -r out.rej -i x.diff",
+        "patch -d ~/scratchpad -o - -i x.diff",
+        "patch --directory ~/scratchpad -p1 -i x.diff",
+    ],
+)
+def test_a_reviewer_reads_each_tool_destination_inside_its_folders(home: Path, command: str) -> None:
+    assert _found(home, command.format(task=_task_folder(home))) == ""
+
+
+@pytest.mark.feature("read-only-roles-tool-writes-inside-own-folders")
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        ("chmod -w app.py", "app.py"),
+        ("chmod -X app.py", "app.py"),
+        ("chmod -R -w app.py", "app.py"),
+        ("chmod -- 755 app.py", "app.py"),
+        ("chmod 755 app.py ~/scratchpad/a", "app.py"),
+        ("chmod 755 ~/scratchpad/a app.py", "app.py"),
+        ("chmod -RL 755 ~/scratchpad/d", UNKNOWN),
+        ("chmod -R --dereference 755 ~/scratchpad/d", UNKNOWN),
+        ("chmod -R --deref 755 ~/scratchpad/d", UNKNOWN),
+        ("truncate -s 0 -", "-"),
+        ("truncate -cs0 app.py", "app.py"),
+        ("truncate --no-create app.py", "app.py"),
+        ("mkdir -m 755 build", "build"),
+        ("tar --extract --file=a.tar --directory=~/scratchpad/out", "./~/scratchpad/out/"),
+        ("tar -xf a.tar member -C ~/scratchpad/out", "./"),
+        ("tar -C ~/scratchpad -C /repo -xf a.tar", "/repo/"),
+        ("tar -c src", UNKNOWN),
+        ("tar -cf", UNKNOWN),
+        ("tar --create --file", UNKNOWN),
+        ("tar -cf host:/x.tar src", UNKNOWN),
+        ("tar -cf ~/scratchpad/a.tar -f host:x src", UNKNOWN),
+        ("tar --suf -C ~/scratchpad -xf ~/scratchpad/a.tar app.py", UNKNOWN),
+        ("tar --set-mtime-format -C ~/scratchpad -xf ~/scratchpad/a.tar app.py", UNKNOWN),
+        ("tar -xf a.tar -C ~/scratchpad/o --transform=s,^,x/,", UNKNOWN),
+        ("tar -xf a.tar -C ~/scratchpad/o --xform s,^,x/,", UNKNOWN),
+        ("tar -xf ~/scratchpad/a.tar --to-command=sh -C ~/scratchpad/o", UNKNOWN),
+        ("tar -xvPf ~/scratchpad/a.tar -C ~/scratchpad/o", UNKNOWN),
+        ("tar -I zstd -xf ~/scratchpad/a.tar -C ~/scratchpad/o", UNKNOWN),
+        ("tar -tf x.tar --checkpoint-action=exec=sh", UNKNOWN),
+        ("tar --remove-files -czf ~/scratchpad/a.tgz src", UNKNOWN),
+        ("tar --dir=~/scratchpad -xf a.tar", UNKNOWN),
+        ("tar --ext -f a.tar -C ~/scratchpad/o", UNKNOWN),
+        ("unzip -d~/scratchpad/o x.zip", "./~/scratchpad/o/"),
+        ("unzip -d /repo/ x.zip", "/repo/"),
+        ("unzip --quiet x.zip", UNKNOWN),
+        ("unzip ~/scratchpad/a.zip -d -l", "-l/"),
+        ("unzip -: -d ~/scratchpad/o x.zip", UNKNOWN),
+        ("patch -d /repo -p1 -i x.diff", "/repo/"),
+        ("patch -d ~/scratchpad -d /repo -i x.diff", "/repo/"),
+        ("patch -d ~/scratchpad -o /repo/a.c -i x.diff", "/repo/a.c"),
+        ("patch -d ~/scratchpad -r /repo/a.rej -i x.diff", "/repo/a.rej"),
+        ("patch -d ~/scratchpad /repo/app.py x.diff", "/repo/app.py"),
+        ("patch -B /tmp/ -d ~/scratchpad -i x.diff", UNKNOWN),
+        ("patch -Y .bak/ -d ~/scratchpad -i x.diff", UNKNOWN),
+        ("patch --dir=~/scratchpad -i x.diff", UNKNOWN),
+        ("patch -d /repo -o - -i x.diff", "/repo/"),
+        ("patch -d /repo -i ~/scratchpad/x.diff -o --dry-run", "/repo/--dry-run"),
+        ("patch --str 1 /repo/app.py", UNKNOWN),
+        ("patch --inp x -d ~/scratchpad /repo/app.py", UNKNOWN),
+        ("patch --unsafe-paths -d ~/scratchpad -i x.diff", UNKNOWN),
+        ("patch --follow-symlinks -d ~/scratchpad -i x.diff", UNKNOWN),
+    ],
+)
+def test_a_reviewer_reads_each_tool_destination_outside_its_folders(home: Path, command: str, target: str) -> None:
+    assert _found(home, command) == f"writes {target}"
+
+
+@pytest.mark.feature("read-only-roles-tool-writes-inside-own-folders")
+@pytest.mark.parametrize(
+    ("command", "found"),
+    [
+        ("chmod +x run.sh", ""),
+        ("truncate -s 0 n.md", ""),
+        ("mkdir -m 700 d", ""),
+        ("tar -xf a.tar", ""),
+        ("tar -C out -xf a.tar", ""),
+        ("unzip a.zip", ""),
+        ("patch -p1 < fix.diff", ""),
+        ("patch -d copy -p1 -i fix.diff", ""),
+        ("tar -C /repo -cf a.tar src", "writes /repo/a.tar"),
+        ("unzip -qt a.zip", ""),
+        ("unzip a.zip -d", f"writes {UNKNOWN}"),
+        ("tar -xf a.tar -C", f"writes {UNKNOWN}"),
+        ("patch -d ~/scratchpad -o", f"writes {UNKNOWN}"),
+        ("patch -o out.py -d", f"writes {UNKNOWN}"),
+    ],
+)
+def test_a_reviewer_judges_tool_destinations_from_its_scratchpad(home: Path, command: str, found: str) -> None:
+    assert _found(home, command, home / "scratchpad") == found

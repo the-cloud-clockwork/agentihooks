@@ -1,0 +1,12 @@
+{
+  "id": "ci-wiring-dequeued-operations",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-retry-release-runner",
+  "behaviour": "External workflow admission treats only explicit dequeued target recovery as operational and preserves declarations for every ordinary or mixed pull request trigger.",
+  "seam": "ci_wiring.check external workflow activity admission",
+  "tests": [
+    "tests/test_ci_wiring.py::test_dequeued_only_recovery_is_outside_pull_request_gates",
+    "tests/test_ci_wiring.py::test_other_pull_request_triggers_still_require_a_declaration",
+    "tests/test_ci_wiring.py::test_a_dequeued_only_operation_is_not_a_gate_declaration"
+  ]
+}
