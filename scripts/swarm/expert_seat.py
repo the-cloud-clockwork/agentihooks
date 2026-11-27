@@ -263,8 +263,8 @@ def _left(slug: str, store: Any, lineage: expert_lineage.Lineage, number: int, n
         return []
     name: str = store.seats.occupant(lineage.seat).occupant
     lost = AgentRecord(name, LANE, lineage.id, seat=lineage.seat)
-    text: str = store.handoff(slug, lineage.id)
-    if text:
+    text: str = current["handoff"] if current else store.handoff(slug, lineage.id)
+    if text and (not current or current["continuity"]["state"] != "confirmed"):
         SEAT.transfers.record(store, slug, lost, REASON, text, now_ms)
         return [OFFERED.format(lineage=lineage.id, name=name)]
     keep_handoff(store, slug, lineage, lost, REASON, _recovery(slug, store, lineage, name), now_ms)

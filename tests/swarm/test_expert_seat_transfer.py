@@ -125,6 +125,21 @@ def test_lost_successor_uses_transfer_history_instead_of_an_older_stored_documen
 
 
 @pytest.mark.feature("expert-newest-seat-transfer")
+def test_lost_expert_preserves_a_stored_document_without_transfer_history(store: RedisStore) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    first = launched(store, runtime)
+    store.put_handoff("sw", first.task, HANDOFF, seat=first.seat, envelope={"reason": "recycle"})
+    store.drop_agent("sw", first.name)
+    successor = launched(store, runtime, NOW + MINUTE)
+    task = runtime.tasks[-1]
+    assert task["handoff"] == task["transfer"]["handoff"] == HANDOFF
+    assert task["transfer"]["next"] == NEXT
+    assert task["transfer"]["predecessor"] == first.name
+    assert task["transfer"]["seat"] == task["seat"] == successor.seat
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
 @pytest.mark.parametrize(("clock_offset", "retry_offset"), [(-1, 1), (0, 1), (2, 2)])
 def test_failed_retry_stays_newest_when_the_clock_does_not_advance(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock_offset: int, retry_offset: int
