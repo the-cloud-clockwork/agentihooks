@@ -29,7 +29,8 @@ def _fake_checker(monkeypatch: pytest.MonkeyPatch, diagnostics: list[dict[str, s
         if "--version" in command:
             return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
         files = command[command.index("--pythonpath") + 2 :]
-        matched = [diagnostic for diagnostic in diagnostics if diagnostic["file"] in files]
+        head = Path(str(kwargs["cwd"]))
+        matched = [item for item in diagnostics if Path(item["file"]).relative_to(head).as_posix() in files]
         report = {"generalDiagnostics": matched, "summary": {"filesAnalyzed": len(files)}}
         return subprocess.CompletedProcess(command, 0, json.dumps(report), "")
 

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts import ci_budget
+from scripts import ci_budget, ci_wiring
 from scripts.ci_lab import static_gates
 from tests.contracts.ci_tiers.test_workflow import enabled
 
@@ -31,7 +31,7 @@ def test_the_type_gate_grading_step_sets_direct_importers_on_itself_not_the_job(
 
 @pytest.mark.feature("type-gate-split-by-tier")
 def test_the_lab_discovers_the_same_direct_importers_scope_from_the_grading_step() -> None:
-    gates = static_gates.discover(WORKFLOW.read_text())
+    gates = static_gates.discover(WORKFLOW.read_text(), reusable=ci_wiring.load(ROOT))
     gate = next(gate for gate in gates if gate.job == "type-gate" and gate.step == GRADING_STEP)
     assert ("TYPE_GATE_DIRECT_IMPORTERS", "1") in gate.env
 
