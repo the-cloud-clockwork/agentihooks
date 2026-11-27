@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_learned:a2069fb610b2a37d6f0a74332c8a24c9f7d96cd08af4f292b8d2a29f8c2a7d42": {
+    "reader": "standards_reader",
+    "reason": "The seat literal changes only when all_seats is true. SeatMemory.scoped then short-circuits address filtering, so changing that unused seat changes no returned notes or printed output."
+  }
+}

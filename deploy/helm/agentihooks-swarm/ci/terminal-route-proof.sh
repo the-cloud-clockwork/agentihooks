@@ -78,7 +78,7 @@ print(json.dumps({"host": host, "address": addresses[0], "private": private, "co
 reach() { kubectl exec -n "${1%%/*}" "${1##*/}" -- python -c "$probe" "$2"; }
 
 allowed=""
-for _ in $(seq 30); do
+for _ in {1..30}; do
   allowed="$(reach "$control/allowed" "$host")"
   [[ $allowed == *'"private": true, "connected": true'* ]] && break
   sleep 2
@@ -90,7 +90,7 @@ fi
 deny() {
   local client=$1 denied
   denied=""
-  for _ in $(seq 15); do
+  for _ in {1..15}; do
     denied="$(reach "$client" "$host")"
     [[ $denied == *'"connected": false'* ]] && break
     sleep 2

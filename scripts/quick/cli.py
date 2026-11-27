@@ -15,6 +15,10 @@ from scripts.quick.guard import QuickError
 from scripts.swarm import safety_nudge
 
 NOT_MEMBER = "this session is not a member of a quick swarm: run it from a quick swarm pane"
+UNBOUND = (
+    "agentihooks quick: {seat} started but its agent never recorded its session in the seat, so the seat stays "
+    "pending; from the pane it runs in, run agentihooks quick relaunch {seat} --folder {folder} --adopt"
+)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -24,6 +28,9 @@ def parser() -> argparse.ArgumentParser:
     up = sub.add_parser("up", help="Split this herdr pane's tab and launch the engineers; this session is master")
     up.add_argument("--agents", type=int, default=layout.DEFAULT_AGENTS, help="Agents with the master, 2 to 5")
     up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex")
+    up.add_argument(
+        "--auth", default="routed", help="routed, default or named:reference; one choice or one per engineer"
+    )
     up.add_argument("--dir", default="", help="Directory the engineers work in; default the current one")
     sub.add_parser("status", help="Print every seat of this session's quick swarm")
     given = sub.add_parser("handoff", help="Accept this seat's Handoff v2 and start its successor in this pane")
@@ -31,8 +38,12 @@ def parser() -> argparse.ArgumentParser:
     again = sub.add_parser("relaunch", help="Start the successor of a seat that handed off")
     again.add_argument("seat")
     again.add_argument("--folder", required=True)
-    again.add_argument(
+    kind = again.add_mutually_exclusive_group()
+    kind.add_argument(
         "--force", action="store_true", help="End the seat's live agent with its pane kept, then start again"
+    )
+    kind.add_argument(
+        "--adopt", action="store_true", help="Record this live session and its herdr pane as the seat's occupant"
     )
     send = sub.add_parser("send", help="Post a message to another seat through the room")
     send.add_argument("to")
@@ -55,17 +66,29 @@ def _harnesses(value: str, engineers: int) -> list[str]:
 def _swarm_for(
     args: argparse.Namespace, environ: dict[str, str], caller: str, quick_id: str, directory: Path
 ) -> registry.Swarm:
+    from scripts.quick.authentication import selections
+
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
+    policies = selections(args.auth, harnesses, environ)
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
     master = registry.Seat(1, names[0], caller, harness, f"{quick_id}-{names[0]}", session_id=session)
     engineers = [
-        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}")
-        for position, (name, pane, harness) in enumerate(zip(names[1:], panes[1:], harnesses, strict=True), 2)
+        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}", auth=mode, account=account)
+        for position, (name, pane, harness, (mode, account)) in enumerate(
+            zip(names[1:], panes[1:], harnesses, policies, strict=True), 2
+        )
     ]
     return registry.Swarm(quick_id, str(directory), (master, *engineers))
+
+
+def _launch_registry(folder: Path) -> registry.Swarm:
+    saved = registry.load(folder)
+    if saved is None:
+        raise QuickError("quick swarm registry disappeared during startup")
+    return saved
 
 
 def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
@@ -86,11 +109,12 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
         paths.register(environ, quick_id, folder)
     started = launch.start_all(folder, swarm, environ)
     exited = launch.exited(swarm.seats[1:], tick.LiveHerdr(environ).bare)
-    failed = sorted({name for name, code in started.items() if code != 0} | set(exited))
+    pending = {seat.seat for seat in _launch_registry(folder).seats[1:] if seat.state == registry.PENDING}
+    failed = sorted({name for name, code in started.items() if code != 0} | set(exited) | pending)
     for name in failed:
         registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
-    for seat in swarm.seats:
+    for seat in _launch_registry(folder).seats:
         print(json.dumps(dataclasses.asdict(seat)))
     if failed:
         print(f"agentihooks quick: {', '.join(failed)} did not start; the next round retries it", file=sys.stderr)
@@ -106,7 +130,10 @@ def _member(environ: Mapping[str, str]) -> member.Member:
 
 def _status(environ: Mapping[str, str]) -> int:
     for seat in _member(environ).swarm.seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+        row = dataclasses.asdict(seat)
+        if seat.position > 1:
+            row["automatic_tiers"] = seat.auth == "routed"
+        print(json.dumps(row))
     return 0
 
 
@@ -126,7 +153,16 @@ def _relaunch(seat: str, folder: str, environ: dict[str, str], forced: bool) -> 
     start = launch.force if forced else launch.relaunch
     outcome = start(Path(folder), seat, environ, bare=live.bare)
     print(outcome)
+    if outcome == "unbound":
+        print(UNBOUND.format(seat=seat, folder=folder), file=sys.stderr)
     return 0 if outcome == "started" else 1
+
+
+def _adopt(seat: str, folder: str, environ: dict[str, str]) -> int:
+    pane, session = guard.require(environ), environ.get("CLAUDE_CODE_SESSION_ID", "")
+    outcome = launch.adopt(Path(folder), seat, pane, session, bare=tick.LiveHerdr(environ).bare)
+    print(outcome)
+    return 0 if outcome == "adopted" else 1
 
 
 def _send(to: str, text: str, environ: Mapping[str, str]) -> int:
@@ -161,6 +197,8 @@ def _run(args: argparse.Namespace, environ: dict[str, str]) -> int:
         return _up(args, environ)
     if args.command == "handoff":
         return _handoff(args.document, environ)
+    if args.command == "relaunch" and args.adopt:
+        return _adopt(args.seat, args.folder, environ)
     if args.command == "relaunch":
         return _relaunch(args.seat, args.folder, environ, args.force)
     if args.command == "send":

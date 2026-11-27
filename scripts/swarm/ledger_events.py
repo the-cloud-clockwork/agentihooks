@@ -12,27 +12,29 @@ import functools
 import json
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
-from dataclasses import dataclass
+from contextvars import ContextVar, copy_context
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack
+from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack, timing
 from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
-from scripts.tick import pool
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 
 MINUTE_MS = 60_000
 TICK_VIEW_TTL_S = 180
+MERGED_VIEW_TTL_S = 2 * 24 * 3600
+TICK_VIEW_READ: ContextVar[bool] = ContextVar("tick_view_read", default=False)
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -460,6 +462,56 @@ def _paged(commit: str | None, field: str, page: Any, source: SourceControl, num
     return None if info.get("hasNextPage") else nodes
 
 
+def _merged_key(url: str) -> str:
+    """Return the shared cache key that keeps the merged view of pull request ``url``."""
+    return f"{PREFIX}:merged-pull-view:{url}"
+
+
+def _kept_merged(cache: Any, urls: list[str]) -> dict[str, PullRequest]:
+    """Return the merged view the shared cache keeps for each pull request in ``urls``, leaving out an entry another
+    release wrote with other fields."""
+    if cache is None or not urls:
+        return {}
+    kept: dict[str, PullRequest] = {}
+    for url, text in zip(urls, cache.mget([_merged_key(url) for url in urls])):
+        saved: dict[str, Any] = json.loads(text) if text else {}
+        if set(saved) == set(PullRequest.__dataclass_fields__):
+            saved["failed"] = tuple(saved["failed"])
+            kept[url] = PullRequest(**saved)
+    return kept
+
+
+def _keep_merged(cache: Any, found: dict[str, PullRequest | None]) -> None:
+    """Keep each view in ``found`` that GitHub answered merged in the shared cache for two days, since a merged view
+    never changes, so a new process serves it instead of reading it again."""
+    if cache is None:
+        return
+    for url, pull in found.items():
+        if pull is not None and pull.state == "MERGED":
+            cache.set(_merged_key(url), json.dumps(asdict(pull)), ex=MERGED_VIEW_TTL_S)
+
+
+def _count_views(pulls: int, kept: int) -> None:
+    """Write to the controller log how many of ``pulls`` distinct pull requests a tick view inside a tick pass had no
+    earlier view of, how many of those it served from the merged views the swarm Redis keeps and how many it read from
+    GitHub; any other read, a tick view with nothing to read and one outside a pass write nothing."""
+    slug = timing.SWARM.get()
+    if slug is None or not pulls or not TICK_VIEW_READ.get():
+        return
+    current = timing.PASS.get() or {}
+    line = {"event": "swarm_pull_views", "slug": slug, "pass_id": current.get("pass_id"), "pulls": pulls}
+    print(json.dumps({**line, "kept_merged": kept, "read": pulls - kept}), file=sys.stderr)
+
+
+def _counted_views(urls: list[str], cache: Any, ttl: float) -> dict[str, PullRequest | None]:
+    """Read ``urls`` through :func:`views` as a tick view, whose read counts reach the controller log."""
+    token = TICK_VIEW_READ.set(True)
+    try:
+        return views(urls, cache=cache, ttl=ttl)
+    finally:
+        TICK_VIEW_READ.reset(token)
+
+
 def views(
     urls: list[str],
     source: SourceControl | None = None,
@@ -468,23 +520,20 @@ def views(
 ) -> dict[str, PullRequest | None]:
     port = source or stack.login_source_control()
     urls = list(dict.fromkeys(urls))
-    found = dict.fromkeys(urls)
+    kept = _kept_merged(cache, urls)
+    found: dict[str, PullRequest | None] = {url: kept.get(url) for url in urls}
+    pending = [url for url in urls if url not in kept]
     selection = PULL_QUERY.partition("{")[2][:-1].replace(
         'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
-    for start in range(0, len(urls), 20):
-        batch = urls[start : start + 20]
-        fields = [
-            f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
-            for i, url in enumerate(batch)
+    batches = [pending[start : start + 20] for start in range(0, len(pending), 20)]
+    with ThreadPoolExecutor() as workers:
+        reads = [
+            workers.submit(copy_context().run, _views_batch, batch, selection, port, cache, ttl) for batch in batches
         ]
-        query = "{" + " ".join(fields) + "}"
-        data = (
-            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
-            if cache is not None
-            else _graphql(query, port)
-        )
+        documents = [read.result() for read in reads]
+    for batch, data in zip(batches, documents):
         gates = _workflow_gates(data, port, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -494,7 +543,24 @@ def views(
                 if declaration is not None
                 else None
             )
+    _keep_merged(cache, {url: found[url] for url in pending})
+    _count_views(len(urls), len(kept))
     return found
+
+
+def _views_batch(
+    batch: list[str], selection: str, port: SourceControl, cache: object | None, ttl: float
+) -> dict[str, Any]:
+    """Return the answer of one document reading up to twenty pull requests in ``batch`` through ``selection``, served
+    from the shared snapshot of the same document for ``ttl`` seconds when ``cache`` is given."""
+    fields = [
+        f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
+        for i, url in enumerate(batch)
+    ]
+    query = "{" + " ".join(fields) + "}"
+    if cache is None:
+        return _graphql(query, port)
+    return github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
 
 
 def fresh_reader(
@@ -508,7 +574,7 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not run_wait.backing_off():
-            read.update(views(shared, cache=cache, ttl=0))
+            read.update(timing.timed(views, shared, cache=cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url)
 
@@ -551,8 +617,7 @@ def _pull_batch(batch: list[str], port: SourceControl) -> dict[str, dict[str, An
 
 def _graphql(query: str, source: SourceControl, **variables: str) -> dict[str, Any]:
     try:
-        with pool.limit("github"):
-            result = _graph_body(query, source, variables)
+        result = _graph_body(query, source, variables)
         errors = result.get("errors", [])
         data = result["data"]
         if not isinstance(data, dict):
@@ -626,7 +691,7 @@ def tick_view(
     known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
     snapshots = {
         **known,
-        **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis, ttl=TICK_VIEW_TTL_S),
+        **_counted_views([url for url in dict.fromkeys(urls) if url not in known], store.redis, TICK_VIEW_TTL_S),
     }
 
     @functools.cache
@@ -663,7 +728,7 @@ class Mail:
         self.store.redis.set(marker, 1, ex=SENT_TTL_S)
         return True
 
-    def send(self, key, address, text, ref="", fyi=False):
+    def send(self, key: str, address: str, text: str, ref: str = "", fyi: bool = False) -> list[str]:
         if self.once(key, lambda: self.inbox.send(SENDER, address, text, ref=ref, fyi=fyi)):
             return [f"told {address}: {key}"]
         return []
@@ -700,7 +765,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + stall_blockers.observe(store, slug, doc, tasks.values(), github, now_ms, held)  # pyright: ignore[reportUnknownArgumentType]
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
-        + _priorities(mail, doc, raised)
+        + _priorities(mail, doc, raised, now_ms)
     )
 
 
@@ -828,7 +893,7 @@ def _events(mail, events, tasks, raised):
                 f"event:{event['rev']}:{event['kind']}:{event['target']}",
                 mail.owner(event["target"]),
                 text,
-                ref=f"{mail.slug}:event:{event['target']}",
+                ref=f"{mail.slug}:event:{event['target']}:{event['rev']}",
                 fyi=event["kind"] == "task done",
             )
     return sent
@@ -841,7 +906,7 @@ def _describe(slug, event, tasks):
         return (
             f"{by} added a follow-up {item} on ledger {slug}: {event.get('text', '')}\n"
             "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-            f"Close it: agentihooks ledger --slug {slug} followup done {item}"
+            f"Close it: agentihooks api --slug {slug} followup done {item}"
         )
     if kind == "added" and name == "questions":
         return f"{by} asked on ledger {slug}: {event.get('text', '')}\nAnswer it, or raise it to the operator."
@@ -871,9 +936,9 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up {followup['id']} on ledger {mail.slug} is still open fifteen minutes "
                 f"after {event['by']} added it: {followup['text']}\n"
                 "Decide it now, or it goes to the operator's Priorities.\n"
-                f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
+                f"Close it: agentihooks api --slug {mail.slug} followup done {followup['id']}"
             )
-            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
+            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}:{now_ms}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
@@ -881,7 +946,7 @@ def _followups(mail, doc, events, ledger, now_ms):
     return sent
 
 
-def _priorities(mail, doc, raised):
+def _priorities(mail: Mail, doc: dict[str, Any], raised: set[str], now_ms: int) -> list[str]:
     key = mail.store.key(mail.slug, "priorities-sent")
     rows = {p["item"]: p for p in doc.get("priorities", [])}
     seen = mail.store.redis.smembers(key)
@@ -902,7 +967,7 @@ def _priorities(mail, doc, raised):
             step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
             text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
-            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
+            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}:{now_ms}")
             sent.append(f"told {owner}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)

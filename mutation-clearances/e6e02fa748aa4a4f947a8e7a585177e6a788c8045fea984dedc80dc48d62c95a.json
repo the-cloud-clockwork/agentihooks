@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x\u01c1Scheduler\u01c1_retire_pushes:ab8b48dfe21a67f78b84147a5cfbcb0fafb9b9e5d4d74b39732acbb9679ac5f7": {
+    "reader": "standards_reader",
+    "reason": "entry.get(\"ref\", ) is equivalent because a trailing comma makes it entry.get(\"ref\"), which yields None for a missing key, and None is falsy under not ref exactly as the original default \"\" is, so branchless returns the same bool for every stored waiting entry."
+  }
+}

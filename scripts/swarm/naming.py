@@ -20,7 +20,15 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm.name_state import KEEP, NameState, NamingError, row, state_key
 
 PREFIX = f"{ROOT}:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
+TYPES = {
+    "master": "master",
+    "eng": "engineer",
+    "ci": "ci",
+    "plan": "planner",
+    "dispatch": "dispatcher",
+    "review": "reviewer",
+    "expert": "expert",
+}
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
 _KINDS = "|".join(TYPES.values())
@@ -117,7 +125,7 @@ def space(repo, code, slug=""):
     return slug if PROOF_RE.fullmatch(slug) else f"{repo_name(repo)}-{code}"
 
 
-def plain(name):
+def plain(name: str) -> str:
     """The name for places that refuse an at sign: git branches, worktree folders and herdr agent names."""
     return name.replace("@", "-")
 

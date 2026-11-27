@@ -363,9 +363,37 @@ PAGE_LIMITS = {
 }
 
 
-def stream_resources(slug):
-    ledger = ledger_view(repository.get_document(slug), slug)
-    return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
+def stream_resources(slug: str) -> dict:
+    return {"swarm": stream_swarm(slug, None)}
+
+
+SUMMARIES: dict[str, tuple[object, dict]] = {}
+SUMMARY_BUILDS: dict[str, threading.Lock] = {}
+
+
+CREW_WINDOW_MS = 2 * 3600 * 1000
+
+
+def active_crew(meta: dict[str, Any], now: int) -> list[dict[str, Any]]:
+    """The crew rows of members seen within the page's active window, the only ones its stats and sync line use."""
+    members: dict[str, Any] = meta.get("members") or {}
+    seen = {name: member for name, member in members.items() if member.get("last_seen", 0) >= now - CREW_WINDOW_MS}
+    return ledger_gate.crew({**meta, "members": seen})
+
+
+def ledger_summary(slug: str) -> dict:
+    from scripts.swarm_ledger.api import summary, task_list
+
+    stored = task_list.rows(repository, slug)
+    with SUMMARY_BUILDS.setdefault(slug, threading.Lock()):
+        held = SUMMARIES.get(slug)
+        if held is not None and held[0] is stored:
+            return held[1]
+        parts = repository.read(slug, *summary.READS)
+        built = summary.build(parts, stored[2], doctor_holds(slug), PAGE_LIMITS)
+        built["_meta"].update(page_version=served_version(), crew=active_crew(parts.get("_meta") or {}, core.now_ms()))
+        SUMMARIES[slug] = (stored, built)
+        return built
 
 
 def workspace_tails(slug, task_id):
@@ -425,6 +453,7 @@ def api_services(hooks: WriteHooks | None = None) -> "Services":
         bin_ledger=writes.bin_ledger,
         workspace_tails=workspace_tails,
         stream_resources=stream_resources,
+        summary=ledger_summary,
         layout=ledger_layout.read,
         write_layout=writes.write_layout,
         write_gate=writes.write_gate,
@@ -457,15 +486,12 @@ def api_services(hooks: WriteHooks | None = None) -> "Services":
     )
 
 
-def sample_streams():
+def sample_streams() -> None:
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
     for slug in HUB.watched():
-        ledger = HUB.resource(slug, "ledger")
-        if ledger is None:
-            continue
         try:
-            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, HUB.resource(slug, "ledger")))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
@@ -806,7 +832,7 @@ def refresh_streams(slugs: list[str]) -> None:
         if HUB.has(slug):
             try:
                 publish_ledger(slug, repository.get_document(slug))
-            except Exception as exc:  # the next write to the ledger publishes its view anyway
+            except Exception as exc:
                 sys.stderr.write(f"refresh stream {slug}: {exc}\n")
 
 
@@ -835,14 +861,14 @@ def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
-def scheduled_wait(interval: float) -> None:
+def scheduled_wait(interval: float, timeout: float | None = None) -> None:
     from redis.exceptions import NoPermissionError
 
     from scripts.scheduler.process_timer import wait
 
     if not SCHEDULER_UNAVAILABLE.is_set():
         try:
-            wait(interval)
+            wait(interval, timeout=timeout)
             return
         except (OSError, NoPermissionError) as exc:
             SCHEDULER_UNAVAILABLE.set()
@@ -941,15 +967,15 @@ def warm_streams(environ=os.environ) -> list[str]:
     return warmed
 
 
-def follow_shared(interval=FOLLOW_S):
-    """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
+def follow_shared(interval: float = FOLLOW_S) -> None:
+    """Publish each watched ledger's newer stored generation, whichever process wrote it to the store."""
     while True:
         for slug in () if core.LOCK.locked() else HUB.watched():
             try:
                 repository.current(slug)
             except Exception as exc:  # one unreadable ledger must not stop the others following
                 sys.stderr.write(f"shared follow {slug}: {exc}\n")
-        scheduled_wait(interval)
+        scheduled_wait(interval, timeout=interval)
 
 
 def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):
@@ -1001,17 +1027,16 @@ def serve() -> None:
     threading.Thread(target=retrying(watch_ledgers), args=(server,), kwargs={"stopping": watching}, daemon=True).start()
     threading.Thread(target=answer_reloads, args=(server,), daemon=True).start()
     threading.Thread(target=refresh_streams, args=(warmed if carried is None else carried,), daemon=True).start()
-    if storage.shared():
-        threading.Thread(target=retrying(follow_shared), daemon=True).start()
+    threading.Thread(target=retrying(follow_shared), daemon=True).start()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     LOADED_CODE.capture()
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
-    PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     drained = True
     try:
         with projector.running(repository, HUB):
             try:
+                PIDFILE.write_text(str(os.getpid()))
                 server.serve_forever(POLL_S)
             finally:
                 stopped.set()

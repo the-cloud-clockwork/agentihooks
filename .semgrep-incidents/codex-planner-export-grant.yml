@@ -1,0 +1,10 @@
+rules:
+  - id: codex-planner-export-grant-missing
+    languages: [python]
+    severity: ERROR
+    message: Codex planner write grants must include the ledger client export directory.
+    paths:
+      include:
+        - /scripts/swarm/runtime.py
+        - codex-planner-export-grant.py
+    pattern: ($LEDGER, $HOME / ".agentihooks" / "swarm", $HOME / "scratchpad")

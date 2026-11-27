@@ -19,7 +19,9 @@ def test_the_chart_places_the_service_as_the_placement_fixture_says(service):
     assert {"affinity": values["affinity"], "tolerations": values["tolerations"]} == placement
 
 
-def test_the_ledger_requests_its_steady_memory_and_is_limited_at_two_gibibytes():
-    resources = yaml.safe_load(VALUES.read_text())["ledger"]["resources"]
+def test_the_ledger_requests_steady_memory_and_preserves_its_process_budget() -> None:
+    ledger = yaml.safe_load(VALUES.read_text())["ledger"]
+    resources = ledger["resources"]
 
-    assert (resources["requests"]["memory"], resources["limits"]["memory"]) == ("512Mi", "2Gi")
+    assert (resources["requests"]["memory"], resources["limits"]["memory"]) == ("512Mi", "2560Mi")
+    assert ledger["cache"]["sizeLimit"] == "512Mi"

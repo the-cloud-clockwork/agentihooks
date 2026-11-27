@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as entry
-from scripts.ci_lab import delivery
+from scripts.ci_lab import delivery, static_exclusions
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = {"on": "push", "jobs": {"lint": {}, "type-gate": {}, "unit": {}}}
@@ -84,6 +84,9 @@ def test_all_mutants_is_kept(tmp_path: Path) -> None:
         block(check_prefix=""),
         block(authoritative="lint"),
         block(authoritative=["lint", "lint"]),
+        block(queue={"authoritative": "lint"}),
+        block(queue={"authoritative": ["lint", "lint"]}),
+        block(queue={"authoritative": [""]}),
         block(extra=1),
         {"authoritative": []},
     ],
@@ -124,6 +127,32 @@ def test_cutover_refuses_an_unknown_gate(tmp_path: Path, capsys: pytest.CaptureF
     assert delivery.main(["cutover", "--grader-root", str(grader)], {"GITHUB_OUTPUT": str(output)}) == 1
     assert not output.exists()
     assert "ghost" in capsys.readouterr().err
+
+
+def test_queue_cutover_reads_the_grader_queue_gates(tmp_path: Path) -> None:
+    grader = tree(tmp_path / "grader", block(queue={"authoritative": ["unit", "lint"], "full_suite_entries": 3}))
+    tree(tmp_path / "head", block(queue={"authoritative": ["type-gate"]}))
+    assert delivery.queue_cutover(grader, {}) == ["unit", "lint"]
+
+
+@pytest.mark.parametrize("lab", [block(), block(queue={}), block(queue={"full_suite_entries": 3})])
+def test_queue_cutover_is_empty_without_queue_gates(tmp_path: Path, lab: dict[str, object]) -> None:
+    assert delivery.queue_cutover(tree(tmp_path, lab), {}) == []
+
+
+@pytest.mark.parametrize(("value", "skip"), [("true", []), ("false", ["unit"]), ("1", ["unit"]), ("TRUE", ["unit"])])
+def test_lab_off_empties_the_queue_gates(tmp_path: Path, value: str, skip: list[str]) -> None:
+    grader = tree(tmp_path, block(queue={"authoritative": ["unit"]}))
+    assert delivery.queue_cutover(grader, {"AGENTIHOOKS_LAB_OFF": value}) == skip
+
+
+def test_an_unknown_queue_gate_is_an_error(tmp_path: Path) -> None:
+    grader = tree(tmp_path, block(authoritative=["lint"], queue={"authoritative": ["unit", "phantom", "ghost"]}))
+    with pytest.raises(delivery.DeliveryError) as unknown:
+        delivery.queue_cutover(grader, {})
+    assert str(unknown.value) == "lab.queue.authoritative names unknown gates: ghost, phantom"
+    with pytest.raises(delivery.DeliveryError, match="lab.queue.authoritative"):
+        delivery.authoritative(grader)
 
 
 def test_runtime_config_validates() -> None:
@@ -171,7 +200,21 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
 
 def test_repository_file_has_an_empty_authoritative_list() -> None:
     assert delivery.authoritative(ROOT) == ()
+    assert delivery.queue_cutover(ROOT, {}) == []
     assert delivery.lab(ROOT)["check_prefix"] == "lab"
+
+
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_exclusion_catalog_keeps_lab_authority_for_the_split_static_gates(tmp_path: Path) -> None:
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    workflow = {"on": "push", "jobs": {"lint": {}, "type-gate": {}, "test-count": {}}}
+    (tmp_path / ".github/workflows/test.yml").write_text(yaml.safe_dump(workflow))
+    lab_block = block(authoritative=["lint", "type-gate", "test-count"])
+    (tmp_path / "delivery.yaml").write_text(yaml.safe_dump({"lab": lab_block}))
+    exclusions = tmp_path / static_exclusions.PATH
+    exclusions.parent.mkdir(parents=True, exist_ok=True)
+    exclusions.write_text((ROOT / static_exclusions.PATH).read_text())
+    assert delivery.authoritative(tmp_path) == ("lint", "type-gate", "test-count")
 
 
 def test_template_carries_the_lab_block() -> None:

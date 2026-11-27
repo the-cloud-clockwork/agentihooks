@@ -19,6 +19,9 @@ MERGED = re.compile(r"\(#(\d+)\)$")
 DEPTH = 50
 BUDGET = 300.0
 TIMEOUT = 120
+RETRY_DELAYS = (5, 10, 20)
+PAGE = 100
+PAGES = 10
 
 
 def api(path: str, binary: bool = False, deadline: float = math.inf) -> Any:
@@ -44,22 +47,60 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
     return [int(match.group(1)) for subject in subjects if (match := MERGED.search(subject))]
 
 
+def retried(path: str, deadline: float, binary: bool = False) -> Any:
+    """Return api's answer for path, printing each failed call and asking again after each wait in RETRY_DELAYS, cut
+    short at the deadline, and raise the final call's failure when it fails too; a timeout or an HTTP 404 answer is
+    never asked again."""
+    for wait in RETRY_DELAYS:
+        try:
+            return api(path, binary=binary, deadline=deadline)
+        except subprocess.CalledProcessError as error:
+            if b"HTTP 404" in error.stderr:
+                raise
+            pause = min(wait, max(0.0, deadline - time.monotonic()))
+            print(f"Mutation stats seed: {path} failed, asking again in {pause:g} s: {error.stderr.decode().rstrip()}")
+            time.sleep(pause)
+    return api(path, binary=binary, deadline=deadline)
+
+
+def download(item: dict[str, Any], deadline: float) -> bytes:
+    """Return one stats artifact's zip through retried, and raise naming the artifact and the last error when its
+    final download fails."""
+    try:
+        return retried(f"actions/artifacts/{item['id']}/zip", deadline, binary=True)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f"Mutation stats seed: every download of {item['name']} ({item['id']}) failed: "
+            f"{error.stderr.decode().rstrip()}"
+        ) from error
+
+
+def run_artifacts(run: int, deadline: float) -> list[dict[str, Any]]:
+    listed: list[dict[str, Any]] = []
+    for page in range(1, PAGES + 1):
+        found = retried(f"actions/runs/{run}/artifacts?per_page={PAGE}&page={page}", deadline)["artifacts"]
+        listed += found
+        if len(found) < PAGE:
+            return listed
+    return listed
+
+
 def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.inf) -> int:
     try:
-        sha = api(f"pulls/{number}", deadline=deadline)["head"]["sha"]
+        sha = retried(f"pulls/{number}", deadline)["head"]["sha"]
     except subprocess.CalledProcessError as error:
         if b"HTTP 404" not in error.stderr:
             raise
         print(f"Mutation stats seed: #{number} is not a readable pull request")
         return 0
-    runs = api(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10", deadline=deadline)["workflow_runs"]
+    runs = retried(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10", deadline)["workflow_runs"]
     for row in runs:
-        artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100", deadline=deadline)["artifacts"]
+        artifacts = run_artifacts(row["id"], deadline)
         found = [item for item in artifacts if item["name"].startswith(ARTIFACT) and not item["expired"]]
         written, pointers = 0, set[str]()
         try:
             for item in sorted(found, key=lambda item: item["id"]):
-                archive = api(f"actions/artifacts/{item['id']}/zip", binary=True, deadline=deadline)
+                archive = download(item, deadline)
                 with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
                     for name in zipped.namelist():
                         base = Path(name).name

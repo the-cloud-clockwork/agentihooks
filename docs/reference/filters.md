@@ -154,7 +154,7 @@ ordinary condition:
 
 | Name | Call site |
 |---|---|
-| `ledger_write` | the ledger server's comment, follow up and question writes |
+| `ledger_write` | the ledger API route code's comment, follow up and question writes |
 | `inbox_send` | `agentihooks msg send` |
 | `judge` | the judge's case and evidence; the package ships its filters, and the judge's call site lands with the judge |
 

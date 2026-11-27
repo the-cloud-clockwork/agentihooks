@@ -1,6 +1,8 @@
 """The swarm session gates PreToolUse runs in order; the first that answers denies the call, and a gate that fails is
 logged and passes."""
 
+import sys
+
 from hooks.common import log
 
 
@@ -20,6 +22,8 @@ GATES = (("claim watch", _claim), ("context recycle gate", _recycle))
 
 
 def pretool(tool_name: str, tool_input: dict, session_id: str) -> str | None:
+    if sys.platform == "win32":
+        return None
     for label, gate in GATES:
         try:
             block = gate(tool_name, tool_input, session_id)

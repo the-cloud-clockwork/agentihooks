@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.xǁNatsConsumerǁ_fetch:9516c88c8d308bdeb48ca6185e0c3994aa1496e30b0c57d90c16623c3a53bf44": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: parts starts at zero for each fetched batch and is read only for truthiness. Adding two instead of one preserves zero exactly when no internal part was skipped and nonzero otherwise. Python integers do not overflow, and the count never escapes the function; refill and delivery behavior are unchanged."
+  }
+}

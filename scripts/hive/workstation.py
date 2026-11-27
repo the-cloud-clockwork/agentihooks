@@ -36,6 +36,9 @@ class MasterTasks:
     def reopen(self, event: Envelope) -> None:
         return None
 
+    def dead_lettered(self, event: Envelope) -> None:
+        return None
+
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         return None
 

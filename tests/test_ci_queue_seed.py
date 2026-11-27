@@ -194,7 +194,7 @@ def test_the_lookup_asks_for_successful_dev_push_runs_of_the_tests_workflow(look
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
         "?branch=dev&event=push&status=success&per_page=1",
     ]
-    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/37847322607/artifacts?per_page=100" in args
+    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/37847322607/artifacts?name=durations-merged" in args
     assert '[.artifacts[] | select(.expired | not) | .name] | join(" ")' in args
 
 

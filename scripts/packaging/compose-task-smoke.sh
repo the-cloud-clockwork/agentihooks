@@ -130,7 +130,7 @@ PY
 printf 'stand in agent finished and its exit is on NATS: %s\n' "$started"
 
 settled=""
-for _ in $(seq 30); do
+for _ in {1..30}; do
   docker compose exec -T -e LEDGER_HOST swarm agentihooks hub run --once
   settled="$(docker compose exec -T -e SLUG -e LEDGER_HOST -e STARTED="$started" swarm python - <<'PY'
 import json

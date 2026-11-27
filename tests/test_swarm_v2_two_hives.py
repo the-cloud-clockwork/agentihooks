@@ -83,10 +83,12 @@ def test_event_relay_sends_hive_items_once_to_the_owner(world, kind):
     add(world, kind)
     doc = world.doc()
     ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0)
-    received = [item for item in inbox.mailbox(world.second_name) if item.ref == f"{cases.SLUG}:event:{kind}/targeted"]
+    rev = next(e["rev"] for e in doc["_meta"]["events"] if e.get("target") == f"{kind}/targeted")
+    ref = f"{cases.SLUG}:event:{kind}/targeted:{rev}"
+    received = [item for item in inbox.mailbox(world.second_name) if item.ref == ref]
     assert len(received) == 1
     assert received[0].address == cases.SECOND
-    assert received[0].ref == f"{cases.SLUG}:event:{kind}/targeted"
+    assert received[0].ref == ref
     assert inbox.deliver(received[0].id, world.lead_name) is None
     assert inbox.deliver(received[0].id, world.second_name).state == "delivered"
     assert inbox.deliver(received[0].id, world.second_name) is None

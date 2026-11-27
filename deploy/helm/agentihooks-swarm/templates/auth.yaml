@@ -4,6 +4,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-auth
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: auth

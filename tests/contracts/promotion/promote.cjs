@@ -2,10 +2,18 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const promote = require('../../../.github/scripts/promote.cjs');
 
+const pageSize = per_page => Math.min(per_page ?? 30, 100);
+
+const servedPage = (items, { page = 1, per_page }) => {
+  const size = pageSize(per_page);
+  return items.slice((page - 1) * size, page * size);
+};
+
 function fixture(options = {}) {
   const writes = [];
   const refs = [];
   const outputs = {};
+  const infos = [];
   const context = {
     repo: { owner: 'owner', repo: 'repo' }, eventName: 'push', ref: 'refs/heads/dev',
     sha: 'graded', payload: { repository: { full_name: 'owner/repo' } },
@@ -34,10 +42,10 @@ function fixture(options = {}) {
   const github = { rest: {
     actions: {
       getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
-      listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
-      listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }),
+      listWorkflowRuns: async args => ({ data: { workflow_runs: servedPage([], args) } }),
+      listJobsForWorkflowRun: async args => ({ data: { jobs: servedPage(jobs, args) } }),
     },
-    checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
+    checks: { listForRef: async args => ({ data: { check_runs: servedPage(checks, args) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
@@ -59,7 +67,7 @@ function fixture(options = {}) {
       getCommit: async ({ ref }) => ({ data: ref === context.sha ? commit(context.sha, 'tree') :
         ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
-      listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      listCommitStatusesForRef: async args => ({ data: servedPage(args.ref === 'snapshot' ? [...grades].reverse() : statuses, args) }),
       compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.orders?.[args.base] || options.order || 'ahead' } }; },
     },
     pulls: {
@@ -75,20 +83,27 @@ function fixture(options = {}) {
       },
     },
   } };
-  github.paginate = async (method, args) => {
+  github.paginate = async (method, args, map) => {
     pages.push(args);
-    if (method === github.rest.actions.listWorkflowRuns) return [];
-    if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
-    if (method === github.rest.checks.listForRef) return checks;
-    if (method === github.rest.repos.listCommitStatusesForRef) return args.ref === 'snapshot' ? [...grades].reverse() : statuses;
-    throw new Error('Unexpected paginated endpoint');
+    const lists = [github.rest.actions.listWorkflowRuns, github.rest.actions.listJobsForWorkflowRun, github.rest.checks.listForRef,
+      github.rest.repos.listCommitStatusesForRef];
+    if (!lists.includes(method)) throw new Error('Unexpected paginated endpoint');
+    let items = [];
+    let done = false;
+    for (let page = 1; !done; page++) {
+      const response = await method({ ...args, page });
+      const data = Array.isArray(response.data) ? response.data : Object.values(response.data).find(Array.isArray);
+      items = items.concat(map ? map({ ...response, data }, () => { done = true; }) : data);
+      done ||= data.length < pageSize(args.per_page);
+    }
+    return items;
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
-  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info() {} };
+  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info: message => { infos.push(message); } };
   github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
     nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
   } } } } });
-  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades,
+  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades, infos,
     now: () => elapsed, sleep: async ms => { elapsed += ms; } };
 }
 
@@ -101,6 +116,93 @@ test('reports the snapshot grade with the promotion app before merging', async (
   await promote(f);
   assert.ok(f.grades.every(grade => grade.sha === 'snapshot' && grade.context === 'Gate — Required' &&
     grade.target_url === 'https://github.com/owner/repo/actions/runs/42'));
+});
+
+for (const status of ['queued', 'waiting', 'pending', 'in_progress']) {
+  test(`a noncompleted triggering promote job merges on its first poll: ${status}`, async () => {
+    const f = fixture();
+    f.jobs[0].status = status;
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.equal(f.grades.at(-1).state, 'success');
+    assert.equal(f.writes.find(([kind]) => kind === 'merge')[1].sha, 'snapshot');
+  });
+}
+
+test('logs every changed grade poll once with all unsettled job statuses', async () => {
+  const f = fixture();
+  const current = f.jobs[0];
+  const gate = f.jobs[1];
+  gate.status = 'queued';
+  const lint = { id: 75, run_id: 42, name: 'lint', status: 'queued', conclusion: null };
+  f.jobs.push(lint);
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    f.jobs.reverse();
+    if (f.now() === 10000) {
+      lint.status = 'in_progress';
+      current.status = 'queued';
+    }
+    if (f.now() === 20000) {
+      gate.status = lint.status = 'completed';
+      lint.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  assert.equal(f.now(), 20000);
+  assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint queued, promote / promote in_progress',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint in_progress, promote / promote queued',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+  ]);
+});
+
+for (const count of [0, 2]) {
+  test(`logs a changing current promotion job count from ${count} to one`, async () => {
+    const f = fixture();
+    const current = f.jobs.shift();
+    if (count === 2) f.jobs.push(current, { ...current, id: 73 });
+    const sleep = f.sleep;
+    f.sleep = async ms => {
+      await sleep(ms);
+      if (f.now() === 10000) {
+        f.jobs.splice(0, f.jobs.length, f.jobs.find(job => job.name === 'Gate — Required'), { ...current, status: 'queued' });
+      }
+    };
+    await promote(f);
+    assert.equal(f.now(), 10000);
+    assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+      `Promotion grade poll: current promote jobs=${count}; unsettled jobs=${count ? 'promote / promote in_progress, promote / promote in_progress' : 'none'}`,
+      'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+    ]);
+  });
+}
+
+test('logs every unsettled job beyond one hundred without another jobs request', async () => {
+  const f = fixture();
+  f.jobs[1].status = 'queued';
+  f.jobs.push(...Array.from({ length: 110 }, (_, id) => ({
+    id: 100 + id, run_id: 42, name: `extra-${id}`, status: 'queued', conclusion: null,
+  })));
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    for (const job of f.jobs.filter(job => job.name !== 'promote / promote')) {
+      job.status = 'completed';
+      job.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  const polls = f.infos.filter(message => message.startsWith('Promotion grade poll:'));
+  assert.equal(polls.length, 2);
+  assert.match(polls[0], /current promote jobs=1;/);
+  assert.ok(polls[0].includes('Gate — Required queued'));
+  assert.ok(polls[0].includes('promote / promote in_progress'));
+  for (let id = 0; id < 110; id++) assert.ok(polls[0].includes(`extra-${id} queued`));
+  assert.equal(polls[1], 'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote in_progress');
+  assert.equal(f.pages.filter(args => args.run_id === 42).length, 3);
 });
 
 test('keeps the snapshot grade pending until the original grade completes', async () => {
@@ -127,6 +229,29 @@ test('never reports a passing snapshot grade for a failed original grade', async
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
+for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
+  test(`fails at once when a job of its own graded run ended ${conclusion}`, async () => {
+    const f = fixture();
+    f.jobs.push({ id: 75, run_id: 42, name: 'lint', status: 'completed', conclusion });
+    await assert.rejects(promote(f), new RegExp(`Graded run jobs did not pass: lint ${conclusion}$`));
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, undefined);
+    assert.ok(f.grades.every(grade => grade.state !== 'success'));
+    assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  });
+}
+
+test('fails at once on a red job of its graded run past the first page of jobs', async () => {
+  const f = fixture();
+  f.jobs.push(...Array.from({ length: 100 - f.jobs.length }, (_, id) => ({ id: 100 + id, run_id: 42, name: `green-${id}`,
+    status: 'completed', conclusion: 'success' })), { id: 75, run_id: 42, name: 'lint', status: 'completed', conclusion: 'failure' });
+  await assert.rejects(promote(f), /Graded run jobs did not pass: lint failure$/);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, undefined);
+  assert.ok(f.grades.every(grade => grade.state !== 'success'));
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
+
 test('waits for the reported snapshot grade to appear before merging', async () => {
   const f = fixture();
   const paginate = f.github.paginate;
@@ -134,6 +259,18 @@ test('waits for the reported snapshot grade to appear before merging', async () 
   await promote(f);
   assert.equal(f.now(), 15000);
   assert.equal(f.grades.at(-1).state, 'success');
+});
+
+test('finds the reported snapshot grade behind a full first page of newer statuses', async () => {
+  const f = fixture();
+  const createCommitStatus = f.github.rest.repos.createCommitStatus;
+  f.github.rest.repos.createCommitStatus = async args => {
+    await createCommitStatus(args);
+    if (args.state === 'success') f.grades.push(...Array.from({ length: 100 }, (_, id) => ({ ...args, context: `newer-${id}` })));
+  };
+  await promote(f);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('waits past four minutes for the snapshot required checks to turn green', async () => {
@@ -410,7 +547,7 @@ test('still reads a queued rerun that keeps its finished readiness job', async (
   assert.equal(f.outputs.graded, newer);
 });
 
-test('verifies the running job separately from its selected newer grade during self wait', async () => {
+test('an unstable snapshot of a selected newer grade merges', async () => {
   const f = batchFixture({ unstable: true });
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
@@ -431,6 +568,34 @@ test('never releases a selected grade whose readiness is revoked before merge', 
   await assert.rejects(promote(f), /no longer ready/);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.equal(f.outputs.main, undefined);
+});
+
+test('fails at once naming a job already red in the picked newer grade', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
+      [...result, { name: 'lint', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
+  };
+  await assert.rejects(promote(f), /Graded run jobs did not pass: lint cancelled$/);
+  assert.equal(f.now(), 0);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('releases the picked newer grade past an exempt side job it holds red', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
+      [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
+  };
+  await promote(f);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
@@ -546,87 +711,66 @@ test('a repeated promotion does not open or merge another pull request', async (
   assert.equal(f.outputs.main, 'main');
 });
 
-const selfWaitFixture = () => fixture({ existing: true, mergeState: 'unstable' });
+const unstableFixture = () => fixture({ existing: true, mergeState: 'unstable' });
 
-test('admits only its running check after the current run grade passed', async () => {
-  const f = selfWaitFixture();
-  f.checks.push({ name: 'unit-selected', status: 'completed', conclusion: 'skipped' });
+for (const [name, alter] of [
+  ['a red check of a dispatched run', f => f.checks.push({ name: 'load', status: 'completed', conclusion: 'failure',
+    details_url: 'https://github.com/owner/repo/actions/runs/44/job/80' })],
+  ['a running check of another workflow', f => f.checks.push({ name: 'kind', status: 'in_progress', conclusion: null,
+    details_url: 'https://github.com/owner/repo/actions/runs/45/job/81' })],
+  ['a failed commit status', f => f.statuses.push({ context: 'policy', state: 'failure' })],
+]) {
+  test(`an unstable snapshot merges on its first poll despite ${name} on the triggering commit`, async () => {
+    const f = unstableFixture();
+    alter(f);
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+  });
+}
+
+test('an unstable snapshot merges without reading the checks or statuses of the triggering commit', async () => {
+  const f = unstableFixture();
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.ok(f.pages.every(args => args.per_page === 100));
-  assert.equal(f.pages.filter(args => args.ref === 'graded').length, 2);
+  assert.equal(f.pages.filter(args => args.ref === 'graded').length, 0);
   assert.equal(f.pages.find(args => args.run_id === 42).filter, 'latest');
 });
 
-test('uses the latest successful status for each context', async () => {
-  const f = selfWaitFixture();
-  f.statuses.push({ context: 'policy', state: 'success' }, { context: 'policy', state: 'failure' });
-  await promote(f);
-  assert.equal(f.outputs.main, 'rebased');
-});
-
-for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
-  test(`another nonpassing check blocks promotion: ${outcome}`, async () => {
-    const f = selfWaitFixture();
-    const pending = outcome === 'queued' || outcome === 'in_progress';
-    f.checks.push({ name: 'another check', status: pending ? outcome : 'completed', conclusion: pending ? null : outcome });
-    await assert.rejects(promote(f));
-    assert.deepEqual(f.writes, []);
-  });
-}
-
-for (const state of ['pending', 'failure', 'error']) {
-  test(`a nonpassing effective commit status blocks promotion: ${state}`, async () => {
-    const f = selfWaitFixture();
-    f.statuses.push({ context: 'policy', state }, { context: 'policy', state: 'success' });
-    await assert.rejects(promote(f));
-    assert.deepEqual(f.writes, []);
-  });
+for (const name of ['mutation-stats-seed', 'test-summary']) {
+  for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled']) {
+    test(`an exempt side job never holds the release: ${name} ${outcome}`, async () => {
+      const f = unstableFixture();
+      const pending = outcome === 'queued' || outcome === 'in_progress';
+      const job = { name, status: pending ? outcome : 'completed', conclusion: pending ? null : outcome };
+      f.jobs.push({ id: 75, run_id: 42, ...job });
+      f.checks.push(job);
+      await promote(f);
+      assert.equal(f.now(), 0);
+      assert.equal(f.outputs.main, 'rebased');
+    });
+  }
 }
 
 for (const [name, alter] of [
-  ['missing grade', f => f.checks.shift()],
-  ['skipped grade', f => { f.checks[0].conclusion = 'skipped'; }],
-  ['failed grade', f => { f.checks[0].conclusion = 'failure'; }],
-  ['pending grade', f => { f.checks[0].status = 'queued'; }],
-  ['another run grade', f => { f.checks[0].details_url = 'https://github.com/owner/repo/actions/runs/41/job/72'; }],
   ['missing current job', f => { f.jobs.length = 0; }],
   ['duplicate current jobs', f => { f.jobs.push({ ...f.jobs[0], id: 73 }); }],
   ['another run job', f => { f.jobs[0].run_id = 41; }],
-  ['another job id', f => { f.jobs[0].id = 73; }],
-  ['another check url', f => { f.jobs[0].check_run_url += '/foreign'; }],
-  ['another check name', f => { f.checks[1].name = 'another job'; }],
-  ['another run details', f => { f.checks[1].details_url = 'https://github.com/owner/repo/actions/runs/41/job/71'; }],
   ['completed current job', f => { f.jobs[0].status = 'completed'; }],
-  ['failed current check', f => { f.checks[1].status = 'completed'; f.checks[1].conclusion = 'failure'; }],
 ]) {
   test(`an unverified current grade or job blocks promotion: ${name}`, async () => {
-    const f = selfWaitFixture();
+    const f = unstableFixture();
     alter(f);
     await assert.rejects(promote(f));
     assert.deepEqual(f.writes, []);
   });
 }
 
-test('reads a failing check beyond the first hundred results', async () => {
-  const f = selfWaitFixture();
-  f.checks.push(...Array.from({ length: 110 }, (_, id) => ({ id, name: `extra-${id}`, status: 'completed', conclusion: 'success' })),
-    { name: 'late failure', status: 'completed', conclusion: 'failure' });
-  await assert.rejects(promote(f));
-  assert.deepEqual(f.writes, []);
-});
-
-test('reads a failing status beyond the first hundred contexts', async () => {
-  const f = selfWaitFixture();
-  f.statuses.push(...Array.from({ length: 110 }, (_, id) => ({ context: `extra-${id}`, state: 'success' })),
-    { context: 'late failure', state: 'failure' });
-  await assert.rejects(promote(f));
-  assert.deepEqual(f.writes, []);
-});
-
 test('finds the exact current job beyond the first hundred jobs', async () => {
-  const f = selfWaitFixture();
+  const f = unstableFixture();
   f.jobs.unshift(...Array.from({ length: 110 }, (_, id) => ({ id, run_id: 42, name: `extra-${id}`, status: 'completed', conclusion: 'success' })));
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
@@ -774,7 +918,8 @@ test('promotes a launch hotfix past an unrelated red promotion check', async () 
 test('never promotes a red grade outside the launch hotfix route', async () => {
   const f = fixture();
   hotfixRun(f, 'success', 'skipped');
-  await assert.rejects(promote(f), /thirty minutes/);
+  await assert.rejects(promote(f), /Graded run jobs did not pass: Gate — Required failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.ok(f.grades.every(grade => grade.state !== 'success'));
 });
@@ -782,7 +927,9 @@ test('never promotes a red grade outside the launch hotfix route', async () => {
 test('never promotes a launch hotfix whose own grade failed', async () => {
   const f = fixture();
   hotfixRun(f, 'failure');
-  await assert.rejects(promote(f), /thirty minutes/);
+  await assert.rejects(promote(f),
+    /Graded run jobs did not pass: Gate — Required failure, Launch hotfix grade failure, coverage-baseline failure$/);
+  assert.equal(f.now(), 0);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
@@ -798,5 +945,14 @@ test('waits for every launch hotfix run job to finish before promoting', async (
   };
   await promote(f);
   assert.equal(f.now(), 15000);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('promotes a launch hotfix while an exempt side job still runs', async () => {
+  const f = fixture();
+  hotfixRun(f);
+  f.jobs.push({ id: 75, run_id: 42, name: 'test-summary', status: 'in_progress', conclusion: null });
+  await promote(f);
+  assert.equal(f.now(), 0);
   assert.equal(f.outputs.main, 'rebased');
 });

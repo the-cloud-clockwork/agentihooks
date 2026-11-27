@@ -11,7 +11,7 @@ nats_image=mirror.gcr.io/library/nats:2.15.1-alpine
 backup="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 cleanup() {
   docker compose down --volumes >/dev/null 2>&1 || true
-  rm -rf "$backup"
+  rm -rf "$backup" || true
 }
 trap cleanup EXIT
 mark=$SECONDS

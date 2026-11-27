@@ -208,8 +208,9 @@ added JSON quoted keys.
 |---|---|---|
 | 14 | `skills` | global: symlinked into `~/.agents/skills` (open agent-skills standard dir, not under `.codex`). Repo scope is `<repo>/.agents/skills`, which the project bridge points at `.claude/skills` |
 | 15 | `commands` | global: not installed; codex-cli 0.160.0 no longer reads `~/.codex/prompts` (live probe: `Unrecognized command '/prompts:<name>'`), and prompts an earlier install wrote are removed. Profile homes: hardlinked as skills (below) |
-| 16 | `agents` | **skipped** by the global install; a rendered profile home writes them as Codex custom agents under `agents/` (see the rendered home table) |
+| 16 | `agents` | global: written as Codex custom agents `~/.codex/agents/<name>.toml` (`name`, `description`, body as `developer_instructions`), tracked by `~/.codex/agents/.agentihooks-manifest.json`; an operator's own file of the same name wins. A rendered profile home writes them under `agents/` the same way |
 | 17 | `rules` (global) | no auto-loaded rules dir; compiled into `AGENTS.md` |
+| 17a | hand-placed `~/.claude` entries | Claude Code loads every file in `~/.claude/rules`, `skills`, `commands` and `agents`, including ones no layer ships. Entries not in the managed-link ledger, under names no layer ships, reach codex too: rules compiled into `AGENTS.md` labelled `local`, skills symlinked into `~/.agents/skills`, commands copied as skills (manifest `.agentihooks-codex-local-commands.json`), agents written as custom agents |
 | 18 | `rules` (repo) | no loader at all; `hooks/context/project_bridge.py` injects every `<repo>/.claude/rules/*.md` body plus the project `MEMORY.md` at SessionStart |
 
 ## §4 Target abstraction
@@ -286,9 +287,13 @@ of the render stamp, so a fetch that adds one re-renders the home.
 **Planner sandbox.** A swarm planner on Codex launches with
 `-c permissions.planner={extends=":read-only", network={enabled=true}, filesystem={…}}`
 and `-c default_permissions="planner"`. The filesystem grants write the ledger
-folder, `~/.agentihooks/swarm` and `~/scratchpad` only, so the repository stays read
-only while `agentihooks ledger` (which locks a file in the ledger folder) and
-Redis calls succeed. This overrides the role's `sandbox_mode = "danger-full-access"`
+folder, `~/.agentihooks/swarm`, `~/scratchpad`, the ledger exports folder, the
+launch checkout's git common dir, the worktree root (`WORKTREE_ROOT`, default
+`~/dev/worktrees`) and the launch temp folder only. The checkout working tree stays
+read only while `agentihooks ledger` (which locks a file in the ledger folder),
+Redis calls, `wt.sh new` and temp files succeed. The managed agentibrain server
+carries `default_tools_approval_mode = "approve"`, so its tools answer under
+approval `never`. This overrides the role's `sandbox_mode = "danger-full-access"`
 for that launch only; every other role keeps it.
 
 **Degrades.** Codex has no command-backed statusline (upstream openai/codex
@@ -352,13 +357,27 @@ warning.
 Every env and header value is scanned by `hooks.secrets.scan` before being
 written to disk — a HARD FLOOR path.
 
+**Pruning.** A server an earlier install wrote and the chain no longer ships is
+removed at `post_install_reconcile`. Nothing is removed in a run where a
+persisted profile did not resolve, and servers the operator added are never
+recorded, so they stay.
+
+**Manual sign-in.** With `_agentihooks.mcpManualSignIn = true` in a layer's
+codex native settings, a remote HTTP server that carries no credential of its
+own (no `bearer_token_env_var`, `env_http_headers` or `http_headers`, and not on
+loopback) is written with `enabled = false`. Codex skips a disabled server at
+startup, so it never fails with AuthRequired. The operator signs in with
+`codex mcp login <name>` and turns the server on in one of two ways:
+`enabled = true` in `config.toml`, which the next install keeps, or
+`-c mcp_servers.<name>.enabled=true` for a single launch.
+
 ## §8 Known gaps
 
 - **Uninstall.** `uninstall_global()` removes Claude artifacts only; nothing
   tears down `~/.codex`. Tracked in the defer log.
 - **Hook trust** cannot be verified from outside codex — `doctor()` says so
   rather than implying a green check covers it.
-- **Agents** have no codex equivalent (§3 row 16).
+- **Agents** carry no model or tool list: a custom agent file cannot narrow the session's sandbox (§3 row 16).
 - **`Interrupt`** exists in codex's `HooksToml` schema and is not in
   `CODEX_HOOK_EVENTS`; it has no `hook_manager` handler today.
 - **`PostCompact`** fires in codex-cli 0.160.0. It remains unregistered because
@@ -398,6 +417,8 @@ uv run python -m pytest tests/test_codex_target.py tests/test_codex_e2e.py tests
 | `additionalContextLimit` default of ~2,500 tokens | codex's published `config-schema.json`, `$defs.HookHandlerConfig` |
 | `project_doc_fallback_filenames` loading a repo CLAUDE.md | `codex -c 'project_doc_fallback_filenames=["CLAUDE.md"]' debug prompt-input` in tcc-qitp: instructions block 36,998 → 77,358 chars |
 | Repo skill root `<repo>/.agents/skills` | 0.154.0 binary strings ("failed to stat repo skills root" beside ".agents"); global roots confirmed live via `debug prompt-input` |
+| `~/.codex/agents/*.toml` loaded as spawnable roles | codex-cli 0.171.0, 2026-11-23: a scratch `CODEX_HOME` holding only `config.toml` and `agents/probe-scout.toml`; `codex exec` listed the roles `probe-scout`, `default`, `explorer`, `worker` |
+| `enabled = false` skips an MCP server at startup | codex-cli 0.171.0, 2026-11-23: one `codex exec` with `-c mcp_servers.<name>.enabled=false` for nine OAuth servers and `enabled=true` for pagerduty logged AuthRequired for pagerduty alone; codex-rs `config/src/mcp_types.rs`: "When `false`, Codex skips initializing this MCP server" |
 | What Claude loads that codex did not | a real tcc-qitp session transcript: one `instructions` attachment, 37 files, 252,291 bytes, every rule body inline |
 | Everything in §3–§5 not listed above | code-derived from `scripts/targets/codex_target.py` during this reconstruction; not re-verified against a codex binary |
 

@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, model_catalog
 from scripts.swarm.store import RedisStore
 from tests.helpers.seat import seat_owner
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -13,11 +14,15 @@ from tests.swarm.test_tick import FakeRuntime
 
 
 @pytest.fixture
-def closed(closing, monkeypatch):  # noqa: F811
+def closed(
+    closing: tuple[RedisStore, Any, FakeRuntime, Path],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RedisStore, Any, FakeRuntime, Path]:
     store, ledger, rt, root = closing
     ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", by))
     monkeypatch.setattr(cli.snapshot, "newest", lambda slug: root / slug / "snapshot.json")
-    store.update("sw", lanes={"eng": {"model": "opus"}}, autonomy="full", max_eng=2)
+    with patch.object(model_catalog, "catalog", return_value={"claude": [{"model": "opus"}], "codex": []}):
+        store.update("sw", lanes={"eng": {"model": "opus"}}, autonomy="full", max_eng=2)
     store.culture.set("sw", "Keep the record")
     store.memory.learn("master@sw", "master@a1b2c3-0001", "Carry the summary", 1)
     run("sw", "close", "--now")

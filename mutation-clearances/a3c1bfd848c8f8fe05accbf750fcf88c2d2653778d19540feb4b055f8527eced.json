@@ -1,0 +1,6 @@
+{
+  "hooks/hook_manager.py:hooks.hook_manager.x__prompt_quota_policy:2bb06c7bd64d96bf60629e322b16ac7eb53aff307b0869ccbc8adf6535fc397b": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: changing the missing-prompt default from empty string to None leaves supplied prompts unchanged. For missing prompts, _signal_match returns False for either falsy value, so record_push_signal writes nothing and prompt guidance remains unchanged."
+  }
+}

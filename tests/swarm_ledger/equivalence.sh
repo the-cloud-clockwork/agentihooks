@@ -17,7 +17,8 @@ replay() {
 
 settle() {
   failed=0
-  for job in $(jobs -p); do
+  pids="$(jobs -p)"
+  for job in $pids; do
     wait "$job" || failed=1
   done
   return "$failed"
@@ -62,15 +63,19 @@ store() {
 page() {
   contract=scripts/swarm_ledger/expected_page_change.json
   remove=()
+  add=()
   if [[ -f "head/$contract" ]] && ! diff -q "head/$contract" "base/$contract" > /dev/null 2>&1; then
     remove=(--remove "$PWD/head/$contract")
+    add=(--add "$PWD/head/$contract")
     echo "::notice::The head changes the expected page change contract;" \
-      "the base page replay hides the elements it names."
+      "the base page replay hides what it removes and the head and fault page replays hide what it adds."
   fi
   replay base-page python -I "$replays/page_replay.py" "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json \
     "${remove[@]}" &
-  replay head-page python -I "$replays/page_replay.py" "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
-  replay fault-page python -I "$replays/page_replay.py" "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
+  replay head-page python -I "$replays/page_replay.py" "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json \
+    "${add[@]}" &
+  replay fault-page python -I "$replays/page_replay.py" "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" \
+    fault-page.json "${add[@]}" &
   settle
   cmp base-page.json head-page.json
   if cmp -s base-page.json fault-page.json; then

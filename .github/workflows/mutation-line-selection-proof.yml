@@ -45,7 +45,7 @@ jobs:
       - name: Use the candidate selector on unchanged sample source and tests
         run: |
           cp -a head/scripts/ci_mutation/. sample/scripts/ci_mutation/
-          cp head/tests/dep_manifest.py sample/tests/dep_manifest.py
+          cp head/scripts/dep_manifest.py sample/scripts/dep_manifest.py
           cp head/tests/mutation_line_selection_proof.py sample/tests/mutation_line_selection_proof.py
       - name: Record contexts and compare selections on the sample head
         working-directory: sample

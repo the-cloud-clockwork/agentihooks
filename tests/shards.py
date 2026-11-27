@@ -6,18 +6,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
-SECONDS_PER_SOURCE_BYTE = 3e-6
-FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
+from scripts.shard_sizing import SECONDS_PER_SOURCE_BYTE, assign_work
+
 OWNER_COPIES = 2
 
 
 def discover_test_files(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py"))
-
-
-def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
-    return {path: (root / path).stat().st_size for path in files}
 
 
 def grouped_files(root: Path, files: list[str]) -> dict[str, str]:
@@ -55,7 +50,7 @@ def assign_files(
             seconds[path] += duration
     serial = {path: seconds[path] if grouped and path in grouped else 0.0 for path in files}
     collection = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
-    return _assign_work(seconds, serial, collection, shards, workers)
+    return assign_work(seconds, serial, collection, shards, workers)
 
 
 def assign_nodes(
@@ -82,51 +77,8 @@ def assign_nodes(
     serial = {unit: seconds[unit] if path in grouped else 0.0 for unit, path in files.items()}
     serial_groups = {unit: grouped.get(path, "") for unit, path in files.items()} if isinstance(grouped, dict) else None
     collection = {unit: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for unit, path in files.items()}
-    parts = _assign_work(seconds, serial, collection, shards, workers, serial_groups, files)
+    parts = assign_work(seconds, serial, collection, shards, workers, serial_groups, files)
     return [[node for unit in part for node in units[unit]] for part in parts]
-
-
-def _assign_work(
-    seconds: dict[str, float],
-    serial: dict[str, float],
-    collection: dict[str, float],
-    shards: int,
-    workers: int,
-    serial_groups: dict[str, str] | None = None,
-    collection_groups: dict[str, str] | None = None,
-) -> list[list[str]]:
-    loads = [0.0] * shards
-    serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
-    # Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit.
-    serial_peaks = [0.0] * shards
-    collection_loads = [0.0] * shards
-    collected: list[set[str]] = [set() for _ in range(shards)]
-    groups: list[list[str]] = [[] for _ in range(shards)]
-    for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
-        group = serial_groups[path] if serial_groups is not None else ""
-        file = collection_groups[path] if collection_groups is not None else path
-        lightest = min(
-            range(shards),
-            key=lambda i: (
-                max(
-                    (loads[i] + seconds[path]) / workers,
-                    serial_peaks[i],
-                    serial_loads[i].get(group, 0.0) + serial[path],
-                )
-                + collection_loads[i]
-                + (collection[path] if file not in collected[i] else 0.0),
-                loads[i],
-            ),
-        )
-        loads[lightest] += seconds[path]
-        total = serial_loads[lightest].get(group, 0.0) + serial[path]
-        serial_loads[lightest][group] = total
-        serial_peaks[lightest] = max(serial_peaks[lightest], total)
-        if file not in collected[lightest]:
-            collection_loads[lightest] += collection[path]
-            collected[lightest].add(file)
-        groups[lightest].append(path)
-    return groups
 
 
 def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:

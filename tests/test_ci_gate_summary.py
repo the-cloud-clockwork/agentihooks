@@ -59,14 +59,14 @@ def test_summary_command_prints_the_artifact_counts(tmp_path, monkeypatch, capsy
     assert capsys.readouterr().out == "Tests: ran 6, flaky 3, failed 1\n"
 
 
-def test_required_summary_writes_current_artifact_counts_even_after_gate_failure(tmp_path):
+def test_required_summary_writes_current_artifact_counts_even_after_gate_failure(tmp_path: Path) -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     gate = workflow["jobs"].get("test-summary", workflow["jobs"]["gate-required"])
     step = next(step for step in gate["steps"] if step.get("name") == "Summarize this run's tests")
     assert step["if"] == "${{ always() }}"
     assert "flake-budget" not in gate["needs"]
     downloads = [step for step in gate["steps"] if step.get("uses", "").startswith("actions/download-artifact@")]
-    assert {step["with"]["pattern"] for step in downloads} == {"durations-3.*", "flakes-3.*"}
+    assert {step["with"]["pattern"] for step in downloads} == {"{durations,flakes}-3.*"}
     assert all(step["if"] == "${{ always() }}" for step in downloads if not step["name"].endswith(", attempt 2"))
     assert all("run-id" not in step["with"] for step in downloads)
     _reports(tmp_path / "test-reports")
@@ -93,6 +93,17 @@ def test_test_summary_never_delays_required_grading():
     assert summary.get("name", "test-summary") != "Gate — Required"
     assert "test-summary" not in gate["needs"]
     assert all("test-summary" not in job.get("needs", []) for job in jobs.values())
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+def test_the_test_summary_downloads_every_report_in_one_step() -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["test-summary"]["steps"]
+    downloads = [step for step in steps if str(step.get("uses")).startswith("actions/download-artifact@")]
+    assert [step["name"] for step in downloads] == [
+        "Download this run's test reports",
+        "Download this run's test reports, attempt 2",
+    ]
+    assert [step["with"] for step in downloads] == [{"pattern": "{durations,flakes}-3.*", "path": "test-reports"}] * 2
 
 
 def test_selected_tests_publish_the_existing_duration_and_flake_formats():

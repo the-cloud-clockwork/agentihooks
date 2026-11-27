@@ -13,7 +13,7 @@ from scripts.swarm_v2.runtime.base import Outcome, Status
 
 
 def offer(task: str = "t1", lane: str = "eng", generation: int = 2, **pin: str) -> Envelope:
-    data = {"lane": lane, "generation": generation, **pin}
+    data = {"lane": lane, "generation": generation, "quota": {}, **pin}
     return Envelope(
         f"ready:rig:{task}:{generation}", "task.ready", "rig", "task", task, generation, 9, "readiness", data
     )
@@ -133,6 +133,17 @@ def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     ]
 
 
+def test_a_dead_lettered_offer_asks_the_hub_to_reopen_its_task_as_dead(hub: SimpleNamespace) -> None:
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).dead_lettered(offer(lane="ci"))
+    assert hub.hub.seen == [
+        (
+            "reopen",
+            "rig",
+            {"op": "reopen", "hive": "hive-a", "task": "t1", "lane": "ci", "generation": 2, "dead": True},
+        )
+    ]
+
+
 def test_a_launch_failed_on_a_harness_is_reported_to_the_hub(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).failed(offer(), "codex", "launch failed")
     assert hub.hub.seen == [
@@ -171,11 +182,12 @@ def test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account(hu
 @pytest.mark.parametrize(
     ("excluded", "taken"),
     [
-        (None, ("eng", "ci", "plan")),
-        ("", ("eng", "ci", "plan")),
-        ("master", ("eng", "ci", "plan")),
-        ("master,ci", ("eng", "plan")),
-        ("eng,ci,plan", ()),
+        (None, ("eng", "ci", "review", "plan")),
+        ("", ("eng", "ci", "review", "plan")),
+        ("master", ("eng", "ci", "review", "plan")),
+        ("master,ci", ("eng", "review", "plan")),
+        ("eng,ci,plan", ("review",)),
+        ("eng,ci,review,plan", ()),
     ],
 )
 def test_a_hive_runs_every_lane_spoke_it_does_not_exclude(excluded, taken):
@@ -395,6 +407,88 @@ def test_a_draining_hive_beats_presence_on_every_events_swarm(monkeypatch: pytes
     bus.close()
 
 
+@pytest.mark.feature("hive-set-drain-stops-lane-spokes")
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ({"draining": "yes", "members": {"pod-a": {"draining": "no"}}}, True),
+        ({"draining": "yes"}, True),
+        ({"draining": "no", "members": {"pod-a": {"draining": "yes"}}}, True),
+        ({"draining": "no", "members": {"pod-a": {"draining": "no"}, "pod-b": {"draining": "yes"}}}, False),
+        ({"draining": "no"}, False),
+        (None, False),
+    ],
+)
+def test_a_hive_drained_as_a_whole_or_by_this_pods_member_takes_no_new_agents(
+    monkeypatch: pytest.MonkeyPatch, record: dict[str, object] | None, expected: bool
+) -> None:
+    from scripts.hive import registry
+
+    shown: list[tuple[object, str]] = []
+    monkeypatch.setattr(registry, "show", lambda client, hive: shown.append((client, hive)) or record)
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+
+    assert lanes.draining(SimpleNamespace(redis="redis"), "hive-a") is expected
+    assert shown == [("redis", "hive-a")]
+
+
+@pytest.mark.feature("hive-set-drain-stops-lane-spokes")
+def test_a_store_without_redis_reads_no_hive_record_and_is_not_draining(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import registry
+
+    shown: list[tuple[object, str]] = []
+    monkeypatch.setattr(registry, "show", lambda client, hive: shown.append((client, hive)) or {"draining": "yes"})
+
+    assert lanes.draining(SimpleNamespace(), "hive-a") is False
+    assert shown == []
+
+
+@pytest.mark.feature("hive-set-drain-stops-lane-spokes")
+def test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.hive import registry
+
+    drained = {"draining": "yes", "members": {"pod-a": {"draining": "no"}}}
+    monkeypatch.setattr(registry, "show", lambda client, hive: drained)
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
+    beats: list[tuple[object, ...]] = []
+    polls: list[tuple[object, ...]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(lanes, "beat", lambda *args: beats.append(args))
+    monkeypatch.setattr(lanes, "run_once", lambda *args: polls.append(args) or [])
+    store = SimpleNamespace(redis="redis")
+
+    lanes.run(store, "bus", "runtime", "hive-a", ("ci",), waits.append, passes=range(1))
+
+    assert beats == [(store, "bus", "hive-a")]
+    assert polls == []
+    assert waits == [lanes.IDLE_S]
+
+
+@pytest.mark.feature("hive-set-drain-stops-lane-spokes")
+def test_the_lane_loop_polls_its_spokes_while_only_another_pods_member_drains(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import registry
+
+    serving = {"draining": "no", "members": {"pod-a": {"draining": "no"}, "pod-b": {"draining": "yes"}}}
+    monkeypatch.setattr(registry, "show", lambda client, hive: serving)
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
+    beats: list[tuple[object, ...]] = []
+    polls: list[tuple[object, ...]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(lanes, "beat", lambda *args: beats.append(args))
+    monkeypatch.setattr(lanes, "run_once", lambda *args: polls.append(args) or ["empty"])
+    store = SimpleNamespace(redis="redis")
+
+    lanes.run(store, "bus", "runtime", "hive-a", ("ci",), waits.append, passes=range(1))
+
+    assert beats == []
+    assert [args[:6] for args in polls] == [(store, "bus", "runtime", "hive-a", ("ci",), lanes.TAKE_MS)]
+    assert waits == [lanes.IDLE_S]
+
+
 def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
     from scripts.hive.daemon import local_checkout
     from scripts.swarm.store import SwarmConfig
@@ -543,7 +637,7 @@ def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(
 
     assert [(c.backend, c.url, c.provision) for c in configs] == [("nats", "nats://bus:4222", False)]
     [(seen_store, seen_bus, runtime, hive, taken)] = served
-    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "plan"))
+    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "review", "plan"))
     assert (type(runtime).__name__, runtime.herdr) == ("LocalHerdrRuntime", "herdr")
     bus.close.assert_called_once_with()
 

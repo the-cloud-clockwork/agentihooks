@@ -1,7 +1,12 @@
 import json
 import subprocess
+import threading
+import urllib.error
+from collections.abc import Callable, Iterator
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -46,6 +51,31 @@ def test_out_of_order_push_names_the_committed_head_gate(repository):
     with pytest.raises(BlockAction) as blocked:
         check_prepush({"tool_input": {"command": "git push"}, "cwd": str(repository)})
     assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(blocked.value)
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_a_lab_push_needs_the_prepush_gate_like_any_push(repository: Path) -> None:
+    git(repository, "remote", "add", "lab", "http://lab.invalid/repo.git")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(
+            {"tool_input": {"command": "git push -o branch=dev lab HEAD:refs/grade/t1"}, "cwd": str(repository)}
+        )
+    assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(blocked.value)
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_the_stop_gate_counts_a_head_pushed_only_to_the_lab_as_unpushed(repository: Path, tmp_path: Path) -> None:
+    import re
+
+    from scripts.gates import push_stop
+
+    lab = tmp_path / "lab.git"
+    git(tmp_path, "init", "-q", "--bare", str(lab))
+    git(repository, "commit", "-q", "--allow-empty", "-m", "graded only")
+    git(repository, "push", "-q", str(lab), "HEAD:refs/grade/t1")
+    tree = push_stop.inspect(repository, re.compile("dev"))
+    assert tree is not None
+    assert tree.unpushed == 1
 
 
 def _no_collection(slug):
@@ -478,6 +508,51 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] != head
 
 
+@pytest.mark.feature("prepare-unpushed-branch-fresh-cut")
+@pytest.mark.parametrize("hint", ["", "handoff_envelope", "reclaim"])
+def test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hint: str
+) -> None:
+    from scripts.swarm import publish, stack
+
+    fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    script = tmp_path / "wt.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'git -C "$3" fetch origin dev >&2\n'
+        "base=origin/dev\n"
+        'if [[ "${4:-}" == --from ]]; then git -C "$3" fetch origin "${5#origin/}" >&2; base="$5"; fi\n'
+        'git -C "$3" worktree add --no-track -b engineer-test "$PUBLISH_PREPARED" "$base" >&2\n'
+        'printf "%s\\n" "$PUBLISH_PREPARED"\n'
+    )
+    monkeypatch.setattr(stack, "WT_SCRIPT", script)
+    monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
+    task = {
+        "id": "t1",
+        "claimed_by": "engineer@test",
+        "state": "claimed",
+        "branch": "never-pushed",
+        "repository_branches": {str(repository): "never-pushed"},
+    }
+    if hint:
+        task[hint] = {"continue_from": "origin/never-pushed"}
+    ledger: Any = SimpleNamespace(
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+    agent = AgentRecord("engineer@test", "ci", "t1")
+
+    result = publish.prepare("swarm", agent, str(repository), ledger)
+
+    assert result["worktree"] == str(worktree)
+    assert git(worktree, "rev-parse", "HEAD") == fresh
+    assert result["branch"] == task["branch"] == "engineer-test"
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    upstream = subprocess.run(["git", "-C", str(worktree), "rev-parse", "@{upstream}"], capture_output=True)
+    assert upstream.returncode != 0
+
+
 @pytest.mark.parametrize(
     "state, deleted, head",
     [
@@ -736,7 +811,9 @@ def test_publication_reads_its_own_task_by_id_and_never_the_tasks_collection(pub
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
     monkeypatch.chdir(publication.repo)
-    args = SimpleNamespace(slug="swarm", command=command, message="Change chosen", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Change chosen", files=["chosen.txt"], via="", direct=False
+    )
     getattr(cli, f"cmd_{command}")(None, args)
     assert reads and set(reads) == {("swarm", "t1")}
 
@@ -765,6 +842,8 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
     else:
         publication.task["branch"] = branch
     if branch == "XXXX":
+        registered = git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Registered branch work")
+        git(root, "push", "origin", f"{registered}:refs/heads/XXXX")
         with pytest.raises(SwarmError, match="engineer-test.*registered.*XXXX"):
             publish.publish(
                 "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
@@ -1293,7 +1372,9 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
         monkeypatch.setattr(p.ledger, "task", refuse)
     elif recording != "missing":
         monkeypatch.setattr(publish, command, refuse)
-    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Continue", files=["chosen.txt"], via="", direct=False
+    )
     with pytest.raises(publish.SwarmError, match=reason):
         getattr(cli, f"cmd_{command}")(None, args)
     assert opened == ["agentihooks-swarm"]
@@ -1816,6 +1897,80 @@ def test_successor_publishes_past_a_settled_pull_request_only(
     assert len(viewed) == 1
 
 
+def _stub_pull_request(monkeypatch: pytest.MonkeyPatch, state: str) -> list[str]:
+    from scripts.swarm import publish
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    viewed: list[str] = []
+
+    def change(asked: str, refused: str) -> ChangeState:
+        assert refused == f"cannot read pull request {asked}"
+        viewed.append(asked)
+        return ChangeState(ChangeRef("example/repo", 7), state, "a" * 40, "dev", False, asked)
+
+    monkeypatch.setattr(publish.stack, "change", change)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
+    return viewed
+
+
+@pytest.mark.feature("publish-unpushed-predecessor-fresh-branch")
+def test_publish_refuses_a_fresh_branch_while_the_recorded_branch_holds_commits_it_lacks(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+
+    p = publication
+    retained = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Retained predecessor work")
+    git(p.root, "push", "origin", f"{retained}:refs/heads/predecessor")
+    p.task.update(branch="predecessor")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
+    monkeypatch.chdir(p.root)
+    before = git(p.root, "rev-parse", "HEAD")
+    with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Keep retained work", ["chosen.txt"])
+    assert p.updates == []
+    assert git(p.root, "rev-parse", "HEAD") == before
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == retained
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.feature("publish-unpushed-predecessor-fresh-branch")
+def test_publish_refuses_a_fresh_branch_over_a_never_pushed_branch_while_its_pull_request_is_open(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+
+    p = publication
+    p.task.update(branch="never-pushed", pr_url="https://github.com/example/repo/pull/7")
+    _stub_pull_request(monkeypatch, "open")
+    monkeypatch.chdir(p.root)
+    with pytest.raises(publish.SwarmError, match="differs from registered branch never-pushed"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Wait for the open pull request", ["chosen.txt"])
+    assert p.updates == []
+    assert p.task["branch"] == "never-pushed"
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.feature("publish-unpushed-predecessor-fresh-branch")
+@pytest.mark.parametrize("url", ["", "https://github.com/example/repo/pull/7"])
+def test_publish_records_a_fresh_branch_over_a_never_pushed_recorded_branch(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    from scripts.swarm import publish
+
+    p = publication
+    p.task.update(branch="never-pushed", pr_url=url)
+    viewed = _stub_pull_request(monkeypatch, "closed")
+    monkeypatch.chdir(p.root)
+    result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue on a fresh branch", ["chosen.txt"])
+    head = git(p.root, "rev-parse", "HEAD")
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.repo): "engineer-test"}
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/never-pushed") == ""
+    assert viewed == ([url] if url else [])
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
@@ -1998,3 +2153,563 @@ def test_only_the_task_owner_can_publish(publication, fields):
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing(publication, monkeypatch):
+    import fakeredis
+
+    from hooks.context import blocker_window
+    from scripts.swarm import panic, publish, store
+    from scripts.swarm.store import RedisStore, SwarmError
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda environ=None: fake)
+    panic.engage(RedisStore(fake), "swarm", "60 errors in the last hour", False, [], 0)
+    with pytest.raises(SwarmError) as refused:
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    frozen = blocker_window.FROZEN.format(slug="swarm", reason="60 errors in the last hour")
+    assert (
+        str(refused.value) == f"{frozen}; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
+    )
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(publication.root, "show", "HEAD:chosen.txt") == "after"
+    assert not (publication.root / ".git-gate-head").exists()
+
+
+@pytest.mark.feature("panic-publish-holds")
+def test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch(publication, monkeypatch):
+    from hooks.context import blocker_window
+    from scripts.swarm import publish
+
+    asked = []
+
+    def held_push(cwd, branch, slug):
+        asked.append((cwd, branch, slug))
+
+    monkeypatch.setattr(blocker_window, "held_push", held_push)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert asked == [(str(publication.root), "engineer-test", "swarm")]
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
+
+
+LAB_HOOK = (
+    "#!/bin/sh\n"
+    "while read old new ref; do\n"
+    '  echo "$ref $GIT_PUSH_OPTION_0" >> pushed\n'
+    '  echo "lab grade: http://lab.invalid/grades/$new"\n'
+    "done\n"
+)
+
+
+@pytest.fixture
+def lab(publication: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    bare = tmp_path / "lab" / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(bare, "config", "receive.advertisePushOptions", "true")
+    hook = bare / "hooks" / "post-receive"
+    hook.write_text(LAB_HOOK)
+    hook.chmod(0o755)
+    monkeypatch.setenv("AGENTIHOOKS_LAB_REMOTE", str(bare))
+    return bare
+
+
+def _publish_via_lab(publication: SimpleNamespace, direct: bool = False) -> dict:
+    from scripts.swarm import publish
+
+    return publish.publish(
+        "swarm",
+        publication.agent,
+        str(publication.repo),
+        publication.ledger,
+        "Change chosen",
+        ["chosen.txt"],
+        publish.LabRoute("t1", direct),
+    )
+
+
+def _origin(publication: SimpleNamespace) -> str:
+    return git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test")
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import publish
+
+    answers = iter(
+        [
+            {"grades": []},
+            {"grades": [{"conclusion": None}]},
+            {"grades": [{"conclusion": "failure"}, {"conclusion": "success"}]},
+        ]
+    )
+    read, slept = [], []
+
+    def read_grade(url: str) -> dict:
+        read.append((url, _origin(publication)))
+        return next(answers)
+
+    monkeypatch.setattr(publish, "read_grade", read_grade)
+    monkeypatch.setattr(publish.time, "sleep", lambda seconds: slept.append(seconds) if seconds >= 1 else None)
+    result = _publish_via_lab(publication)
+    head = git(publication.root, "rev-parse", "HEAD")
+    url = f"http://lab.invalid/grades/{head}"
+    assert result["lab_grade"] == url
+    assert read == [(url, ""), (url, ""), (url, "")]
+    assert slept == [15, 15]
+    assert git(lab, "rev-parse", "refs/grade/t1") == head
+    assert (lab / "pushed").read_text() == "refs/grade/t1 branch=engineer-test\n"
+    assert _origin(publication).split()[0] == head
+    assert git(publication.root, "remote", "get-url", "lab") == str(lab)
+    shown = capfd.readouterr().err
+    assert f"remote: lab grade: {url}" in shown
+    assert shown.endswith("\n")
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_leaves_origin_untouched_on_a_red_grade(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.setattr(publish, "read_grade", lambda url: {"grades": [{"conclusion": "failure"}]})
+    monkeypatch.setattr(publish, "LAB_WAIT_S", 0)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication)
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert str(refused.value).startswith(
+        f"the lab grade http://lab.invalid/grades/{head} concluded failure; origin was not pushed; Next: "
+    )
+    assert git(lab, "rev-parse", "refs/grade/t1") == head
+    assert _origin(publication) == ""
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+
+    monkeypatch.setattr(publish, "read_grade", lambda url: pytest.fail("a direct publish read the grade"))
+    result = _publish_via_lab(publication, direct=True)
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert result["lab_grade"] == f"http://lab.invalid/grades/{head}"
+    assert git(lab, "rev-parse", "refs/grade/t1") == head
+    assert _origin(publication).split()[0] == head
+
+
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize("direct", [False, True])
+def test_lab_publication_records_its_head_and_wait_before_polling(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch, direct: bool
+) -> None:
+    from typing import Any
+
+    import fakeredis
+
+    from hooks.context import swarm_heartbeat
+    from scripts.swarm import cli, idle, pr_wait, publish, waits
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    store: Any = SimpleNamespace(redis=redis, agents=lambda slug: [publication.agent])
+    monkeypatch.setattr(pr_wait, "time", SimpleNamespace(time=lambda: 2.0))
+    monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
+
+    def recorded() -> None:
+        rows = {"t1": {"id": "t1", "pr_url": "https://github.com/o/r/pull/1"}}
+        assert (
+            pr_wait.enforce_pass(
+                store, "swarm", rows, lambda url: pytest.fail("read old origin PR during an active lab wait"), 2001
+            )
+            == []
+        )
+        head = git(lab, "rev-parse", "refs/grade/t1")
+        marked = pr_wait.read(redis, "swarm", publication.agent.name) or {}
+        assert marked["pushed_head"] == head
+        assert marked["pushed_at"] == "2000"
+        assert marked["pushed_branch"] == "refs/grade/t1"
+        assert marked["pushed_repo"] == ""
+        held = idle.wait(redis, "swarm", publication.agent.name) or {}
+        assert held["on"] == {"kind": "lab", "target": f"http://lab.invalid/grades/{head}"}
+        assert held["reason"] == pr_wait.REASON
+        assert held["at"] == 2000
+        assert held["until"] == 2000 + waits.CHECKED_MINUTES * 60_000
+
+    def grade(url: str) -> dict:
+        recorded()
+        return {"grades": [{"conclusion": "success"}]}
+
+    monkeypatch.setattr(publish, "read_grade", grade)
+    flags = ["--direct"] if direct else []
+    args = cli.build_parser().parse_args(
+        ["swarm", "publish", "--via", "lab", *flags, "-m", "Change chosen", "chosen.txt"]
+    )
+    result = cli.publication_command(store, args)
+    recorded()
+    env = {
+        "AGENTIHOOKS_SWARM": "swarm",
+        "AGENTIHOOKS_AGENT_NAME": publication.agent.name,
+        "AGENTIHOOKS_SWARM_TASK": "t1",
+    }
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "agentihooks swarm swarm publish --via lab -m change -- chosen.txt"},
+        "cwd": str(publication.repo),
+    }
+    assert swarm_heartbeat.push_mark(payload, env, redis) is True
+    recorded()
+    assert result["head"] == git(lab, "rev-parse", "refs/grade/t1")
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_pushes_the_grade_ref_with_push_negotiation(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+
+    real = publish.git_https.run
+    pushed: list[list[str]] = []
+
+    def run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        if argv[-1].startswith("HEAD:refs/grade/"):
+            pushed.append(argv)
+        return real(argv, cwd=cwd)
+
+    monkeypatch.setattr(publish.git_https, "run", run)
+    _publish_via_lab(publication, direct=True)
+    assert pushed == [
+        ["git", "-c", "push.negotiate=true", "push", "-o", "branch=engineer-test", "lab", "HEAD:refs/grade/t1"]
+    ]
+    assert (lab / "pushed").read_text() == "refs/grade/t1 branch=engineer-test\n"
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.delenv("AGENTIHOOKS_LAB_REMOTE", raising=False)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication, direct=True)
+    assert str(refused.value).startswith(
+        "publish --via lab needs AGENTIHOOKS_LAB_REMOTE naming the lab remote of this repository; Next: "
+    )
+    assert _origin(publication) == ""
+
+
+@pytest.mark.feature("publish-refusal-keeps-lab-route")
+@pytest.mark.parametrize(("direct", "flags"), [(False, ["--via", "lab"]), (True, ["--via", "lab", "--direct"])])
+def test_publish_via_lab_refusal_repeats_its_lab_route_in_the_next_command(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direct: bool, flags: list[str]
+) -> None:
+    import shlex
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.delenv("AGENTIHOOKS_LAB_REMOTE", raising=False)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication, direct=direct)
+    repeated = str(refused.value).split("; Next: ", 1)[1]
+    assert repeated == shlex.join(
+        ["agentihooks", "swarm", "swarm", "publish", "--message", "Change chosen", *flags, "--", "chosen.txt"]
+    )
+    args = cli.build_parser().parse_args(shlex.split(repeated)[2:])
+    assert (args.via, args.direct, args.files) == ("lab", direct, ["chosen.txt"])
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize(
+    ("hook", "code"),
+    [("post-receive", "true"), ("pre-receive", 'echo "lab grade: http://lab.invalid/grades/refused"; exit 1')],
+)
+def test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade(
+    publication: SimpleNamespace, lab: Path, hook: str, code: str
+) -> None:
+    from scripts.swarm.store import SwarmError
+
+    (lab / "hooks" / hook).write_text(f"#!/bin/sh\ncat >/dev/null\n{code}\n")
+    (lab / "hooks" / hook).chmod(0o755)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication, direct=True)
+    assert str(refused.value).startswith("the lab push named no grade url; origin was not pushed: ")
+    assert _origin(publication) == ""
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_lab_conclusion_refuses_once_the_wait_runs_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    clock, slept = iter([0, 1799, 1800]), []
+    monkeypatch.setattr(publish.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(publish.time, "sleep", slept.append)
+    monkeypatch.setattr(publish, "read_grade", lambda url: {"grades": [{"conclusion": None}]})
+    with pytest.raises(SwarmError) as refused:
+        publish.lab_conclusion("http://lab.invalid/grades/abc")
+    assert str(refused.value) == (
+        "the lab grade http://lab.invalid/grades/abc has not concluded after 1800 s; origin was not pushed"
+    )
+    assert slept == [15]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize(
+    "answer",
+    [urllib.error.URLError("refused"), json.JSONDecodeError("no json", "", 0), {"head": "abc"}],
+)
+def test_an_unreadable_lab_grade_refuses_the_wait(monkeypatch: pytest.MonkeyPatch, answer: object) -> None:
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    def read_grade(url: str) -> object:
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(publish, "read_grade", read_grade)
+    with pytest.raises(SwarmError) as refused:
+        publish.lab_conclusion("http://lab.invalid/grades/abc")
+    cause = answer if isinstance(answer, Exception) else KeyError("grades")
+    assert str(refused.value) == (
+        f"the lab grade http://lab.invalid/grades/abc could not be read, so origin was not pushed: {cause!r}"
+    )
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_direct_without_the_lab_route_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    import syslog
+    from typing import Any
+
+    from scripts.swarm import cli, publish
+    from scripts.swarm.store import SwarmError
+
+    store: Any = None
+    monkeypatch.setattr(syslog, "syslog", lambda *args: None)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: SimpleNamespace(task="t1", name="engineer@test"))
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: "/repo")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(task=lambda slug, task: {}))
+    monkeypatch.setattr(publish, "refusal_branch", lambda repo, task: "")
+    monkeypatch.setattr(publish, "publish", lambda *args: pytest.fail("published without the lab route"))
+    args = cli.build_parser().parse_args(["swarm", "publish", "--direct", "-m", "Change", "chosen.txt"])
+    with pytest.raises(SwarmError) as refused:
+        cli.publication_command(store, args)
+    assert str(refused.value) == "publish --direct goes with --via lab"
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_read_grade_reads_the_lab_answer_with_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
+    from scripts.swarm import publish
+
+    opened = []
+
+    def urlopen(url: str, timeout: int) -> io.BytesIO:
+        opened.append((url, timeout))
+        return io.BytesIO(b'{"head": "abc", "grades": []}')
+
+    monkeypatch.setattr(publish.urllib.request, "urlopen", urlopen)
+    assert publish.read_grade("http://lab.invalid/grades/abc") == {"head": "abc", "grades": []}
+    assert opened == [("http://lab.invalid/grades/abc", 10)]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize(
+    ("flags", "route"),
+    [([], None), (["--via", "lab"], ("t1", False)), (["--via", "lab", "--direct"], ("t1", True))],
+)
+def test_publish_command_hands_the_lab_route_to_publish(
+    monkeypatch: pytest.MonkeyPatch, flags: list[str], route: tuple[str, bool] | None
+) -> None:
+    from typing import Any
+
+    from scripts.swarm import cli, publish
+
+    called = []
+    store: Any = SimpleNamespace(redis=object())
+    monkeypatch.setattr(cli, "_worker", lambda store, args: SimpleNamespace(task="t1", name="engineer@test"))
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: "/repo")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(task=lambda slug, task: {}))
+    monkeypatch.setattr(publish, "publish", lambda *args: called.append(args) or {})
+    args = cli.build_parser().parse_args(["swarm", "publish", *flags, "-m", "Change", "chosen.txt"])
+    cli.publication_command(store, args)
+    assert called[0][5] == ["chosen.txt"]
+    assert called[0][6] == (publish.LabRoute(*route) if route else None)
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_command_names_its_lab_flags(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import re
+
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("COLUMNS", "200")
+    parser = cli.build_parser()
+    assert parser.parse_args(["swarm", "publish", "-m", "Change"]).via == ""
+    with pytest.raises(SystemExit) as refused:
+        parser.parse_args(["swarm", "publish", "--via", "origin", "-m", "Change"])
+    assert refused.value.code == 2
+    with pytest.raises(SystemExit):
+        parser.parse_args(["swarm", "publish", "--help"])
+    shown = capsys.readouterr().out
+    assert re.search(r"^  --via \{lab\} +grade HEAD on the lab remote before origin$", shown, re.M)
+    assert re.search(r"^  --direct +with --via lab, push origin without the lab grade$", shown, re.M)
+
+
+NOTICE_SIGNER = "notice-signer"
+NOTICE_ACTOR = "agenticore-app[bot]"
+
+
+@pytest.fixture
+def lab_receiver(publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Serve the real webhook receiver with lab intake on a local port and point the notice settings at it.
+
+    The task worktree fetches from a GitHub origin url and pushes to its local remote, and tips keeps the remote task
+    branch as the receiver saw it at each notice it accepted."""
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake
+    from scripts.events.config import BusConfig
+    from scripts.events.envelope import Envelope
+    from scripts.events.memory import open_bus
+    from scripts.hub import github_webhooks
+
+    remote = publication.repo.parent / "remote.git"
+    git(publication.root, "remote", "set-url", "origin", "git@github.com:Acme/Widgets.git")
+    git(publication.root, "config", "remote.origin.pushurl", str(remote))
+    bus = open_bus(BusConfig())
+    heads = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+    tips: list[str] = []
+
+    class Witness:
+        def publish(self, subject: str, event: Envelope) -> bool:
+            tips.append(git(publication.root, "ls-remote", str(remote), "refs/heads/engineer-test"))
+            return bus.lab_heads.publish(subject, event)
+
+    intake = LabIntake(Witness(), NOTICE_SIGNER.encode())
+    pulls = github_webhooks.LazyPulls(bus)  # pyright: ignore[reportArgumentType]
+    ingress = github_webhooks.Ingress(pulls, b"webhook-signer", intake)
+    server = ThreadingHTTPServer(("localhost", 0), github_webhooks.handler(ingress))
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{server.server_address[1]}{github_webhooks.NOTICE_PATH}")
+    monkeypatch.setenv(NOTICE_SECRET_ENV, NOTICE_SIGNER)
+    monkeypatch.setenv(ACTOR_ENV, NOTICE_ACTOR)
+    yield SimpleNamespace(heads=heads, remote=remote, tips=tips)
+    server.shutdown()
+    server.server_close()
+    serving.join()
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
+    publication: SimpleNamespace, lab_receiver: SimpleNamespace
+) -> None:
+    from scripts.swarm import publish
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    notice = {
+        "event": "notice",
+        "repo": "https://github.com/acme/widgets",
+        "head": head,
+        "base": git(publication.root, "merge-base", head, "origin/dev"),
+        "actor": NOTICE_ACTOR,
+        "action": "pushed",
+    }
+    deliveries = lab_receiver.heads.fetch(100, 0)
+    assert [(delivery.event.type, delivery.event.data) for delivery in deliveries] == [("ci.lab.head.notice", notice)]
+    assert lab_receiver.tips == [f"{head}\trefs/heads/engineer-test"]
+    assert result["lab_notice"] == "200"
+
+
+def refuse_the_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sign the notice with a secret the receiver does not hold, so it answers 401."""
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+
+    monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+
+
+def send_the_notice_nowhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the notice at a local port nothing listens on, so the connection is refused."""
+    import socket
+
+    from scripts.ci_lab.head_notice import URL_ENV
+
+    with socket.socket() as probe:
+        probe.bind(("localhost", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{port}/lab/head")
+
+
+@pytest.mark.feature("lab-head-notice-push")
+@pytest.mark.parametrize("failure", [refuse_the_notice, send_the_notice_nowhere], ids=["refused", "unreachable"])
+def test_a_failed_notice_never_fails_the_push(
+    publication: SimpleNamespace,
+    lab_receiver: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: Callable[[pytest.MonkeyPatch], None],
+) -> None:
+    from scripts.swarm import publish
+
+    failure(monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    prefix, suffix = f"lab head notice for {head} was not accepted: ", "; the push stands"
+    lines = capsys.readouterr().err.splitlines()
+    assert any(line.startswith(prefix) and line.endswith(suffix) for line in lines)
+    assert result["lab_notice"] == "0"
+    assert lab_receiver.heads.fetch(100, 0) == []
+    assert lab_receiver.tips == []
+    assert git(publication.root, "ls-remote", str(lab_receiver.remote), "refs/heads/engineer-test").split()[0] == head
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_publish_without_the_lab_notice_settings_sends_and_records_no_notice(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+    from scripts.swarm import publish
+
+    monkeypatch.delenv(URL_ENV, raising=False)
+    monkeypatch.delenv(NOTICE_SECRET_ENV, raising=False)
+    monkeypatch.delenv(ACTOR_ENV, raising=False)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert "lab_notice" not in result
+    assert result["head"] == git(publication.root, "rev-parse", "HEAD")
+
+
+@pytest.mark.feature("lab-head-notice-push")
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:The-Cloud-Clockwork/agentihooks.git",
+        "ssh://git@github.com/The-Cloud-Clockwork/agentihooks.git",
+        "https://github.com/the-cloud-clockwork/agentihooks/",
+    ],
+    ids=["scp ssh", "ssh url", "https"],
+)
+def test_the_notice_names_the_repository_as_github_deliveries_do(origin: str) -> None:
+    from scripts.swarm import publish
+
+    assert publish.lab_repository(origin) == "https://github.com/the-cloud-clockwork/agentihooks"

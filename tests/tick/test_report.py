@@ -260,14 +260,17 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "status publish": frozenset({"health findings"}),
     }
     assert {step.name: step.needs for step in host.STEPS if step.needs} == {
-        "planning after phase": frozenset({"planning and phase pass"})
+        "planning after phase": frozenset({"planning and phase pass"}),
+        "tick view": frozenset({"view wait"}),
     }
     assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
 
 def _closing_store(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
     redis = SimpleNamespace(
-        set=lambda key, value: calls.append(("set", key, value)), delete=lambda key: calls.append(("delete", key))
+        set=lambda key, value: calls.append(("set", key, value)),
+        delete=lambda key: calls.append(("delete", key)),
+        get=lambda key: None,
     )
     return SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
 

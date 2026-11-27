@@ -4,6 +4,8 @@ import json
 import re
 import subprocess
 import urllib.request
+from collections.abc import Mapping
+from typing import Any
 
 from scripts.account_names import OAUTH_ENV, oauth_env
 from scripts.codex_quota import codex_home
@@ -111,5 +113,5 @@ def cached(harness, environ, redis, now):
     return models
 
 
-def catalog(environ, redis, now):
+def catalog(environ: Mapping[str, str], redis: Any, now: float) -> dict[str, list[dict[str, Any]]]:
     return {harness: cached(harness, environ, redis, now) for harness in READERS}

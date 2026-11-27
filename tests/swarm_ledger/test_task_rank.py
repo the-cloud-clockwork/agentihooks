@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm_ledger import ledger, ledger_rank, ledger_tasks, new_ledger
@@ -285,7 +287,7 @@ def test_task_add_stamps_its_rank_so_the_dispatcher_may_reorder_a_master_rank():
 
 
 def test_an_if_owned_rank_on_a_rank_with_no_recorded_author_lands():
-    doc, ctx = {"tasks": [{"id": "t1", "rank": "low"}]}, FakeContext()
+    doc, ctx = {"tasks": [{"id": "t1", "rank": "low"}]}, cast(Any, FakeContext())
     ctx.refused = []
     assert ledger_rank.apply(doc, {**page_rank("high"), "by": "dispatcher", "if_owned": True}, ctx) is True
     assert (doc["tasks"][0]["rank"], ctx.stamps, ctx.refused) == ("high", {"tasks/t1/rank": {"by": "dispatcher"}}, [])
@@ -431,8 +433,8 @@ def test_task_set_passes_the_operators_quote_with_the_rank(monkeypatch):
     assert sent == [("task_update", {"item": "tasks/t1", "fields": {"rank": "high"}, "quote": "his words"})]
 
 
-@pytest.mark.parametrize("action", [["add", "t5", "b", "--rank", "high"], ["group", "t1", "t2"]])
-def test_only_task_set_takes_a_quote(monkeypatch, action):
+@pytest.mark.parametrize("action", [["group", "t1", "t2"], ["split", "t1", "t2"]])
+def test_task_group_and_split_take_no_quote(monkeypatch, action):
     sent = []
     monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((kind, f)))
     argv = ["--slug", SLUG, "--as", MASTER, "task", *action, "--quote", "his words"]
@@ -445,7 +447,7 @@ def test_only_task_set_takes_a_quote(monkeypatch, action):
 
 
 def test_the_rank_op_by_a_refused_author_changes_nothing_and_names_why():
-    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    doc, ctx = {"tasks": [{"id": "t1"}]}, cast(Any, FakeContext())
     ctx.refused = []
     assert ledger_rank.apply(doc, {**page_rank("high"), "by": ENGINEER}, ctx) is False
     assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == ({"id": "t1"}, {}, [], False)
@@ -468,7 +470,7 @@ def page_rank(rank):
 
 
 def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
-    doc, ctx = {"tasks": [{"id": "t0"}, {"id": "t1"}]}, FakeContext()
+    doc, ctx = {"tasks": [{"id": "t0"}, {"id": "t1"}]}, cast(Any, FakeContext())
     assert ledger_rank.apply(doc, page_rank("next"), ctx) is True
     assert doc["tasks"][1] == {"id": "t1", "rank": "urgent"} and doc["tasks"][0] == {"id": "t0"}
     assert ctx.stamps == {"tasks/t1/rank": {"by": "operator"}}
@@ -481,14 +483,14 @@ def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
 )
 def test_setting_the_rank_a_task_already_has_from_the_same_author_changes_nothing(task, rank):
     held = {"tasks/t1/rank": {"by": "operator"}}
-    doc, ctx = {"tasks": [task]}, FakeContext(held)
+    doc, ctx = {"tasks": [task]}, cast(Any, FakeContext(held))
     assert ledger_rank.apply(doc, page_rank(rank), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), held, [], False)
 
 
 @pytest.mark.parametrize("held", [{}, {"tasks/t1/rank": {"by": "dispatcher"}}])
 def test_setting_the_same_rank_as_another_author_takes_the_rank_over(held):
-    doc, ctx = {"tasks": [{"id": "t1", "rank": "high"}]}, FakeContext(held)
+    doc, ctx = {"tasks": [{"id": "t1", "rank": "high"}]}, cast(Any, FakeContext(held))
     assert ledger_rank.apply(doc, page_rank("high"), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
         {"id": "t1", "rank": "high"},
@@ -498,7 +500,7 @@ def test_setting_the_same_rank_as_another_author_takes_the_rank_over(held):
 
 
 def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leaves_it():
-    doc, ctx = {"tasks": [{"id": "t1"}]}, FakeContext()
+    doc, ctx = {"tasks": [{"id": "t1"}]}, cast(Any, FakeContext())
     assert ledger_rank.apply(doc, page_rank("normal"), ctx) is True
     assert (doc["tasks"][0], ctx.stamps, ctx.dirty) == (
         {"id": "t1", "rank": "normal"},
@@ -508,7 +510,7 @@ def test_an_explicit_normal_on_an_unranked_task_is_stored_so_the_dispatcher_leav
 
 
 def test_the_page_rank_op_on_a_ledger_without_tasks_is_rejected():
-    assert ledger_rank.apply({}, page_rank("low"), FakeContext()) is False
+    assert ledger_rank.apply({}, page_rank("low"), cast(Any, FakeContext())) is False
 
 
 def test_task_add_help_names_the_ranks(capsys):

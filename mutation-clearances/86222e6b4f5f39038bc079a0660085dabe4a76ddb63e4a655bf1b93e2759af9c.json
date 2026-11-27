@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_invalidated:6122eec3160bac37d42fa8851473af0515fd81dd567c9ea8acb7dccd93b70096": {
+    "reader": "standards_reader",
+    "reason": "rsplit(\"/\", k)[-1] is the text after the last \"/\" for every k >= 1; this branch's path starts with \"tests/\", so it always contains a slash."
+  }
+}

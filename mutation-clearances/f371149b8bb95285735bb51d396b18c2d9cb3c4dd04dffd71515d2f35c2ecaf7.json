@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_changes:1e2b94ad56ae8aa61e1b8d4c7aa6ba1f052c689e429d01aa25afa93e7d23c5af": {
+    "reader": "standards_reader",
+    "reason": "without \"--\" git accepts \"*.py\" as the same pathspec (verified: exit 0 with the same .py file list), so it reads the same blobs and fails in the same cases."
+  }
+}

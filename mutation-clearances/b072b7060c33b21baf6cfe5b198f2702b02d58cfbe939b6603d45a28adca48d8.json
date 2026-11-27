@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x_grade:25388dcdeac3b957bb9042fe3f6e419c172ed0b3e0f9fb2ccffe48ce8ad68c91": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its second argument unchanged at run time and never evaluates or reads its first argument, so rewriting, garbling or nulling the type argument text cannot change any observable behaviour."
+  }
+}

@@ -10,9 +10,9 @@ original_docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 negative=""
 cleanup() {
   if [[ -n "$negative" ]]; then kill "$negative" 2>/dev/null || true; fi
-  docker --host "$original_docker_host" ps -aq --filter "label=$label" | xargs -r docker --host "$original_docker_host" rm -f
-  rm -f "$proof_dir/override.yaml" "$proof_dir/pull.log"
-  rmdir "$proof_dir"
+  docker --host "$original_docker_host" ps -aq --filter "label=$label" | xargs -r docker --host "$original_docker_host" rm -f || true
+  rm -f "$proof_dir/override.yaml" "$proof_dir/pull.log" || true
+  rmdir "$proof_dir" || true
 }
 trap cleanup EXIT
 docker run -d --name "$registry" --label "$label" --platform linux/amd64 -p 5000:5000 mirror.gcr.io/library/python:3.12-slim-bookworm python -u -c "$(cat <<'PY'

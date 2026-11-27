@@ -1,54 +1,13 @@
 rules:
-  - id: ledger-server-write-route
-    languages: [python]
-    severity: ERROR
-    message: >-
-      Incident 16 November: the hub admission claim and every other swarm write went over HTTP to the ledger server,
-      so a slow ledger server made hub claims late and a stale page process could take writes. The ledger server only
-      reads; every write route lives in scripts.swarm_ledger.api_service, the ledger API service the public host
-      sends page writes to.
-    paths:
-      include:
-        - /scripts/swarm_ledger/ledger_server.py
-        - ledger-server-write.py
-    patterns:
-      - pattern-inside: |
-          class $CLASS(...):
-              ...
-      - pattern: |
-          def $METHOD(self, ...):
-              ...
-      - metavariable-regex:
-          metavariable: $METHOD
-          regex: ^do_(POST|PUT|PATCH|DELETE)$
-  - id: ledger-http-client
-    languages: [python]
-    severity: ERROR
-    message: >-
-      Incident 16 November: swarm clients wrote the ledger over HTTP through the ledger server. A ledger API client
-      runs the ledger API route code in process over the shared database: build it with
-      scripts.tick.adapters.database_ledger.client or scripts.swarm_ledger.ledger.client, never a ResourceClient
-      without the in process transport.
-    paths:
-      include:
-        - /scripts/
-        - /hooks/
-        - ledger-server-write.py
-      exclude:
-        - /scripts/swarm_ledger/api/client.py
-    patterns:
-      - pattern-either:
-          - pattern: ResourceClient(...)
-          - pattern: $MODULE.ResourceClient(...)
-      - pattern-not: ResourceClient(..., transport=$TRANSPORT, ...)
-      - pattern-not: $MODULE.ResourceClient(..., transport=$TRANSPORT, ...)
   - id: ledger-write-switch
     languages: [python]
     severity: ERROR
     message: >-
       Incident 16 November: a switch chose between the in process ledger path and the ledger server, so writes
-      outside a tick pass still reached the ledger server. The in process ledger API path is the only one; judge a
-      call with database_ledger.acting and never bring back database_ledger.serving or database_ledger.scoped.
+      outside a tick pass still reached the ledger server. The ledger API route code is the only write path: run in
+      process, or on this host's warm writer socket through writer_client.routed, which runs the same route code;
+      judge a call with database_ledger.acting and never bring back database_ledger.serving or
+      database_ledger.scoped.
     paths:
       include:
         - /scripts/

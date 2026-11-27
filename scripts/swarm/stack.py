@@ -259,9 +259,19 @@ def _origin_url(git: list[str]) -> str:
     return shell([*git, "remote", "get-url", "origin"]).stdout.strip()
 
 
+def _abandoned(dep: dict[str, object], branch: str) -> bool:
+    """Tell whether an unclaimed dependency records a branch that origin answers it does not hold."""
+    if dep.get("state") != "open" or dep.get("claimed_by"):
+        return False
+    listed = shell(["git", "ls-remote", "--heads", "origin", branch])
+    return listed.returncode == 0 and not any(
+        line.endswith(f"\trefs/heads/{branch}") for line in listed.stdout.splitlines()
+    )
+
+
 def _base_of(dep: dict[str, object], foreign: list[dict[str, object]]) -> str:
     branch = str(dep["branch"])
-    if _merged_into_dev(dep) or dep in foreign:
+    if _merged_into_dev(dep) or dep in foreign or _abandoned(dep, branch):
         return _dev_base()
     _fetch_origin(["git"], branch, f"cannot fetch {branch}")
     return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")

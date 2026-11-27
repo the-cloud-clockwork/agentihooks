@@ -10,7 +10,7 @@ import pytest
 from scripts.ci_lab import digests
 from scripts.ci_mutation import stats_cache
 from scripts.ci_mutation.stats_dependencies import StoredStats
-from tests.dep_manifest import MODULE, unit_hashes
+from scripts.dep_manifest import MODULE, unit_hashes
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "reference" / "ci-lab.md"
 
@@ -36,7 +36,7 @@ RECORDS = {
 GOLDEN = {
     "static": "static-v1-4b187fa1f86aed0defbd09ab7e347535ff7dc1ebe68ce7632699bb2dcae59ffb",
     "test": "test-v1-28f019682121264e77614e24d678af401a7a77368780a802738e2ec4ce4c0b77",
-    "stats": "stats-v4-b5891dcd6fdfc93028d0114781ea86eb2059790bd2a4d1ecfbe764046ed2255d",
+    "stats": "stats-v4-575ab5687b8d822c805980e1ad15d07559b0bf7f37e60b03e2c48ee53c714d5a",
     "mutant": "mutant-v1-d7fa3cbcb90e677e8e1844e25015e79435052a2a335515e5f8f4a4cb5519509b",
     "grade": "grade-v1-3239f51cc667199b67c460ae7e6c8ad5b90dc61f64ca223571b6211149514455",
 }
@@ -85,9 +85,7 @@ def cases() -> dict[str, tuple[Callable[[Any], str], Any]]:
                 discovery="3" * 64,
                 sources={"pyproject.toml": SHA256["pyproject.toml"], "uv.lock": SHA256["uv.lock"]},
                 options=("-p", "no:cacheprovider"),
-                interpreter="3.12.7",
-                platform="linux",
-                versions={"mutmut": "3.3.1", "pytest": "8.3.4"},
+                lockfile="8" * 64,
             ),
         ),
         "mutant": (
@@ -234,8 +232,7 @@ def test_a_schema_bump_is_a_cold_cache(kind: str, monkeypatch: pytest.MonkeyPatc
 
 def test_stats_key_is_the_stats_cache_identity(tmp_path: Path) -> None:
     _, inputs = cases()["stats"]
-    runtime = [inputs.interpreter, inputs.platform, dict(inputs.versions)]
-    values = (stats_cache.SCHEMA, dict(inputs.sources), list(inputs.options), runtime)
+    values = (stats_cache.SCHEMA, dict(inputs.sources), list(inputs.options), inputs.lockfile)
     context = {**dict(zip(stats_cache.CONTEXT_FIELDS, values)), "inventory": ["scripts/app.py"]}
     stored = StoredStats(tmp_path, tmp_path, context, {"scripts/app.py": [6, 7]})
     scope = stored.scope(dict(inputs.inputs))

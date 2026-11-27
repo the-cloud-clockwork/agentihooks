@@ -147,6 +147,16 @@ configured baseline, and the override clears when the session ends.
 
 ---
 
+## Delivery Requirements
+
+Every agent session starts with a delivery requirements summary of at most 50 words, injected at `SessionStart` on the Claude, Codex and Copilot targets for standalone sessions and swarm seats alike. `agentihooks init` prints the same summary as its last line. The summary asks for each change as one complete pull request, split in two only when it changes more than the file limit, never smaller for size alone, and for the source root fix rather than a workaround the user did not ask for.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_CODEREVIEW_FILELIMIT` | `20` | Code review file limit: a change may be split into two pull requests only when it changes more than this many files. |
+
+---
+
 ## Context Preprocessor (token compression)
 
 > **Periodic rules / CLAUDE.md re-injection was removed on 2026-07-20.** Claude
@@ -238,7 +248,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
 | `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` | `false` | Gates master login placement for swarm masters (see [Master claude ai login](account-login.md#master-claude-ai-login)); route `claude-ai`, front door masters included, works with it on or off |
-| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login)) |
+| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Live sessions on a claude ai login](account-login.md#live-sessions-on-a-claude-ai-login)) |
 | `AGENTIHOOKS_MASTER_LOGIN_SLOTS` | `5` | Number of stored claude ai login slots |
 | `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `2` | 7-day left % on the first entry of `AGENTIHOOKS_MASTER_LOGIN_ORDER` at or under which nothing new places there (claude-ai route, master login placement, worker token routing, controller admission); a master already there gets a handoff directive |
 | `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |
@@ -468,8 +478,11 @@ and the step starvation step floors every step's alarm window to it, critical an
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `AGENTIHOOKS_AUTOSCALER_STATUS` | unset | The cluster autoscaler status ConfigMap the `autoscaler alert` slow lane step reads, as `namespace/name`, such as `kube-system/cluster-autoscaler-oci-status`. Each pass counts each node group's failed scale ups in a row in the swarm Redis and raises one `autoscaler` ledger alert to the masters on two in a row, a timed out scale up or more launched instances past the join budget, then closes it once every group recovered. The step reads the ConfigMap with the controller pod's service account, which needs get on it. Unset reads nothing; a failed read returns one action line and changes nothing |
 | `AGENTIHOOKS_TICK_CADENCE` | `1` | Tick cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks a guard: from six minutes the delivery guard and heartbeat limit, from eight the stale watcher as well; the lease TTL check does not depend on the cadence. It does not change how often a pass runs — the scheduler cron stays every minute, and a controller install's own per-pass wait stays `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` — only how far `resting` and the step starvation step's alarm windows stretch past a pass |
 | `AGENTIHOOKS_SCHEDULER_UNIT` | unset | Set to `1` only by the `agentihooks-scheduler.service` user unit. A supervisor that sees it marks its runtime folder so `ensure_running` starts the unit instead of a child, and drains a supervisor started outside the unit. Never set it by hand; see [The scheduler runs in its own user unit](../pillars/swarm.md#the-scheduler-runs-in-its-own-user-unit) |
+| `AGENTIHOOKS_TICK_HOOK_READS` | `observe` | What a live site hook's read of a pass box key its site does not declare does: `observe` logs a warning and the read answers, `enforce` raises `UndeclaredHookRead`, `off` checks nothing. Stripped and lowercased; an unknown value observes. Read each time a pass builds its site hooks; see [Site hook reads](tick-engine-steps.md#site-hook-reads) |
+| `AGENTIHOOKS_TICK_PROFILE_STEPS` | unset | Comma separated engine step names, as the tick step catalogue prints them, such as `master scale,reap`. `scripts.swarm.timing.within` runs each listed step under `cProfile` and writes one `swarm_tick_step_profile` JSON line to standard error per run, with its wall time, pass id and top 25 functions by cumulative and by own time. Unset or empty profiles nothing. Profiling slows the listed steps, so empty it once the lines are read; see [Profile a step](tick-engine-steps.md#profile-a-step) |
 | `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 100 seconds (the golden pass duration, `scripts.tick.engine.GOLDEN_PASS_S`), matched exactly, so `s2` is refused. Any other value makes `update_pass_budget` raise `KeyError` inside the tick pass, before the observe group runs |
 
 Set the stage by adding or editing one `AGENTIHOOKS_TICK_STAGE=S2` line in `~/.agentihooks/.env`; keep a single line

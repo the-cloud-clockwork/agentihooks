@@ -1,13 +1,15 @@
 import hashlib
 import json
 import subprocess
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
-from scripts.events.bus import StateConflict
+from scripts.events.bus import Bus, StateConflict
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
-from scripts.events.memory import open_bus
+from scripts.events.memory import MemoryBus, open_bus
 from scripts.hub import pulls
 from scripts.hub.pulls import Observation, Pulls
 from scripts.swarm.store import SwarmError
@@ -75,7 +77,8 @@ def test_reactor_follows_task_changes_on_one_hub_replica():
     assert reactor.poll == hub.poll
 
 
-def test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects():
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects() -> None:
     from scripts.events import subjects
     from scripts.hub import registry, runner
     from scripts.swarm_ledger.repository import outbox
@@ -132,7 +135,8 @@ def test_a_reopened_pull_request_returns_to_the_poll():
     assert open_urls(bus) == [URL]
 
 
-def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request() -> None:
     bus, hub, consumer = setup()
     other_casing = URL.replace("acme/widgets", "Acme/Widgets")
     hub.handle(task_changed())
@@ -142,6 +146,8 @@ def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
     hub.observe(Observation(other_casing, "merged", "a1"))
     events = drain(consumer)
     assert [(e.swarm, e.type, e.key, e.data["url"]) for e in events] == [
+        ("crew", "pull.opened", URL, URL),
+        ("other", "pull.opened", URL, URL),
         ("crew", "pull.merged", URL, URL),
         ("other", "pull.merged", URL, URL),
     ]
@@ -258,12 +264,33 @@ def test_state_transitions_name_what_happened():
     assert snapshot(bus)["state"] == "merged"
 
 
-def test_first_observation_of_a_merged_pull_request_reports_the_merge():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_first_observation_of_a_merged_pull_request_reports_the_merge() -> None:
     bus, hub, consumer = setup()
     hub.handle(task_changed())
     hub.observe(Observation(URL, "merged", "a1", True))
-    assert [e.type for e in drain(consumer)] == ["pull.merged"]
+    assert [e.type for e in drain(consumer)] == ["pull.opened", "pull.merged"]
     assert snapshot(bus)["queued"] is False
+
+
+@pytest.mark.feature("hub-pull-first-look-opened")
+@pytest.mark.parametrize(
+    ("state", "published"),
+    [("open", ["pull.opened"]), ("merged", ["pull.opened", "pull.merged"]), ("closed", ["pull.opened", "pull.closed"])],
+)
+def test_a_first_look_publishes_opened_before_any_terminal_event(state: str, published: list[str]) -> None:
+    bus, hub, consumer = setup()
+    hub.handle(task_changed())
+    hub.handle(task_changed("other"))
+    hub.observe(Observation(URL, state, "a1"))
+    assert kinds(drain(consumer)) == [
+        (swarm, kind, version) for version, kind in enumerate(published, 1) for swarm in ("crew", "other")
+    ]
+    stored = snapshot(bus)
+    assert stored is not None
+    assert (stored["version"], stored["pending"]) == (len(published), [])
+    hub.observe(Observation(URL, state, "a1"))
+    assert drain(consumer) == []
 
 
 def test_leaving_the_queue_without_merging_is_a_dequeue():
@@ -461,7 +488,8 @@ def test_a_snapshot_that_stays_contended_raises():
     assert len(attempts) == 8
 
 
-def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again() -> None:
     bus, hub, consumer = setup()
     hub.handle(task_changed())
     hub.handle(task_changed(url=OTHER))
@@ -473,6 +501,7 @@ def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again():
     assert snapshot(bus)["swarms"] == ["crew", "late"]
     hub.observe(Observation(URL, "merged", "a1"))
     assert [(e.swarm, e.type) for e in drain(consumer)] == [
+        ("crew", "pull.opened"),
         ("crew", "pull.closed"),
         ("crew", "pull.merged"),
         ("late", "pull.merged"),
@@ -510,7 +539,8 @@ def test_poll_publishes_what_missed_deliveries_would_have_and_nothing_a_webhook_
     assert fetched == [URL, OTHER, URL, OTHER, OTHER]
 
 
-def test_poll_records_its_pass_time():
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_poll_records_its_pass_time() -> None:
     clock = Clock()
     bus, hub, _ = setup(lambda url: Observation(url), clock)
     hub.poll()
@@ -541,7 +571,8 @@ def test_poll_skips_a_pull_request_it_cannot_read_and_polls_the_rest(capsys, err
     assert fetched == [URL, OTHER]
 
 
-def test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval(capsys):
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval(capsys: pytest.CaptureFixture[str]) -> None:
     fetched = []
 
     def fetch(url):
@@ -558,7 +589,8 @@ def test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval(capsys):
     assert drain(consumer) == []
 
 
-def test_poll_yields_when_the_replica_loses_its_lease():
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_poll_yields_when_the_replica_loses_its_lease() -> None:
     fetched = []
     bus, hub, _ = setup(lambda url: fetched.append(url) or Observation(url))
     hub.handle(task_changed())
@@ -639,3 +671,223 @@ def test_pulls_default_to_github_fetch_and_wall_clock(monkeypatch):
     hub.poll()
     assert len(calls) == 1
     assert json.loads(bus.state(pulls.BUCKET).get(pulls.POLLED).value) > 0
+
+
+REPO = "https://github.com/acme/widgets"
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_tracking_a_pull_request_records_its_swarms_for_the_repository():
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.track("other", OTHER)
+    hub.track("crew", OTHER)
+    entry = bus.state(pulls.BUCKET).get(pulls.repository_key(REPO.upper()))
+    assert entry is not None
+    assert json.loads(entry.value) == ["crew", "other"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_reaches_each_tracking_swarm_with_one_id_per_change():
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.track("other", OTHER)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    events = drain(consumer)
+    assert {(e.swarm, e.type, e.key, e.data["repository"], e.data["head"]) for e in events} == {
+        ("crew", "merge_group.requested", "a1", REPO, "a1"),
+        ("other", "merge_group.requested", "a1", REPO, "a1"),
+    }
+    assert len({(e.swarm, e.id) for e in events}) == len({e.id for e in events}) == 2
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_for_an_untracked_repository_publishes_nothing():
+    _, hub, consumer = setup()
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    assert drain(consumer) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_repository_key_hashes_the_lowercased_repository():
+    assert pulls.repository_key(REPO.upper()) == "repo." + hashlib.sha256(REPO.lower().encode()).hexdigest()
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment():
+    bus, hub, _ = setup()
+    hub.track("crew", "https://github.com/pull/pull/pull/3")
+    entry = bus.state(pulls.BUCKET).get(pulls.repository_key("https://github.com/pull/pull"))
+    assert entry is not None
+    assert json.loads(entry.value) == ["crew"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind():
+    bus, hub, _ = setup()
+    exact = bus.events.consumer("exact", "swarm.crew.merge_group.requested")
+    hub.track("crew", URL)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    [event] = drain(exact)
+    digest = hashlib.sha256(json.dumps(["crew", "merge_group.requested", REPO.lower(), "a1"]).encode()).hexdigest()
+    assert (event.id, event.entity, event.key, event.version, event.time, event.author) == (
+        digest,
+        "merge_group",
+        "a1",
+        1,
+        1000,
+        pulls.AUTHOR,
+    )
+    assert event.data == {"repository": REPO, "head": "a1"}
+
+
+SWEPT = [f"https://github.com/acme/widgets/pull/{number}" for number in range(100, 106)]
+
+
+def stepping_fetch(clock: Clock, step_ms: int, fetched: list[str]) -> Callable[[str], Observation]:
+    def fetch(url: str) -> Observation:
+        fetched.append(url)
+        clock.now += step_ms
+        return Observation(url, "open", "a1")
+
+    return fetch
+
+
+def polled(bus: MemoryBus) -> int | None:
+    entry = bus.state(pulls.BUCKET).get(pulls.POLLED)
+    return None if entry is None else json.loads(entry.value)
+
+
+def health(bus: MemoryBus) -> dict | None:
+    entry = bus.state(pulls.BUCKET).get(pulls.HEALTH)
+    return None if entry is None else json.loads(entry.value)
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_names_the_poll_slice_and_its_sweep_and_health_keys() -> None:
+    assert (pulls.SLICE_MS, pulls.SWEEP, pulls.HEALTH) == (10_000, "sweep", "health")
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_a_poll_returns_after_one_slice_and_the_next_call_resumes_from_its_cursor() -> None:
+    clock, fetched = Clock(), []
+    bus, hub, _ = setup(stepping_fetch(clock, 5_000, fetched), clock)
+    for url in SWEPT:
+        hub.track("crew", url)
+    hub.poll()
+    assert fetched == SWEPT[:2]
+    assert polled(bus) is None
+    assert health(bus) == {"at": 11_000, "track_delay_ms": 0}
+    hub.poll()
+    assert fetched == SWEPT[:4]
+    hub.poll()
+    assert fetched == SWEPT
+    assert polled(bus) == 1000
+    hub.poll()
+    assert fetched == SWEPT
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_a_sweep_whose_cursor_left_the_open_index_starts_again_from_the_first_open_pull() -> None:
+    clock, fetched = Clock(), []
+    _, hub, _ = setup(stepping_fetch(clock, 5_000, fetched), clock)
+    for url in SWEPT:
+        hub.track("crew", url)
+    hub.poll()
+    hub.observe(Observation(SWEPT[2], "merged", "a1"))
+    hub.poll()
+    assert fetched == [*SWEPT[:2], SWEPT[0], SWEPT[1]]
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_a_rate_limit_in_a_resumed_sweep_waits_a_full_interval_from_that_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clock, fetched = Clock(), []
+    stepping = stepping_fetch(clock, 5_000, fetched)
+
+    def fetch(url: str) -> Observation:
+        if url == SWEPT[2]:
+            fetched.append(url)
+            raise SwarmError("API rate limit exceeded")
+        return stepping(url)
+
+    bus, hub, _ = setup(fetch, clock)
+    for url in SWEPT:
+        hub.track("crew", url)
+    hub.poll()
+    hub.poll()
+    assert fetched == SWEPT[:3]
+    assert polled(bus) == 11_000
+    clock.now = 11_000 + pulls.INTERVAL_MS - 1
+    hub.poll()
+    assert fetched == SWEPT[:3]
+    assert capsys.readouterr().err == f"hub: GitHub poll skipped {SWEPT[2]}: API rate limit exceeded\n"
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_a_task_change_published_mid_sweep_is_tracked_within_one_slice() -> None:
+    from dataclasses import replace
+
+    from scripts.events import subjects
+    from scripts.hub import registry, runner
+    from scripts.swarm_ledger.repository import outbox
+
+    clock, fetched, published, handled = Clock(), [], [], []
+    urls = [f"https://github.com/acme/widgets/pull/{number}" for number in range(100, 140)]
+    stepping = stepping_fetch(clock, 2_000, fetched)
+
+    def fetch(url: str) -> Observation:
+        seen = stepping(url)
+        if url == urls[2]:
+            bus.events.publish(subjects.subject("crew", "task", outbox.token("t1")), task_changed())
+            published.append(clock.now)
+        return seen
+
+    bus, hub, _ = setup(fetch, clock)
+    for url in urls:
+        hub.track("crew", url)
+
+    def handle(event: Envelope) -> None:
+        handled.append(clock.now)
+        hub.handle(event)
+
+    reactor = replace(hub.reactor(), handler=handle)
+    hubs = runner.HubRunner(cast(Bus, bus), registry.Registry([reactor]), "holder", clock=clock, lease_ttl_ms=10**9)
+    for _ in range(10):
+        hubs.run_once(timeout_ms=0)
+        if handled:
+            break
+    tracked = snapshot(bus)
+    assert tracked is not None
+    assert tracked["swarms"] == ["crew"]
+    assert handled[0] - published[0] <= pulls.SLICE_MS
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_the_poll_records_the_track_delay_and_the_sweep_length() -> None:
+    clock, fetched = Clock(), []
+    bus, hub, _ = setup(stepping_fetch(clock, 3_000, fetched), clock)
+    hub.handle(task_changed())
+    hub.handle(task_changed(url=OTHER))
+    hub.poll()
+    assert health(bus) == {"at": 7_000, "track_delay_ms": 100, "sweep_ms": 6_000}
+    clock.now = 1_000 + 1_800_000
+    hub.handle(task_changed(version=2))
+    hub.poll()
+    assert health(bus) == {"at": 1_807_000, "track_delay_ms": 1_800_100, "sweep_ms": 6_000}
+    clock.now = 1_801_000 + pulls.INTERVAL_MS
+    hub.poll()
+    assert health(bus) == {"at": 2_107_000, "track_delay_ms": 0, "sweep_ms": 6_000}
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_a_poll_slice_records_the_track_delay_before_its_sweep_ends() -> None:
+    clock, fetched = Clock(), []
+    bus, hub, _ = setup(stepping_fetch(clock, 5_000, fetched), clock)
+    for url in SWEPT:
+        hub.track("crew", url)
+    hub.handle(task_changed(url=SWEPT[0]))
+    hub.poll()
+    assert health(bus) == {"at": 11_000, "track_delay_ms": 100}

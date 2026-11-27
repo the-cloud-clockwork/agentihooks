@@ -8,6 +8,7 @@ kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-github-webhook
   annotations:
+    argocd.argoproj.io/sync-wave: "1"
     secret.reloader.stakater.com/reload: {{ $receiver.secretName | quote }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
@@ -41,6 +42,10 @@ spec:
           env:
             - name: AGENTIHOOKS_BUS
               value: {{ .Values.hub.bus.backend | quote }}
+            {{- if .Values.hub.bus.scoped }}
+            - name: AGENTIHOOKS_BUS_SCOPED
+              value: "1"
+            {{- end }}
             {{- include "swarm.extraEnv" $receiver.env | nindent 12 }}
           envFrom:
             - secretRef:

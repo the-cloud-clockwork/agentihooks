@@ -33,7 +33,7 @@ def ledger():
     slug = f"outbox-{uuid.uuid4().hex[:12]}"
     repository = postgres.PostgresLedgerRepository(URL)
     repository.migrate()
-    repository.create(slug, CONTENT)
+    repository.create(slug, CONTENT, "swarm")
     return repository, slug
 
 

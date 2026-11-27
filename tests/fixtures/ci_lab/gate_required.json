@@ -1,0 +1,4254 @@
+{
+ "bases": {
+  "merge_group": {
+   "flags": {
+    "inline": "false",
+    "kind": "",
+    "mutation": "false",
+    "reused": ""
+   },
+   "needs": {
+    "brain-smoke": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "collect": {
+     "outputs": {},
+     "result": "success"
+    },
+    "coverage-ratchet": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "dep-manifest": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "docs": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "helm-kind": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "install-smoke": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "kind-due": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lab-verdict": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "ledger-load": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint-actions": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation-plan": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation-stats": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "queue-fail-fast": {
+     "outputs": {},
+     "result": "success"
+    },
+    "reuse": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "select": {
+     "outputs": {
+      "count": "0",
+      "legs": "[]",
+      "queued": "true",
+      "scope": "full"
+     },
+     "result": "success"
+    },
+    "semgrep": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "shard-check": {
+     "outputs": {},
+     "result": "success"
+    },
+    "sonar": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "split": {
+     "outputs": {
+      "commit": "15a7b5b7e423027f637a103b183822e81ecf7c8a",
+      "queue_312": "{\"python-version\": \"3.12\", \"shard\": 1, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 2, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 3, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 4, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 5, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 6, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 7, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 8, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 9, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 10, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 11, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 12, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 13, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 14, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 15, \"total\": 16, \"predicted_seconds\": 565.0860712524501}, {\"python-version\": \"3.12\", \"shard\": 16, \"total\": 16, \"predicted_seconds\": 565.0860712524501}",
+      "reused": "0",
+      "run": "43804392940"
+     },
+     "result": "success"
+    },
+    "stage-budget": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "swarm-image": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "test-count": {
+     "outputs": {},
+     "result": "success"
+    },
+    "type-gate": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit": {
+     "outputs": {
+      "reused": "0"
+     },
+     "result": "success"
+    },
+    "unit-lost": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-rerun": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-selected": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "worker-image": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "writer-lock": {
+     "outputs": {},
+     "result": "skipped"
+    }
+   },
+   "run": 43813177104
+  },
+  "pull_request": {
+   "flags": {
+    "inline": "false",
+    "kind": "",
+    "mutation": "true",
+    "reused": ""
+   },
+   "needs": {
+    "brain-smoke": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "collect": {
+     "outputs": {},
+     "result": "success"
+    },
+    "coverage-ratchet": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "dep-manifest": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "docs": {
+     "outputs": {},
+     "result": "success"
+    },
+    "helm-kind": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "install-smoke": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "kind-due": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lab-verdict": {
+     "outputs": {
+      "authoritative": "{}"
+     },
+     "result": "success"
+    },
+    "ledger-load": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint": {
+     "outputs": {},
+     "result": "success"
+    },
+    "lint-actions": {
+     "outputs": {},
+     "result": "success"
+    },
+    "mutation": {
+     "outputs": {},
+     "result": "success"
+    },
+    "mutation-plan": {
+     "outputs": {
+      "bases": "60fab9f67aa4423c08be62d1dbb8c5315692c14a",
+      "browser": "false",
+      "durations": "durations-merged-61a7e07aa53290f55f7f736e948a1f811b682fc6",
+      "forwarded": "false",
+      "reused": "false",
+      "selection": "true",
+      "shards": "[0]",
+      "stats_parts": "[0, 1]"
+     },
+     "result": "success"
+    },
+    "mutation-stats": {
+     "outputs": {},
+     "result": "success"
+    },
+    "queue-fail-fast": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "reuse": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "select": {
+     "outputs": {
+      "count": "15",
+      "key": "durations-merged-61a7e07aa53290f55f7f736e948a1f811b682fc6",
+      "legs": "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+      "scope": "selected",
+      "sonar": "run"
+     },
+     "result": "success"
+    },
+    "semgrep": {
+     "outputs": {},
+     "result": "success"
+    },
+    "shard-check": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "sonar": {
+     "outputs": {
+      "analysis": "c743f1af-303c-44c7-826f-e483312ee5e3"
+     },
+     "result": "success"
+    },
+    "split": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "stage-budget": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "swarm-image": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "test-count": {
+     "outputs": {},
+     "result": "success"
+    },
+    "type-gate": {
+     "outputs": {},
+     "result": "success"
+    },
+    "unit": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-lost": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-rerun": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-selected": {
+     "outputs": {},
+     "result": "success"
+    },
+    "worker-image": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "writer-lock": {
+     "outputs": {},
+     "result": "success"
+    }
+   },
+   "run": 43815279091
+  },
+  "push": {
+   "flags": {
+    "inline": "false",
+    "kind": "true",
+    "mutation": "false",
+    "reused": "false"
+   },
+   "needs": {
+    "brain-smoke": {
+     "outputs": {},
+     "result": "success"
+    },
+    "collect": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "coverage-ratchet": {
+     "outputs": {},
+     "result": "success"
+    },
+    "dep-manifest": {
+     "outputs": {},
+     "result": "success"
+    },
+    "docs": {
+     "outputs": {},
+     "result": "success"
+    },
+    "helm-kind": {
+     "outputs": {},
+     "result": "success"
+    },
+    "install-smoke": {
+     "outputs": {},
+     "result": "success"
+    },
+    "kind-due": {
+     "outputs": {
+      "due": "true"
+     },
+     "result": "success"
+    },
+    "lab-verdict": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "ledger-load": {
+     "outputs": {},
+     "result": "success"
+    },
+    "lint": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint-actions": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation-plan": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "mutation-stats": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "queue-fail-fast": {
+     "outputs": {},
+     "result": "success"
+    },
+    "reuse": {
+     "outputs": {
+      "grader": "61a7e07aa53290f55f7f736e948a1f811b682fc6",
+      "reused": "false"
+     },
+     "result": "success"
+    },
+    "select": {
+     "outputs": {
+      "count": "0",
+      "key": "durations-merged-b09d4a6d44b83de6e30d41e200d326208d95d128",
+      "legs": "[]",
+      "scope": "full",
+      "source": "43811866897"
+     },
+     "result": "success"
+    },
+    "semgrep": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "shard-check": {
+     "outputs": {},
+     "result": "success"
+    },
+    "sonar": {
+     "outputs": {
+      "analysis": "1b54d46e-b372-45bc-9180-a8edf7d8a503"
+     },
+     "result": "success"
+    },
+    "split": {
+     "outputs": {
+      "queue_legs": "{\"1\":1,\"2\":2,\"3\":3,\"4\":4,\"5\":5,\"6\":6,\"7\":7,\"8\":8,\"9\":9,\"10\":10,\"11\":11,\"12\":12,\"13\":13,\"14\":14,\"15\":15,\"16\":16,\"17\":1,\"18\":2,\"19\":3,\"20\":4}",
+      "source": "43811866897"
+     },
+     "result": "success"
+    },
+    "stage-budget": {
+     "outputs": {},
+     "result": "success"
+    },
+    "swarm-image": {
+     "outputs": {},
+     "result": "success"
+    },
+    "test-count": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "type-gate": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit": {
+     "outputs": {},
+     "result": "success"
+    },
+    "unit-lost": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-rerun": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "unit-selected": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "worker-image": {
+     "outputs": {},
+     "result": "success"
+    },
+    "writer-lock": {
+     "outputs": {},
+     "result": "success"
+    }
+   },
+   "run": 43813437603
+  }
+ },
+ "cases": [
+  {
+   "base": "push",
+   "name": "push as recorded",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push brain-smoke failure",
+   "passes": false,
+   "results": {
+    "brain-smoke": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push brain-smoke cancelled",
+   "passes": false,
+   "results": {
+    "brain-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push brain-smoke skipped",
+   "passes": false,
+   "results": {
+    "brain-smoke": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "brain-smoke"
+   ],
+   "name": "push without brain-smoke",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push collect success",
+   "passes": true,
+   "results": {
+    "collect": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "collect"
+   ],
+   "name": "push without collect",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push coverage-ratchet failure",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push coverage-ratchet cancelled",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push coverage-ratchet skipped",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "coverage-ratchet"
+   ],
+   "name": "push without coverage-ratchet",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push dep-manifest failure",
+   "passes": false,
+   "results": {
+    "dep-manifest": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push dep-manifest cancelled",
+   "passes": false,
+   "results": {
+    "dep-manifest": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push dep-manifest skipped",
+   "passes": false,
+   "results": {
+    "dep-manifest": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "dep-manifest"
+   ],
+   "name": "push without dep-manifest",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push docs failure",
+   "passes": false,
+   "results": {
+    "docs": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push docs cancelled",
+   "passes": false,
+   "results": {
+    "docs": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push docs skipped",
+   "passes": false,
+   "results": {
+    "docs": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "docs"
+   ],
+   "name": "push without docs",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push helm-kind failure",
+   "passes": false,
+   "results": {
+    "helm-kind": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push helm-kind cancelled",
+   "passes": false,
+   "results": {
+    "helm-kind": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push helm-kind skipped",
+   "passes": false,
+   "results": {
+    "helm-kind": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "helm-kind"
+   ],
+   "name": "push without helm-kind",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push install-smoke failure",
+   "passes": false,
+   "results": {
+    "install-smoke": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push install-smoke cancelled",
+   "passes": false,
+   "results": {
+    "install-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push install-smoke skipped",
+   "passes": false,
+   "results": {
+    "install-smoke": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "install-smoke"
+   ],
+   "name": "push without install-smoke",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push kind-due failure",
+   "passes": false,
+   "results": {
+    "kind-due": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push kind-due cancelled",
+   "passes": false,
+   "results": {
+    "kind-due": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push kind-due skipped",
+   "passes": false,
+   "results": {
+    "kind-due": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "kind-due"
+   ],
+   "name": "push without kind-due",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push lab-verdict failure",
+   "passes": false,
+   "results": {
+    "lab-verdict": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lab-verdict cancelled",
+   "passes": false,
+   "results": {
+    "lab-verdict": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lab-verdict success",
+   "passes": true,
+   "results": {
+    "lab-verdict": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "lab-verdict"
+   ],
+   "name": "push without lab-verdict",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push ledger-load failure",
+   "passes": false,
+   "results": {
+    "ledger-load": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push ledger-load cancelled",
+   "passes": false,
+   "results": {
+    "ledger-load": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push ledger-load skipped",
+   "passes": false,
+   "results": {
+    "ledger-load": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "ledger-load"
+   ],
+   "name": "push without ledger-load",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push lint failure",
+   "passes": false,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint cancelled",
+   "passes": false,
+   "results": {
+    "lint": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint success",
+   "passes": true,
+   "results": {
+    "lint": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "lint"
+   ],
+   "name": "push without lint",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions success",
+   "passes": true,
+   "results": {
+    "lint-actions": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "push without lint-actions",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push mutation failure",
+   "passes": false,
+   "results": {
+    "mutation": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation cancelled",
+   "passes": false,
+   "results": {
+    "mutation": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation success",
+   "passes": true,
+   "results": {
+    "mutation": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "mutation"
+   ],
+   "name": "push without mutation",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push mutation-plan failure",
+   "passes": false,
+   "results": {
+    "mutation-plan": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation-plan cancelled",
+   "passes": false,
+   "results": {
+    "mutation-plan": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation-plan success",
+   "passes": true,
+   "results": {
+    "mutation-plan": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "mutation-plan"
+   ],
+   "name": "push without mutation-plan",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push mutation-stats failure",
+   "passes": false,
+   "results": {
+    "mutation-stats": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation-stats cancelled",
+   "passes": false,
+   "results": {
+    "mutation-stats": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push mutation-stats success",
+   "passes": true,
+   "results": {
+    "mutation-stats": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "mutation-stats"
+   ],
+   "name": "push without mutation-stats",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push queue-fail-fast failure",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push queue-fail-fast cancelled",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push queue-fail-fast skipped",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "queue-fail-fast"
+   ],
+   "name": "push without queue-fail-fast",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push reuse failure",
+   "passes": false,
+   "results": {
+    "reuse": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push reuse cancelled",
+   "passes": false,
+   "results": {
+    "reuse": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push reuse skipped",
+   "passes": false,
+   "results": {
+    "reuse": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "reuse"
+   ],
+   "name": "push without reuse",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push select failure",
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push select cancelled",
+   "passes": false,
+   "results": {
+    "select": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push select skipped",
+   "passes": false,
+   "results": {
+    "select": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "select"
+   ],
+   "name": "push without select",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push semgrep failure",
+   "passes": false,
+   "results": {
+    "semgrep": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push semgrep cancelled",
+   "passes": false,
+   "results": {
+    "semgrep": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push semgrep success",
+   "passes": true,
+   "results": {
+    "semgrep": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "semgrep"
+   ],
+   "name": "push without semgrep",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push shard-check failure",
+   "passes": false,
+   "results": {
+    "shard-check": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push shard-check cancelled",
+   "passes": false,
+   "results": {
+    "shard-check": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push shard-check skipped",
+   "passes": false,
+   "results": {
+    "shard-check": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "shard-check"
+   ],
+   "name": "push without shard-check",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push sonar failure",
+   "passes": false,
+   "results": {
+    "sonar": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push sonar cancelled",
+   "passes": false,
+   "results": {
+    "sonar": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push sonar skipped",
+   "passes": false,
+   "results": {
+    "sonar": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "sonar"
+   ],
+   "name": "push without sonar",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push split failure",
+   "passes": false,
+   "results": {
+    "split": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push split cancelled",
+   "passes": false,
+   "results": {
+    "split": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push split skipped",
+   "passes": false,
+   "results": {
+    "split": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "split"
+   ],
+   "name": "push without split",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push stage-budget failure",
+   "passes": false,
+   "results": {
+    "stage-budget": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push stage-budget cancelled",
+   "passes": false,
+   "results": {
+    "stage-budget": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push stage-budget skipped",
+   "passes": false,
+   "results": {
+    "stage-budget": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "stage-budget"
+   ],
+   "name": "push without stage-budget",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push swarm-image failure",
+   "passes": false,
+   "results": {
+    "swarm-image": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push swarm-image cancelled",
+   "passes": false,
+   "results": {
+    "swarm-image": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push swarm-image skipped",
+   "passes": false,
+   "results": {
+    "swarm-image": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "swarm-image"
+   ],
+   "name": "push without swarm-image",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push test-count failure",
+   "passes": false,
+   "results": {
+    "test-count": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push test-count cancelled",
+   "passes": false,
+   "results": {
+    "test-count": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push test-count success",
+   "passes": true,
+   "results": {
+    "test-count": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "test-count"
+   ],
+   "name": "push without test-count",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push type-gate failure",
+   "passes": false,
+   "results": {
+    "type-gate": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push type-gate cancelled",
+   "passes": false,
+   "results": {
+    "type-gate": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push type-gate success",
+   "passes": true,
+   "results": {
+    "type-gate": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "type-gate"
+   ],
+   "name": "push without type-gate",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push unit failure",
+   "passes": false,
+   "results": {
+    "unit": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit cancelled",
+   "passes": false,
+   "results": {
+    "unit": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit skipped",
+   "passes": false,
+   "results": {
+    "unit": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "unit"
+   ],
+   "name": "push without unit",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push unit-lost failure",
+   "passes": false,
+   "results": {
+    "unit-lost": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-lost cancelled",
+   "passes": false,
+   "results": {
+    "unit-lost": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-lost success",
+   "passes": true,
+   "results": {
+    "unit-lost": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "unit-lost"
+   ],
+   "name": "push without unit-lost",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push unit-rerun failure",
+   "passes": false,
+   "results": {
+    "unit-rerun": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-rerun cancelled",
+   "passes": false,
+   "results": {
+    "unit-rerun": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-rerun success",
+   "passes": true,
+   "results": {
+    "unit-rerun": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "unit-rerun"
+   ],
+   "name": "push without unit-rerun",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push unit-selected failure",
+   "passes": false,
+   "results": {
+    "unit-selected": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-selected cancelled",
+   "passes": false,
+   "results": {
+    "unit-selected": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push unit-selected success",
+   "passes": true,
+   "results": {
+    "unit-selected": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "unit-selected"
+   ],
+   "name": "push without unit-selected",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push worker-image failure",
+   "passes": false,
+   "results": {
+    "worker-image": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push worker-image cancelled",
+   "passes": false,
+   "results": {
+    "worker-image": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push worker-image skipped",
+   "passes": false,
+   "results": {
+    "worker-image": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "worker-image"
+   ],
+   "name": "push without worker-image",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push writer-lock failure",
+   "passes": false,
+   "results": {
+    "writer-lock": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push writer-lock cancelled",
+   "passes": false,
+   "results": {
+    "writer-lock": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push writer-lock skipped",
+   "passes": false,
+   "results": {
+    "writer-lock": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "writer-lock"
+   ],
+   "name": "push without writer-lock",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request as recorded",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request brain-smoke failure",
+   "passes": false,
+   "results": {
+    "brain-smoke": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request brain-smoke cancelled",
+   "passes": false,
+   "results": {
+    "brain-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request brain-smoke success",
+   "passes": false,
+   "results": {
+    "brain-smoke": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "brain-smoke"
+   ],
+   "name": "pull_request without brain-smoke",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request collect skipped",
+   "passes": false,
+   "results": {
+    "collect": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "collect"
+   ],
+   "name": "pull_request without collect",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request coverage-ratchet failure",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request coverage-ratchet cancelled",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request coverage-ratchet success",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "coverage-ratchet"
+   ],
+   "name": "pull_request without coverage-ratchet",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request dep-manifest failure",
+   "passes": false,
+   "results": {
+    "dep-manifest": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request dep-manifest cancelled",
+   "passes": false,
+   "results": {
+    "dep-manifest": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request dep-manifest success",
+   "passes": false,
+   "results": {
+    "dep-manifest": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "dep-manifest"
+   ],
+   "name": "pull_request without dep-manifest",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request docs failure",
+   "passes": false,
+   "results": {
+    "docs": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request docs cancelled",
+   "passes": false,
+   "results": {
+    "docs": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request docs skipped",
+   "passes": false,
+   "results": {
+    "docs": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "docs"
+   ],
+   "name": "pull_request without docs",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request helm-kind failure",
+   "passes": false,
+   "results": {
+    "helm-kind": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request helm-kind cancelled",
+   "passes": false,
+   "results": {
+    "helm-kind": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request helm-kind success",
+   "passes": false,
+   "results": {
+    "helm-kind": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "helm-kind"
+   ],
+   "name": "pull_request without helm-kind",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request install-smoke failure",
+   "passes": false,
+   "results": {
+    "install-smoke": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request install-smoke cancelled",
+   "passes": false,
+   "results": {
+    "install-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request install-smoke success",
+   "passes": false,
+   "results": {
+    "install-smoke": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "install-smoke"
+   ],
+   "name": "pull_request without install-smoke",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request kind-due failure",
+   "passes": false,
+   "results": {
+    "kind-due": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request kind-due cancelled",
+   "passes": false,
+   "results": {
+    "kind-due": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request kind-due success",
+   "passes": false,
+   "results": {
+    "kind-due": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "kind-due"
+   ],
+   "name": "pull_request without kind-due",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lab-verdict failure",
+   "passes": false,
+   "results": {
+    "lab-verdict": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lab-verdict cancelled",
+   "passes": false,
+   "results": {
+    "lab-verdict": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lab-verdict skipped",
+   "passes": false,
+   "results": {
+    "lab-verdict": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "lab-verdict"
+   ],
+   "name": "pull_request without lab-verdict",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request ledger-load failure",
+   "passes": false,
+   "results": {
+    "ledger-load": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request ledger-load cancelled",
+   "passes": false,
+   "results": {
+    "ledger-load": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request ledger-load success",
+   "passes": false,
+   "results": {
+    "ledger-load": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "ledger-load"
+   ],
+   "name": "pull_request without ledger-load",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint failure",
+   "passes": false,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint cancelled",
+   "passes": false,
+   "results": {
+    "lint": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint skipped",
+   "passes": false,
+   "results": {
+    "lint": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "lint"
+   ],
+   "name": "pull_request without lint",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions skipped",
+   "passes": false,
+   "results": {
+    "lint-actions": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "pull_request without lint-actions",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation failure",
+   "passes": false,
+   "results": {
+    "mutation": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation cancelled",
+   "passes": false,
+   "results": {
+    "mutation": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation skipped",
+   "passes": false,
+   "results": {
+    "mutation": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "mutation"
+   ],
+   "name": "pull_request without mutation",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-plan failure",
+   "passes": false,
+   "results": {
+    "mutation-plan": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-plan cancelled",
+   "passes": false,
+   "results": {
+    "mutation-plan": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-plan skipped",
+   "passes": false,
+   "results": {
+    "mutation-plan": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "mutation-plan"
+   ],
+   "name": "pull_request without mutation-plan",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-stats failure",
+   "passes": false,
+   "results": {
+    "mutation-stats": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-stats cancelled",
+   "passes": false,
+   "results": {
+    "mutation-stats": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request mutation-stats skipped",
+   "passes": false,
+   "results": {
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "mutation-stats"
+   ],
+   "name": "pull_request without mutation-stats",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request queue-fail-fast failure",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request queue-fail-fast cancelled",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request queue-fail-fast success",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "queue-fail-fast"
+   ],
+   "name": "pull_request without queue-fail-fast",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request reuse failure",
+   "passes": false,
+   "results": {
+    "reuse": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request reuse cancelled",
+   "passes": false,
+   "results": {
+    "reuse": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request reuse success",
+   "passes": false,
+   "results": {
+    "reuse": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "reuse"
+   ],
+   "name": "pull_request without reuse",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request select failure",
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request select cancelled",
+   "passes": false,
+   "results": {
+    "select": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request select skipped",
+   "passes": false,
+   "results": {
+    "select": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "select"
+   ],
+   "name": "pull_request without select",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request semgrep failure",
+   "passes": false,
+   "results": {
+    "semgrep": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request semgrep cancelled",
+   "passes": false,
+   "results": {
+    "semgrep": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request semgrep skipped",
+   "passes": false,
+   "results": {
+    "semgrep": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "semgrep"
+   ],
+   "name": "pull_request without semgrep",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request shard-check failure",
+   "passes": false,
+   "results": {
+    "shard-check": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request shard-check cancelled",
+   "passes": false,
+   "results": {
+    "shard-check": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request shard-check success",
+   "passes": false,
+   "results": {
+    "shard-check": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "shard-check"
+   ],
+   "name": "pull_request without shard-check",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request sonar failure",
+   "passes": false,
+   "results": {
+    "sonar": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request sonar cancelled",
+   "passes": false,
+   "results": {
+    "sonar": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request sonar skipped",
+   "passes": false,
+   "results": {
+    "sonar": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "sonar"
+   ],
+   "name": "pull_request without sonar",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request split failure",
+   "passes": false,
+   "results": {
+    "split": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request split cancelled",
+   "passes": false,
+   "results": {
+    "split": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request split success",
+   "passes": false,
+   "results": {
+    "split": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "split"
+   ],
+   "name": "pull_request without split",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request stage-budget failure",
+   "passes": false,
+   "results": {
+    "stage-budget": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request stage-budget cancelled",
+   "passes": false,
+   "results": {
+    "stage-budget": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request stage-budget success",
+   "passes": false,
+   "results": {
+    "stage-budget": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "stage-budget"
+   ],
+   "name": "pull_request without stage-budget",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request swarm-image failure",
+   "passes": false,
+   "results": {
+    "swarm-image": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request swarm-image cancelled",
+   "passes": false,
+   "results": {
+    "swarm-image": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request swarm-image success",
+   "passes": false,
+   "results": {
+    "swarm-image": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "swarm-image"
+   ],
+   "name": "pull_request without swarm-image",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request test-count failure",
+   "passes": false,
+   "results": {
+    "test-count": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request test-count cancelled",
+   "passes": false,
+   "results": {
+    "test-count": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request test-count skipped",
+   "passes": false,
+   "results": {
+    "test-count": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "test-count"
+   ],
+   "name": "pull_request without test-count",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request type-gate failure",
+   "passes": false,
+   "results": {
+    "type-gate": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request type-gate cancelled",
+   "passes": false,
+   "results": {
+    "type-gate": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request type-gate skipped",
+   "passes": false,
+   "results": {
+    "type-gate": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "type-gate"
+   ],
+   "name": "pull_request without type-gate",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit failure",
+   "passes": false,
+   "results": {
+    "unit": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit cancelled",
+   "passes": false,
+   "results": {
+    "unit": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit success",
+   "passes": false,
+   "results": {
+    "unit": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "unit"
+   ],
+   "name": "pull_request without unit",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-lost failure",
+   "passes": false,
+   "results": {
+    "unit-lost": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-lost cancelled",
+   "passes": false,
+   "results": {
+    "unit-lost": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-lost success",
+   "passes": false,
+   "results": {
+    "unit-lost": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "unit-lost"
+   ],
+   "name": "pull_request without unit-lost",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-rerun failure",
+   "passes": false,
+   "results": {
+    "unit-rerun": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-rerun cancelled",
+   "passes": false,
+   "results": {
+    "unit-rerun": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-rerun success",
+   "passes": false,
+   "results": {
+    "unit-rerun": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "unit-rerun"
+   ],
+   "name": "pull_request without unit-rerun",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-selected failure",
+   "passes": false,
+   "results": {
+    "unit-selected": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-selected cancelled",
+   "passes": false,
+   "results": {
+    "unit-selected": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request unit-selected skipped",
+   "passes": false,
+   "results": {
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "unit-selected"
+   ],
+   "name": "pull_request without unit-selected",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request worker-image failure",
+   "passes": false,
+   "results": {
+    "worker-image": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request worker-image cancelled",
+   "passes": false,
+   "results": {
+    "worker-image": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request worker-image success",
+   "passes": false,
+   "results": {
+    "worker-image": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "worker-image"
+   ],
+   "name": "pull_request without worker-image",
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request writer-lock failure",
+   "passes": false,
+   "results": {
+    "writer-lock": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request writer-lock cancelled",
+   "passes": false,
+   "results": {
+    "writer-lock": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request writer-lock skipped",
+   "passes": false,
+   "results": {
+    "writer-lock": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "writer-lock"
+   ],
+   "name": "pull_request without writer-lock",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group as recorded",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group brain-smoke failure",
+   "passes": false,
+   "results": {
+    "brain-smoke": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group brain-smoke cancelled",
+   "passes": false,
+   "results": {
+    "brain-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group brain-smoke success",
+   "passes": false,
+   "results": {
+    "brain-smoke": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "brain-smoke"
+   ],
+   "name": "merge_group without brain-smoke",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group collect skipped",
+   "passes": false,
+   "results": {
+    "collect": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "collect"
+   ],
+   "name": "merge_group without collect",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group coverage-ratchet failure",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group coverage-ratchet cancelled",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group coverage-ratchet success",
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "coverage-ratchet"
+   ],
+   "name": "merge_group without coverage-ratchet",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group dep-manifest failure",
+   "passes": false,
+   "results": {
+    "dep-manifest": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group dep-manifest cancelled",
+   "passes": false,
+   "results": {
+    "dep-manifest": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group dep-manifest success",
+   "passes": false,
+   "results": {
+    "dep-manifest": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "dep-manifest"
+   ],
+   "name": "merge_group without dep-manifest",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group docs failure",
+   "passes": false,
+   "results": {
+    "docs": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group docs cancelled",
+   "passes": false,
+   "results": {
+    "docs": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group docs success",
+   "passes": false,
+   "results": {
+    "docs": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "docs"
+   ],
+   "name": "merge_group without docs",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group helm-kind failure",
+   "passes": false,
+   "results": {
+    "helm-kind": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group helm-kind cancelled",
+   "passes": false,
+   "results": {
+    "helm-kind": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group helm-kind success",
+   "passes": false,
+   "results": {
+    "helm-kind": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "helm-kind"
+   ],
+   "name": "merge_group without helm-kind",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group install-smoke failure",
+   "passes": false,
+   "results": {
+    "install-smoke": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group install-smoke cancelled",
+   "passes": false,
+   "results": {
+    "install-smoke": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group install-smoke success",
+   "passes": false,
+   "results": {
+    "install-smoke": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "install-smoke"
+   ],
+   "name": "merge_group without install-smoke",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group kind-due failure",
+   "passes": false,
+   "results": {
+    "kind-due": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group kind-due cancelled",
+   "passes": false,
+   "results": {
+    "kind-due": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group kind-due success",
+   "passes": false,
+   "results": {
+    "kind-due": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "kind-due"
+   ],
+   "name": "merge_group without kind-due",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lab-verdict failure",
+   "passes": false,
+   "results": {
+    "lab-verdict": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lab-verdict cancelled",
+   "passes": false,
+   "results": {
+    "lab-verdict": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lab-verdict success",
+   "passes": true,
+   "results": {
+    "lab-verdict": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "lab-verdict"
+   ],
+   "name": "merge_group without lab-verdict",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group ledger-load failure",
+   "passes": false,
+   "results": {
+    "ledger-load": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group ledger-load cancelled",
+   "passes": false,
+   "results": {
+    "ledger-load": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group ledger-load success",
+   "passes": false,
+   "results": {
+    "ledger-load": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "ledger-load"
+   ],
+   "name": "merge_group without ledger-load",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint failure",
+   "passes": false,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint cancelled",
+   "passes": false,
+   "results": {
+    "lint": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint success",
+   "passes": false,
+   "results": {
+    "lint": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "lint"
+   ],
+   "name": "merge_group without lint",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions success",
+   "passes": false,
+   "results": {
+    "lint-actions": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "merge_group without lint-actions",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation failure",
+   "passes": false,
+   "results": {
+    "mutation": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation cancelled",
+   "passes": false,
+   "results": {
+    "mutation": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation success",
+   "passes": false,
+   "results": {
+    "mutation": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "mutation"
+   ],
+   "name": "merge_group without mutation",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-plan failure",
+   "passes": false,
+   "results": {
+    "mutation-plan": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-plan cancelled",
+   "passes": false,
+   "results": {
+    "mutation-plan": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-plan success",
+   "passes": false,
+   "results": {
+    "mutation-plan": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "mutation-plan"
+   ],
+   "name": "merge_group without mutation-plan",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-stats failure",
+   "passes": false,
+   "results": {
+    "mutation-stats": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-stats cancelled",
+   "passes": false,
+   "results": {
+    "mutation-stats": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group mutation-stats success",
+   "passes": false,
+   "results": {
+    "mutation-stats": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "mutation-stats"
+   ],
+   "name": "merge_group without mutation-stats",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group queue-fail-fast failure",
+   "passes": true,
+   "results": {
+    "queue-fail-fast": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group queue-fail-fast cancelled",
+   "passes": true,
+   "results": {
+    "queue-fail-fast": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group queue-fail-fast skipped",
+   "passes": false,
+   "results": {
+    "queue-fail-fast": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "queue-fail-fast"
+   ],
+   "name": "merge_group without queue-fail-fast",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group reuse failure",
+   "passes": false,
+   "results": {
+    "reuse": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group reuse cancelled",
+   "passes": false,
+   "results": {
+    "reuse": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group reuse success",
+   "passes": false,
+   "results": {
+    "reuse": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "reuse"
+   ],
+   "name": "merge_group without reuse",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group select failure",
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group select cancelled",
+   "passes": false,
+   "results": {
+    "select": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group select skipped",
+   "passes": false,
+   "results": {
+    "select": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "select"
+   ],
+   "name": "merge_group without select",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group semgrep failure",
+   "passes": false,
+   "results": {
+    "semgrep": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group semgrep cancelled",
+   "passes": false,
+   "results": {
+    "semgrep": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group semgrep success",
+   "passes": false,
+   "results": {
+    "semgrep": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "semgrep"
+   ],
+   "name": "merge_group without semgrep",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group shard-check failure",
+   "passes": false,
+   "results": {
+    "shard-check": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group shard-check cancelled",
+   "passes": false,
+   "results": {
+    "shard-check": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group shard-check skipped",
+   "passes": false,
+   "results": {
+    "shard-check": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "shard-check"
+   ],
+   "name": "merge_group without shard-check",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group sonar failure",
+   "passes": false,
+   "results": {
+    "sonar": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group sonar cancelled",
+   "passes": false,
+   "results": {
+    "sonar": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group sonar success",
+   "passes": false,
+   "results": {
+    "sonar": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "sonar"
+   ],
+   "name": "merge_group without sonar",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group split failure",
+   "passes": false,
+   "results": {
+    "split": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group split cancelled",
+   "passes": false,
+   "results": {
+    "split": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group split skipped",
+   "passes": false,
+   "results": {
+    "split": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "split"
+   ],
+   "name": "merge_group without split",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group stage-budget failure",
+   "passes": false,
+   "results": {
+    "stage-budget": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group stage-budget cancelled",
+   "passes": false,
+   "results": {
+    "stage-budget": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group stage-budget success",
+   "passes": false,
+   "results": {
+    "stage-budget": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "stage-budget"
+   ],
+   "name": "merge_group without stage-budget",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group swarm-image failure",
+   "passes": false,
+   "results": {
+    "swarm-image": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group swarm-image cancelled",
+   "passes": false,
+   "results": {
+    "swarm-image": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group swarm-image success",
+   "passes": false,
+   "results": {
+    "swarm-image": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "swarm-image"
+   ],
+   "name": "merge_group without swarm-image",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group test-count failure",
+   "passes": false,
+   "results": {
+    "test-count": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group test-count cancelled",
+   "passes": false,
+   "results": {
+    "test-count": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group test-count skipped",
+   "passes": false,
+   "results": {
+    "test-count": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "test-count"
+   ],
+   "name": "merge_group without test-count",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group type-gate failure",
+   "passes": false,
+   "results": {
+    "type-gate": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group type-gate cancelled",
+   "passes": false,
+   "results": {
+    "type-gate": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group type-gate success",
+   "passes": false,
+   "results": {
+    "type-gate": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "type-gate"
+   ],
+   "name": "merge_group without type-gate",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit failure",
+   "passes": false,
+   "results": {
+    "unit": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit cancelled",
+   "passes": false,
+   "results": {
+    "unit": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit skipped",
+   "passes": false,
+   "results": {
+    "unit": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "unit"
+   ],
+   "name": "merge_group without unit",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-lost failure",
+   "passes": false,
+   "results": {
+    "unit-lost": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-lost cancelled",
+   "passes": false,
+   "results": {
+    "unit-lost": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-lost success",
+   "passes": false,
+   "results": {
+    "unit-lost": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "unit-lost"
+   ],
+   "name": "merge_group without unit-lost",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-rerun failure",
+   "passes": false,
+   "results": {
+    "unit-rerun": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-rerun cancelled",
+   "passes": false,
+   "results": {
+    "unit-rerun": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-rerun success",
+   "passes": false,
+   "results": {
+    "unit-rerun": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "unit-rerun"
+   ],
+   "name": "merge_group without unit-rerun",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-selected failure",
+   "passes": false,
+   "results": {
+    "unit-selected": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-selected cancelled",
+   "passes": false,
+   "results": {
+    "unit-selected": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group unit-selected success",
+   "passes": false,
+   "results": {
+    "unit-selected": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "unit-selected"
+   ],
+   "name": "merge_group without unit-selected",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group worker-image failure",
+   "passes": false,
+   "results": {
+    "worker-image": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group worker-image cancelled",
+   "passes": false,
+   "results": {
+    "worker-image": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group worker-image success",
+   "passes": false,
+   "results": {
+    "worker-image": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "worker-image"
+   ],
+   "name": "merge_group without worker-image",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group writer-lock failure",
+   "passes": false,
+   "results": {
+    "writer-lock": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group writer-lock cancelled",
+   "passes": false,
+   "results": {
+    "writer-lock": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group writer-lock success",
+   "passes": false,
+   "results": {
+    "writer-lock": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "writer-lock"
+   ],
+   "name": "merge_group without writer-lock",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "flags": {
+    "reused": "true"
+   },
+   "name": "push reused",
+   "passes": false
+  },
+  {
+   "base": "push",
+   "flags": {
+    "kind": "false"
+   },
+   "name": "push kind not due skips helm",
+   "passes": true,
+   "results": {
+    "helm-kind": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "flags": {
+    "kind": ""
+   },
+   "name": "push kind unknown keeps helm",
+   "passes": false,
+   "results": {
+    "helm-kind": "skipped"
+   }
+  },
+  {
+   "base": "push",
+   "event": "workflow_dispatch",
+   "name": "dispatch keeps lint",
+   "passes": false
+  },
+  {
+   "base": "push",
+   "event": "workflow_dispatch",
+   "name": "dispatch with lint",
+   "passes": true,
+   "results": {
+    "collect": "success",
+    "lint": "success",
+    "lint-actions": "success",
+    "semgrep": "success",
+    "test-count": "success",
+    "type-gate": "success"
+   }
+  },
+  {
+   "base": "push",
+   "event": "workflow_dispatch",
+   "name": "dispatch with collect and lint-actions skipped",
+   "passes": false,
+   "results": {
+    "lint": "success",
+    "semgrep": "success",
+    "test-count": "success",
+    "type-gate": "success"
+   }
+  },
+  {
+   "base": "push",
+   "flags": {
+    "mutation": "true"
+   },
+   "name": "push mutation ran",
+   "passes": false
+  },
+  {
+   "base": "push",
+   "flags": {
+    "inline": "true",
+    "mutation": "true"
+   },
+   "name": "push mutation inline",
+   "passes": true,
+   "results": {
+    "mutation-plan": "success",
+    "mutation-stats": "success"
+   }
+  },
+  {
+   "base": "push",
+   "flags": {
+    "inline": "true",
+    "mutation": "true"
+   },
+   "name": "push mutation inline plan skipped",
+   "passes": false
+  },
+  {
+   "base": "push",
+   "name": "push queue baseline skipped",
+   "passes": true,
+   "set": {
+    "queue-baseline": {
+     "outputs": {},
+     "result": "skipped"
+    }
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group queue baseline skipped",
+   "passes": true,
+   "set": {
+    "queue-baseline": {
+     "outputs": {},
+     "result": "skipped"
+    }
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lab verdict failed",
+   "passes": false,
+   "results": {
+    "lab-verdict": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "lab-verdict"
+   ],
+   "name": "push lab verdict absent",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push lab verdict null",
+   "passes": true,
+   "set": {
+    "lab-verdict": null
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lab verdict bad object",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "[1]"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "push",
+   "name": "push lab verdict bad json",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "push",
+   "name": "push lab verdict empty object",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{}"
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab verdict skipped",
+   "passes": false,
+   "results": {
+    "lab-verdict": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab authoritative red",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": true}",
+     "lab_lint": "failure"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab authoritative green",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": true}",
+     "lab_lint": "success"
+    }
+   },
+   "passes": true,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab skipped for an authoritative gate the head does not run",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit\": true}",
+     "lab_unit": "skipped"
+    }
+   },
+   "passes": true,
+   "results": {
+    "unit": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab check missing at the deadline for an authoritative gate the head does not run",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit\": true}",
+     "lab_unit": "failure"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab skipped for an authoritative gate the head requires",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit-selected\": true}",
+     "lab_unit-selected": "skipped"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab not authoritative",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": false}",
+     "lab_lint": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab authoritative empty result",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": true}",
+     "lab_lint": ""
+    }
+   },
+   "passes": false,
+   "results": {
+    "lint": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lab authoritative ignored",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"docs\": true}",
+     "lab_docs": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "docs": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request select failed",
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope selected",
+   "outputs": {
+    "select": {
+     "scope": "selected"
+    }
+   },
+   "passes": true,
+   "results": {
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "skipped",
+    "unit-selected": "success"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope selected missing unit",
+   "outputs": {
+    "select": {
+     "scope": "selected"
+    }
+   },
+   "passes": true,
+   "results": {
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none skipped",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "skipped",
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope unknown",
+   "outputs": {
+    "select": {
+     "scope": "most"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request sonar skip",
+   "outputs": {
+    "select": {
+     "scope": "full",
+     "sonar": "skip"
+    }
+   },
+   "passes": false,
+   "results": {
+    "sonar": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request sonar skip still ran",
+   "outputs": {
+    "select": {
+     "scope": "full",
+     "sonar": "skip"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "mutation": "false"
+   },
+   "name": "pull request without mutation",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "mutation": "false"
+   },
+   "name": "pull request without mutation skipped",
+   "passes": true,
+   "results": {
+    "mutation": "skipped",
+    "mutation-plan": "skipped",
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "mutation": ""
+   },
+   "name": "pull request mutation unknown",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "inline": "true"
+   },
+   "name": "pull request mutation inline",
+   "passes": true,
+   "results": {
+    "mutation": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request forwarded stats",
+   "outputs": {
+    "mutation-plan": {
+     "forwarded": "true"
+    }
+   },
+   "passes": true,
+   "results": {
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request forwarded stats failed plan",
+   "outputs": {
+    "mutation-plan": {
+     "forwarded": "true"
+    }
+   },
+   "passes": false,
+   "results": {
+    "mutation-plan": "failure",
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request unforwarded stats",
+   "outputs": {
+    "mutation-plan": {
+     "forwarded": "false"
+    }
+   },
+   "passes": false,
+   "results": {
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group fail fast reported",
+   "outputs": {
+    "queue-fail-fast": {
+     "failed": "unit 3"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group fail fast failed",
+   "passes": true,
+   "results": {
+    "queue-fail-fast": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group lost rerun",
+   "passes": true,
+   "results": {
+    "unit": "failure",
+    "unit-lost": "success",
+    "unit-rerun": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group cancelled rerun",
+   "passes": true,
+   "results": {
+    "unit": "cancelled",
+    "unit-lost": "success",
+    "unit-rerun": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group rerun failed",
+   "passes": false,
+   "results": {
+    "unit": "failure",
+    "unit-lost": "success",
+    "unit-rerun": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group unit skipped",
+   "passes": false,
+   "results": {
+    "unit": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request sonar skipped by selection",
+   "outputs": {
+    "select": {
+     "count": "15",
+     "key": "durations-merged-61a7e07aa53290f55f7f736e948a1f811b682fc6",
+     "legs": "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+     "scope": "selected",
+     "sonar": "skip"
+    }
+   },
+   "passes": true,
+   "results": {
+    "sonar": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative false reads as no authoritative gates",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": false
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative gate without a lab result keeps its own",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": true}"
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative select keeps its outputs",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request failed selection the lab grades green",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request cancelled selection the lab grades green",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "select": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "mutation": ""
+   },
+   "name": "pull_request without a mutation flag",
+   "passes": false,
+   "results": {
+    "mutation": "skipped",
+    "mutation-plan": "skipped",
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group fail fast without outputs",
+   "passes": true,
+   "set": {
+    "queue-fail-fast": {
+     "result": "success"
+    }
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": true,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "success",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full unit failure",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": false,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "failure",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full unit skipped",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": false,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "skipped",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none with every test job skipped",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": true,
+   "results": {
+    "coverage-ratchet": "skipped",
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "skipped",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none with a unit job that ran",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "skipped",
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "success",
+    "unit-selected": "skipped"
+   }
+  }
+ ],
+ "source": "Gate \u2014 Required step of .github/workflows/test.yml; needs recorded from Actions runs"
+}

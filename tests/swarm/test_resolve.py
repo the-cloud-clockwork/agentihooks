@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -32,7 +33,7 @@ class Ledger:
         op = {"op": kind, "id": f"{kind}-{len(self.writes)}", "by": by, "item": item, **fields}
         self.writes.append(op)
         ledger_blockers.check(op)
-        ctx = SimpleNamespace(slug=slug, at=1, refused=[], record=lambda *a, **k: None, stamp=lambda *a: None)
+        ctx: Any = SimpleNamespace(slug=slug, at=1, refused=[], record=lambda *a, **k: None, stamp=lambda *a: None)
         if not ledger_blockers.apply(self.doc, op, ctx):
             raise SwarmError("; ".join(ctx.refused))
 

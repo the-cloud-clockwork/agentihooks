@@ -12,7 +12,7 @@ from scripts.events.config import QueuePolicy
 from scripts.events.dead import dead_letter
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_events, headroom, presence
-from scripts.swarm import launch_check, readiness
+from scripts.swarm import launch_check, offer_quota, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
 ASKED = "asked"
@@ -24,6 +24,11 @@ class Tasks(Protocol):
         ...
 
     def reopen(self, event: Envelope) -> None: ...
+
+    def dead_lettered(self, event: Envelope) -> None:
+        """Asks the hub to reopen a dead lettered offer, which advances its task's claim generation when no
+        admission is held, so the next offer carries a fresh claim key."""
+        ...
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
 
@@ -91,13 +96,14 @@ class Spoke:
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
+        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit)
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
-            delivery = readiness.take(queue, self.view, timeout_ms, self.config.fit)
+            delivery = readiness.take(queue, self.view, timeout_ms, fit)
         except Exception:
             return self._failed()
         if delivery is None:
-            return recovered or "empty"
+            return recovered or ("held" if fit.held else "empty")
         try:
             heartbeat.check()
             return self._apply(delivery, heartbeat)
@@ -202,12 +208,11 @@ class Spoke:
         if waiting := self._waiting(prior):
             delivery.nak(self.config.policy.ack_wait_ms)
             return waiting
-        if prior.get("state") in ("dead", "withdrawn"):
-            delivery.term()
-            return prior["state"]
+        if prior.get("state") == "dead":
+            return self._ended(delivery)
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED):
+        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED, "withdrawn"):
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
@@ -239,6 +244,13 @@ class Spoke:
         delivery.ack()
         self._report_launch(event, launch)
         return "started"
+
+    def _ended(self, delivery: Delivery) -> str:
+        """Terms an offer whose claim at this generation is dead after asking the hub to advance the task's claim
+        generation, so a task whose offer dead lettered unadmitted is offered again under a fresh claim key."""
+        self.tasks.dead_lettered(delivery.event)
+        delivery.term()
+        return "dead"
 
     def _ask_again(
         self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
@@ -398,7 +410,7 @@ class Spoke:
         else:
             raise StateConflict
         self.bus.dead.publish(f"dead.{event.swarm}", letter)
-        self.tasks.reopen(event)
+        self.tasks.dead_lettered(event)
         claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
 
     def _exhaust(self, delivery: Delivery) -> str:

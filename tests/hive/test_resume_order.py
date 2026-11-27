@@ -35,10 +35,11 @@ def _ack(redis: Any, order: Any) -> dict[str, Any]:
 def test_the_hive_spawns_the_resume_order_process_with_the_encoded_order(
     redis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.hive import orders
+    from scripts.hive import dispatch, orders
 
     spawned = Mock()
     monkeypatch.setattr(orders.subprocess, "Popen", spawned)
+    monkeypatch.setattr(dispatch, "_resumes", [])
     order = _order()
     orders.Consumer(redis, HIVE, Mock())._spawn_resume(order)
     assert spawned.call_args.args[0] == [sys.executable, "-m", "scripts.hive.resume_order", HIVE, order.encode()]
@@ -251,6 +252,24 @@ def test_one_poll_starts_every_unanswered_resume_order(redis: Any) -> None:
     consumer.offbeat = Mock()
     consumer.poll_commands()
     assert [call.args[0] for call in consumer.offbeat.call_args_list] == [first, second]
+
+
+@pytest.mark.feature("hive-resume-start-failure")
+def test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_command_poll(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import orders
+
+    first, second = _order(), replace(_order(), id="resume:x:1:2")
+    orders.Orders(redis).command(HIVE, first)
+    orders.Orders(redis).command(HIVE, second)
+    monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
+    consumer = orders.Consumer(redis, HIVE, cast(Any, Mock()))
+    assert consumer.poll_commands() == 2
+    failed = {"status": "failed", "target": {"host_id": HIVE}, "failure": "error: BlockingIOError"}
+    assert [_ack(redis, first), _ack(redis, second)] == [failed, failed]
+    assert consumer.poll_commands() == 2
+    assert redis.xlen(orders.Orders(redis).commands(HIVE)) == 0
 
 
 @pytest.mark.feature("hub-dead-resume")

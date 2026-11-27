@@ -1,3 +1,5 @@
+import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -8,8 +10,23 @@ import yaml
 from scripts import ci_budget
 from tests.contracts.ci_tiers.test_workflow import enabled
 from tests.test_ci_anton_runners import resolve
+from tests.test_ci_proof_branch_pushes import _events, _runs_on
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+NON_GATING: dict[str, str] = {
+    "access-audit.yml": "audits collaborators and installed apps and alerts only on unapproved or unreadable access",
+    "ci-lab-image.yml": "builds, smokes and publishes the CI lab image",
+    "count-record.yml": "records the dev suite test count that later pull request bases read",
+    "coverage-stability.yml": "compares the measured lines of the newest dev commit's finished runs",
+    "gate-required.yml": "follows every Tests run and reports Gate Required only for pull request runs",
+    "github-access-audit.yml": "reads back the effective GitHub access controls",
+    "hive-worker.yml": "proves the worker hive chart and image in kind and publishes the image",
+    "swarm-image.yml": "builds and pushes the dev swarm image",
+    "swarm-node-base.yml": "copies the locked worker base into the org registry",
+    "swarm-node-image.yml": "builds, qualifies and publishes the worker image and moves its dev tag; a release tags it",
+}
 
 
 def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
@@ -22,6 +39,51 @@ def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
     assert "needs.gate-required.result == 'success'" in promote["if"]
     assert "!contains(needs.*.result, 'failure')" in promote["if"]
     assert "!contains(needs.*.result, 'cancelled')" in promote["if"]
+
+
+@pytest.mark.feature("promotion-graded-jobs-gate-or-exempt")
+def test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    script = json.dumps(str(ROOT / ".github/scripts/promote.cjs"))
+    listed = subprocess.run(
+        ["node", "-p", f"JSON.stringify(require({script}).EXEMPT)"], capture_output=True, text=True, check=True
+    )
+    exempt = set(json.loads(listed.stdout))
+    gating = _needed(jobs, "promotion-ready")
+    assert sorted(set(jobs) - gating - exempt - {"promotion-ready", "promote"}) == []
+    assert sorted((exempt - set(jobs)) | (exempt & gating)) == []
+    assert sorted(name for name in exempt if {"name", "strategy", "uses"} & set(jobs[name])) == []
+    assert sorted(job for job, spec in jobs.items() if job not in exempt and spec.get("name") in exempt) == []
+
+
+def _needed(jobs: dict[str, Any], name: str) -> set[str]:
+    needs = jobs[name].get("needs", [])
+    direct = {needs} if isinstance(needs, str) else set(needs)
+    return direct.union(*(_needed(jobs, need) for need in direct))
+
+
+@pytest.mark.feature("promotion-dev-push-workflows-non-gating")
+def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> None:
+    workflows = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.y*ml")}
+    names = {file: spec.get("name", f".github/workflows/{file}") for file, spec in workflows.items()}
+    triggers = {file: _events(spec) for file, spec in workflows.items()}
+    fired = {file for file, events in triggers.items() if "push" in events and _runs_on(events["push"] or {}, "dev")}
+    while (
+        chained := {
+            file
+            for file, events in triggers.items()
+            if (run := events.get("workflow_run"))
+            and _runs_on(run, "dev")
+            and {names[source] for source in fired} & set(run["workflows"])
+        }
+        - fired
+    ):
+        fired |= chained
+    assert all(NON_GATING.values())
+    assert sorted(fired - {"test.yml"}) == sorted(NON_GATING), (
+        "a workflow that runs on a dev push outside the Tests run never gates promotion: "
+        "move its gate into test.yml or list it in NON_GATING with the reason it does not gate"
+    )
 
 
 def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pull_requests_or_the_queue():
@@ -73,6 +135,31 @@ def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pu
     assert called["with"]["plant"] == "${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}"
 
 
+@pytest.mark.feature("tick-scale-gate-wiring")
+def test_tick_scale_profiles_registered_steps_including_the_agent_launcher() -> None:
+    from scripts.tick.registry import steps
+
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    names = set(called["with"]["profile"].split(" && ")[1].split(" || ")[0].strip("'").split(","))
+    registered = {step.name for step in steps()}
+    assert not names - registered, f"Unregistered profiled tick steps: {sorted(names - registered)}"
+    assert "master scale" in names
+
+
+@pytest.mark.feature("tick-scale-gate-wiring")
+def test_tick_scale_promotion_page_lists_the_profiled_steps() -> None:
+    import re
+
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    names = set(called["with"]["profile"].split(" && ")[1].split(" || ")[0].strip("'").split(","))
+    page = (ROOT / "docs/reference/delivery-tiers.md").read_text()
+    described = page.split("On `diffcheck/tick-scale-profile`", 1)[1].split("with cProfile.", 1)[0]
+    assert set(re.findall(r"`([^`]+)`", described)) == names
+    assert "master scale" in names
+
+
 def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, SimpleNamespace]:
     return {
         name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis, promote="false"))
@@ -89,9 +176,11 @@ def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, Si
         "coverage-baseline",
         "flake-budget",
         "sonar",
+        "sonar-after-unit",
         "hierarchy-cpu",
         "tick-scale",
         "tick-pattern-tree",
+        "type-gate-tree",
     ],
 )
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
@@ -163,6 +252,18 @@ def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None
     for consumer in ("promotion-ready", "promote"):
         needs = _graded_needs(jobs[consumer])
         needs["tick-pattern-tree"].result = result
+        assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
+
+
+@pytest.mark.feature("type-gate-split-by-tier")
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_clean_whole_tree_type_check(result: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    tree = jobs["type-gate-tree"]
+    assert any(step.get("run") == "python -m scripts.type_gate --tree" for step in tree["steps"])
+    for consumer in ("promotion-ready", "promote"):
+        needs = _graded_needs(jobs[consumer])
+        needs["type-gate-tree"].result = result
         assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 

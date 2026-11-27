@@ -169,6 +169,15 @@ def pid_account(pid: int, proc: Path = _PROC, accounts: Mapping[str, str] | None
     return routed.get(_env_fingerprint(pid, proc, f"{TOKEN_PREFIX}{account}"), account)
 
 
+def pid_route(pid: int, proc: Path = _PROC) -> str:
+    """Route kind of the agent process ``pid`` from its variable names: api, interactive for a claude ai login, else
+    subscription."""
+    names = _env_names(pid, proc)
+    if API_MARKER in names:
+        return API_ACCOUNT
+    return "interactive" if any(name.startswith(INTERACTIVE_PREFIX) for name in names) else "subscription"
+
+
 def session_account(pid: int, proc: Path = _PROC) -> str:
     """Account of the agent process ``pid``; this process's environment when /proc is unavailable."""
     if (proc / str(pid) / "environ").exists():
@@ -203,9 +212,13 @@ def live_sessions(
     return sessions
 
 
-def _is_codex(pid: int, proc: Path) -> bool:
+def _codex_argv(pid: int, proc: Path) -> list[str]:
     argv = _cmdline(pid, proc)
-    return bool(argv) and (_comm(pid, proc) == "codex" or Path(argv[0]).name == "codex")
+    return argv if argv and (_comm(pid, proc) == "codex" or Path(argv[0]).name == "codex") else []
+
+
+def _is_codex(pid: int, proc: Path) -> bool:
+    return bool(_codex_argv(pid, proc))
 
 
 def _codex_positionals(argv: list[str]) -> list[str]:
@@ -216,9 +229,9 @@ def _codex_positionals(argv: list[str]) -> list[str]:
 
 
 def _is_codex_session(pid: int, proc: Path) -> bool:
-    if not _is_codex(pid, proc):
+    argv = _codex_argv(pid, proc)
+    if not argv:
         return False
-    argv = _cmdline(pid, proc)
     if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
         return False
     if any(part == REMOTE or part.startswith(f"{REMOTE}=") for part in argv[1:]):
@@ -236,9 +249,7 @@ def execution_key(endpoint: str) -> str:
 
 
 def _managed_execution(pid: int, proc: Path) -> str:
-    if not _is_codex(pid, proc):
-        return ""
-    argv = _cmdline(pid, proc)
+    argv = _codex_argv(pid, proc)
     if _codex_positionals(argv)[:1] != ["app-server"] or LISTEN not in argv[:-1]:
         return ""
     return execution_key(argv[argv.index(LISTEN) + 1])

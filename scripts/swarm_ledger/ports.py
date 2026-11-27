@@ -12,6 +12,8 @@ class Swarm(Protocol):
     freeze: Any
     effort_range: Any
     claim_hold: Any
+    focus_check: Any
+    order_check: Any
     idle: Any
     lease: Any
     model_catalog: Any

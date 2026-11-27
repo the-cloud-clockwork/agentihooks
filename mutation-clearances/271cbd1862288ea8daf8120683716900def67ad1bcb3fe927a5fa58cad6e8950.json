@@ -1,0 +1,6 @@
+{
+  "hooks/hook_manager.py:hooks.hook_manager.x_emit_permission_decision:8088b968bd02808273700bad24d2fcaa291b4ea6ec8096ebbf826b85c16db3b5": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: allowed_permission_decisions sets target = target or current_target(), and target is the non-empty result of current_target() on the line above, so the mutant resolves to the same current_target() value, and no code runs between the two calls that could change AGENTIHOOKS_TARGET."
+  }
+}

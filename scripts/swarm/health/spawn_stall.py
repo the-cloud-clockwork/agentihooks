@@ -3,13 +3,14 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
+from scripts.swarm import blockers, capacity, freeze, master_pin, panic, tick_activity, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone, pass_state
 from scripts.swarm.store import RedisStore
@@ -27,7 +28,7 @@ def read(store, slug: str) -> dict:
 
 
 def save(store, slug: str, state: dict) -> None:
-    timing.keep()
+    tick_activity.renew_now()
     store.redis.set(store.key(slug, KEY), json.dumps(state))
 
 
@@ -165,7 +166,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
     finding = found[0]
     text = f"Spawn stall on {slug}: {finding.summary}. " + "; ".join(finding.evidence)
     if "message" not in state:
-        timing.keep()
+        tick_activity.renew_now()
         item = inbox.send("swarm", seat_address(slug, "master"), text, ref=f"{REF}{slug}:{state['since']}")
         state.update(message=item.id, sent_at=at)
         save(store, slug, state)
@@ -174,6 +175,11 @@ def deliver(store, slug: str, ledger, at: int) -> None:
         ledger.notify(slug, text)
         state["notified"] = True
         save(store, slug, state)
+
+
+def _panic_action(slug: str, line: str) -> None:
+    """Print one panic action of the pass of swarm ``slug`` as a swarm panic event."""
+    timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
 
 
 @contextmanager
@@ -186,7 +192,7 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
             return
         previous = error
         failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
-        timing.keep()
+        tick_activity.renew_now()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
         blockers.record(store, slug, type(error).__name__, f"{step}: {error}", clock())
         panic.count_error(store, slug, type(error).__name__, clock())
@@ -196,8 +202,9 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         yield
     finally:
         timing.ON_FAILURE.reset(token)
-        for line in panic.tick_pass(store, previous is None, clock()):
-            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic", "slug": slug, "action": line}))
+        report = partial(_panic_action, slug)
+        for line in panic.tick_pass(store, slug, previous is None, clock(), report):
+            report(line)
         observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())
         if found := findings(store, slug):

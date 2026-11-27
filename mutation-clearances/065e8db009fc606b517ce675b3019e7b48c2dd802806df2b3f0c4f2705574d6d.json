@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:48ffefd5f1ee0138cab03ac61759d06f7a4c531d52d392c836d6e0c78f79c5c1": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including table and column names, resolve case insensitively, so the uppercased select returns the same arcs."
+  }
+}

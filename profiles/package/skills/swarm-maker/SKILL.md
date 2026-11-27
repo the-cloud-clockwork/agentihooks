@@ -6,7 +6,7 @@ description: Guides users to build bundle overlays and purpose built swarms whil
 # Swarm Maker
 
 Requires Git and the installed `agentihooks` CLI. If agentihooks is missing,
-install the package with `uv tool install agentihooks`; a missing Git requires
+install the package with `uv tool install "agentihooks[nats]"`; a missing Git requires
 the host's system dependency process. Run commands below; do not reimplement
 the scaffold or edit the ledger JSON or swarm store directly.
 

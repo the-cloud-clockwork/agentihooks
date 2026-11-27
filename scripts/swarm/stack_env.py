@@ -41,7 +41,7 @@ def settings(env_file: Path, environ: dict[str, str] | None = None) -> dict[str,
     }
     values.update(selected)
     defaults = {
-        "AGENTIHOOKS_DEPLOYMENT": lambda: "compose",
+        "SWARM_DEPLOYMENT": lambda: "compose",
         "SWARM_BIND": lambda: BIND,
         "SWARM_HIVE_ID": lambda: "compose-controller",
         "SWARM_IMAGE_TAG": lambda: "release",

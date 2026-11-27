@@ -1,6 +1,7 @@
 import re
 
 from scripts.swarm_ledger import ledger_plans
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
 FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref", "plan")
@@ -133,7 +134,7 @@ def check_append(op: dict) -> None:
         seen.add(entry["phase"])
 
 
-def append(doc: dict, op: dict, ctx) -> bool:
+def append(doc: dict, op: dict, ctx: OpContext) -> bool:
     ids = {phase["id"] for phase in doc["phases"]}
     taken = [f"phase id {entry['phase']} is already taken" for entry in op["phases"] if entry["phase"] in ids]
     if taken:
@@ -170,7 +171,7 @@ def append(doc: dict, op: dict, ctx) -> bool:
     return True
 
 
-def apply(doc: dict, op: dict, ctx) -> bool:
+def apply(doc: dict, op: dict, ctx: OpContext) -> bool:
     if op["op"] == "phase_append":
         return append(doc, op, ctx)
     phases = doc["phases"]
@@ -233,14 +234,15 @@ def review_record(phase: dict, op: dict, at: int) -> dict:
     return record
 
 
-def decided(doc: dict, phase_id: str, review: dict, by: str, ctx) -> None:
+def decided(doc: dict, phase_id: str, review: dict, by: str, ctx: OpContext) -> None:
     if review["state"] == "pending":
         return
     item = f"phases/{phase_id}"
     doc["priorities"] = [row for row in doc["priorities"] if row["item"] != item]
     if review["state"] != "sent_back" or review["escalated"]:
         return
-    plan = next((t for t in doc["tasks"] if t.get("phase") == phase_id and t.get("kind") == "plan"), None)
+    owned = (t for t in doc["tasks"] if t.get("phase") == phase_id and t.get("kind") == "plan")
+    plan = next((t for t in owned if not t.get("enhances")), None)
     if plan is None or plan.get("state") == "open":
         return
     plan.update(state="open", claimed_by="", done=False)

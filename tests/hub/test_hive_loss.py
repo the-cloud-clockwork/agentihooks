@@ -55,7 +55,17 @@ def rig():
 
     def offer(version):
         queue.offer(
-            Envelope(f"ready-{version}", "task.ready", "rig", "task", "task", version, T0, "readiness", {"lane": "eng"})
+            Envelope(
+                f"ready-{version}",
+                "task.ready",
+                "rig",
+                "task",
+                "task",
+                version,
+                T0,
+                "readiness",
+                {"lane": "eng", "quota": {}},
+            )
         )
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))

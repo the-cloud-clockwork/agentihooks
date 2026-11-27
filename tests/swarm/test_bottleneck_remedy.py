@@ -1,11 +1,12 @@
 import json
 from dataclasses import replace
+from unittest.mock import patch
 
 import pytest
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, dispatcher, metrics
+from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, dispatcher, metrics, model_catalog
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
@@ -123,10 +124,11 @@ def caps(store):
     return config.max_eng, config.max_ci
 
 
-def pin(store, lane, agent, model="opus"):
+def pin(store: RedisStore, lane: str, agent: str, model: str = "opus") -> None:
     lanes = {key: dict(value) for key, value in store.config(SLUG).lanes.items()}
     lanes.setdefault(lane, {}).update(agent=agent, model=model)
-    store.update(SLUG, lanes=lanes)
+    with patch.object(model_catalog, "catalog", return_value={"claude": [{"model": model}], "codex": []}):
+        store.update(SLUG, lanes=lanes)
 
 
 def lane_of(store, lane):

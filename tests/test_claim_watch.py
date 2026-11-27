@@ -1,15 +1,20 @@
+import importlib.util
 import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from hooks.context import claim_watch
 from scripts.swarm import ledger_client, store
 from scripts.swarm_ledger import ledger_workspace
+from tests.helpers import service_path
 
 pytestmark = pytest.mark.unit
 
 NAME = "engineer@a1b2c3-0004"
+INTERPRETER = [sys.executable, "-P", "-m", "scripts.install"]
 ENV = {
     "AGENTIHOOKS_SWARM": "sw",
     "AGENTIHOOKS_AGENT_NAME": NAME,
@@ -65,7 +70,7 @@ def hive(monkeypatch):
 
 @pytest.fixture
 def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
-    from scripts.tick.adapters import database_ledger
+    from scripts.tick.adapters import writer_client
 
     reads = []
 
@@ -81,7 +86,7 @@ def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
             return [self.request(slug, path)]
 
     module = ledger_client._ledger()
-    monkeypatch.setattr(database_ledger, "ResourceClient", Slow)
+    monkeypatch.setattr(writer_client, "ResourceClient", Slow)
     monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
     monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
     monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
@@ -109,7 +114,7 @@ def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
     assert redis.reads == [KEY]
     assert spawn.calls == [
         (
-            ["agentihooks", "swarm", "sw", "--as", NAME, "exit"],
+            [*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"],
             {
                 "start_new_session": True,
                 "stdin": subprocess.DEVNULL,
@@ -121,6 +126,16 @@ def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
     assert (folder / "progress.md").read_text() == "earlier step\n" + claim_watch.NOTE.format(
         at="1970-01-01T00:16:40Z", name=NAME, owner=OTHER
     )
+
+
+@pytest.mark.feature("service-commands-run-through-interpreter")
+def test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path(tmp_path: Path) -> None:
+    _, _, spawn = _check(OTHER)
+
+    [(argv, _)] = spawn.calls
+    done = service_path.help_run(argv, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "agentihooks swarm" in done.stdout
 
 
 def test_the_claimant_itself_keeps_working() -> None:
@@ -305,7 +320,67 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
             {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/"}
         )
     assert redis.reads == [KEY]
-    assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+    assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
+
+
+@pytest.mark.feature("swarm-gates-platform-invocation")
+@pytest.mark.parametrize("import_platform", ["win32", "linux"])
+def test_swarm_gates_choose_the_platform_at_each_call(monkeypatch: pytest.MonkeyPatch, import_platform: str) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    spec = importlib.util.spec_from_file_location("isolated_swarm_gates", swarm_gates.__file__)
+    assert spec is not None and spec.loader is not None
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, "platform", import_platform)
+    spec.loader.exec_module(fresh)
+    calls = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict, session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == []
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert fresh.pretool("Bash", {}, "s1") == "stop"
+    assert calls == ["claim"]
+    monkeypatch.setattr(claim_watch, "check", lambda: None)
+    calls.clear()
+    assert fresh.pretool("Bash", {}, "s1") == "handoff"
+    assert calls == ["recycle"]
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == ["recycle"]
+
+
+@pytest.mark.feature("swarm-gates-platform-invocation")
+def test_windows_runs_neither_swarm_gate_at_the_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    calls: list[str] = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict[str, object], session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert calls == []
 
 
 @pytest.mark.wall_clock
@@ -343,7 +418,7 @@ def test_a_lost_pushed_claim_still_exits_through_the_swarm_gates(monkeypatch: py
     assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == claim_watch.STOP.format(
         task="t1", slug="sw", owner=OTHER
     )
-    assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+    assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
 
 
 @pytest.mark.parametrize("session", [{}, {"session_id": "s1"}])

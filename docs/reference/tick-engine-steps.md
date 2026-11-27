@@ -283,6 +283,77 @@ the next pass.
 The tick report counts these runs per step in its Late share, Abandoned, Held and Dropped columns; see
 [Outcome columns](tick-report.md#outcome-columns).
 
+### Profile a step
+
+The tick report shows how long a step ran and how much CPU it used, but not where that time went. To find out, list
+the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`, added by pull request 10512. `scripts.swarm.timing.within`, which runs
+every engine step at its budget, reads the variable on each step run and runs every listed step under `cProfile`. The
+value is a comma separated list of step names exactly as the [tick step catalogue](tick-step-catalogue.md) prints
+them. Spaces around each name are dropped, and an unset or empty value profiles nothing.
+
+Set it in the environment of the process that runs the tick, as for `AGENTIHOOKS_TICK_STAGE` (see
+[Configuration](configuration.md#swarm-tick)): one line in `~/.agentihooks/.env` on the machine whose scheduler
+ticks, or the controller's deployment environment for a hosted controller.
+
+```bash
+AGENTIHOOKS_TICK_PROFILE_STEPS="master scale,reap"
+```
+
+Each profiled run writes one JSON line to standard error when the step returns or raises. An example, with each
+function list cut to its first entries:
+
+```json
+{"event": "swarm_tick_step_profile", "step": "master scale", "wall_s": 41.73, "top_cumulative": ["/app/scripts/hive/launch.py:665(_placed) calls=1 own_s=0.0011 cumulative_s=40.9102", "/app/scripts/hive/launch.py:685(_reselect) calls=78 own_s=0.0094 cumulative_s=38.2210"], "top_own": ["~:0(<method 'recv_into' of '_socket.socket' objects>) calls=9120 own_s=6.1043 cumulative_s=6.1043"], "pass_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"}
+```
+
+| Field | Value |
+| --- | --- |
+| `event` | Always `swarm_tick_step_profile` |
+| `step` | The step name as listed |
+| `wall_s` | Wall seconds of the profiled call, profiler overhead included |
+| `top_cumulative` | Up to 25 functions (`timing.PROFILE_TOP_N`) sorted by time spent in them and everything they called |
+| `top_own` | Up to 25 functions sorted by time spent in their own code |
+| `pass_id` | The running pass, present only while a pass record is open |
+
+Each function line reads `<file>:<line>(<function>) calls=<n> own_s=<seconds> cumulative_s=<seconds>`; a recursive
+function shows its calls as `<total>/<primitive>`. `cProfile` sees only the thread that runs the step, so work the
+step hands to other threads does not appear. It also slows every call it records: the step's `tick:steps` and
+`tick:records` walls rise while it is listed, so treat profiled walls as evidence only and empty the variable once
+the lines are read.
+
+Read the lines of the last hour from the tick journal:
+
+```bash
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now \
+  | grep '"event": "swarm_tick_step_profile"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+for r in map(json.loads, sys.stdin):
+    print(r["step"], round(r["wall_s"], 1), r.get("pass_id", "-"))
+    for line in r["top_cumulative"][:10]: print("   ", line)'
+```
+
+On a hosted controller, the lines are in the controller pod's log; replace the `journalctl` line with
+`kubectl logs deployment/<controller> -n <namespace> --since=1h` and keep the rest of the pipe.
+
+A function called far more often than the step's work explains, or one whose cumulative time is most of `wall_s`,
+names the cost. The `master scale` profile that found the [master launch retry
+loop](../pillars/hives.md#retry-after-a-full-account-reservation) showed `HiveLaunch._reselect` called 78 times and
+`_admitted_selection` 79 times in one master launch, in pass `9e0d10`, an 83 second pass of controller release
+2.17.806, as the pull request 10731 description records.
+
+The `profile` input of the `.github/actions/tick-scale` action sets the same variable for the
+[tick scale gate](delivery-tiers.md#tick-scale-gate-at-promotion); a push to `diffcheck/tick-scale-profile`
+sets it to `track outages,reap,spawn,tick view`. No step is named `spawn` since pull request 11141 removed it, so
+that push profiles the other three. The tests under the feature map entry
+`tick-step-profiler`, in `tests/swarm/test_timing.py`, hold the behavior.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| No `swarm_tick_step_profile` line appears | The step name against the catalogue, letter for letter; the variable in the environment of the ticking process | Use the catalogue name, such as `master scale` rather than `master_scale`, and set the variable where the tick runs. |
+| A step held or skipped this pass writes no line | `tick:records` for the step: `held`, `skipped`, `rested` or `dropped` | Only a step that runs is profiled; read a pass where it ran. |
+| A profiled step reads `late` or is abandoned | Its wall with the variable empty | The profiler's overhead pushed it over its budget. Empty the variable and compare the plain wall. |
+
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 60 seconds for the critical
@@ -297,7 +368,7 @@ These steps declare the slow lane:
 | `scripts.tick.steps.observe` | `observe` | pane evidence, lab capacity |
 | `scripts.tick.steps.agents` | `agents` | strays, failed panes |
 | `scripts.tick.steps.masters` | `masters` | retire idle master, master stall, prompt stall |
-| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane) |
+| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane), autoscaler alert |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 | `scripts.tick.steps.masters` | `master watch` | night watch, master alarm |
 | `scripts.tick.steps.agents` | `close` | conversations, session models |
@@ -885,19 +956,242 @@ The positional order is name, group, call, `needs`, `reads`, `writes`.
 id, as keywords; see
 [Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
-`tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
-`scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording
-pass box and recording pass views. It records which step stored and read each
-key and names every gap:
+#### Undeclared pass reads
+
+A step's call reads the pass state through the reader it is handed, `get`,
+and that reader refuses every `BOX_KEYS` value the step's `reads` and `writes`
+do not declare; a test keeps `BOX_KEYS` equal to the keys steps and site hooks
+store (see below). `CallStep.run` (`scripts.tick.steps`) and `WriteStep.run`
+(`scripts.tick.steps.tasks`) build it on every pass with
+`scripts.tick.steps.declared_read` over
+`declared_keys(reads | writes)`; no setting turns it off. A refused read raises
+`scripts.tick.steps.UndeclaredRead`:
+
+```text
+UndeclaredRead: step <name> reads pass value <key> it does not declare
+```
+
+`declared_keys` takes the key of every `pass:<key>` and `hook:<key>` domain the
+step names and adds `raised`, the [held exception](#exceptions), so every step
+may read `raised` without declaring it. The reader answers a key in this order:
+
+| Read | Answer |
+| --- | --- |
+| `get("tools")`, `get("deadline")` | The pass tools and the step deadline, with no check |
+| `get("box")`, or a key whose value is a `PassBox`, such as the wrapper's `judging` box | A `DeclaredBox` view of that box |
+| A key in `BOX_KEYS` the step does not declare | Refused, whether or not a step stored it yet |
+| Any other key | The value the pass view holds under it, with no check: `slug`, `store`, `ledger`, `runtime`, `now_ms`, and a plain dictionary under any key outside `BOX_KEYS` |
+
+`BOX_KEYS` holds the thirteen values steps and site hooks store: `agents`,
+`config`, `count`, `doc`, `finished`, `found`, `judged`, `live`,
+`phase changed`, `rows`, `sleeping`, `stop` and `view`. The `DeclaredBox` view:
+
+- refuses `view[<key>]`, `<key> in view` and `view.get(<key>)` when the step
+  does not declare the key and the key is in `BOX_KEYS` or is stored in the
+  box, so a key outside `BOX_KEYS` is guarded from the moment a step stores it;
+- raises `Left`, a `KeyError`, for a declared key the box does not hold, so
+  `view.get(<key>, <default>)` returns the default;
+- lists and counts only the declared keys the box holds;
+- passes `view[<key>] = <value>` and `del view[<key>]` through to the box with
+  no check.
+
+Some values are stored by a site hook rather than a step: the
+`scripts.swarm.cli` wrapper hooks store `agents`, `config`, `count`, `doc`,
+`rows` and `view`. A step that reads one declares `hook_domains("<key>")`, the
+domain `hook:<key>`, in its `reads`, as `urgent hold` and the other
+`wrapper phases` steps do with `reads=hook_domains("doc")`. The reader counts a
+`hook:<key>` domain exactly as it counts `pass:<key>`: either one opens
+`<key>`. No step writes a `hook:<key>` domain, and the pass edges test below
+grades only `pass:<key>` declarations. Each site hook declares the domains it
+reads and writes for its site in `scripts.swarm.cli.WRAPPER_HOOK_KEYS` and
+`scripts.tick.sites.TICK_HOOK_KEYS`. A live site hook reads the box itself
+rather than a `DeclaredBox` view, so `UndeclaredRead` never names one; a
+separate runtime guard checks its reads, described under
+[Site hook reads](#site-hook-reads).
+
+To clear a refusal, declare the key the message names on the step it names:
+
+| The value is stored by | Add to the step |
+| --- | --- |
+| Another step | `pass_domain("<key>")` in `reads`, and that writer, or a step that needs it, in `needs` |
+| The step itself | `pass_domain("<key>")` in `writes` |
+| A site hook | `hook_domains("<key>")` in `reads` |
+
+A step that stores a value under a new key also adds the key to `BOX_KEYS`:
+`test_the_box_keys_are_the_values_steps_and_hooks_declare_writing` fails until
+`BOX_KEYS` equals the keys all steps and site hooks write.
+
+The refusal is an exception raised from the step's call. A step whose call is
+wrapped to hold its exception through `scripts.tick.steps.hold`, by
+`tasks.held`, `host.held`, the master steps' `_held` or the `observe` group's
+`_run`, holds it like any other exception, as described under
+[Exceptions](#exceptions): the step returns no actions and the tick raises it
+from the group site. `test_a_planted_undeclared_read_is_named` shows it for
+`verify`, wrapped by `_run`: with `pass:rows` removed from its reads, a replay
+of `running` through `tick` raises the `UndeclaredRead` for `verify` and
+`rows`.
+
+| Test | What it holds |
+| --- | --- |
+| `tests/tick/test_declared_reads.py` | The refusal by name for a stored value and for one no step stored yet; declared step and hook values and plain pass state reading through; the view rules above; a `PassBox` in the pass state guarded and a plain dictionary not; a `WriteStep` reading what its `reads` and `writes` declare; every site hook declaring its keys; every `hook:<key>` a step reads written by a site hook at or before the step's site; `BOX_KEYS` equal to the keys steps and site hooks declare writing |
+| `test_recorded_passes_read_only_declared_values` in `tests/swarm/tick_scenarios/test_characterisation.py` | Every scenario through both entry points with each site hook reading a `DeclaredBox` named `hook <site>` over the domains its site declares: no hook read refused, and no hook storing a key its writes do not declare |
+| `tests/tick/test_pass_edges.py` | Every scenario replayed through both entry points with the reader in place, so a refused read in a held step fails that scenario's case with the `UndeclaredRead`; see [The pass edges test](#the-pass-edges-test) |
+
+The feature map entry `swarm-tick-declared-reads` links this behaviour to the
+first two rows; the pass edges tests belong to the entry
+`swarm-tick-pass-edges`. The refusal was delivered by
+[pull request 10541](https://github.com/the-cloud-clockwork/agentihooks/pull/10541).
+
+#### Site hook reads
+
+`scripts.tick.hook_reads` guards the pass box reads of the live site hooks.
+`TickSites.hooks` (`scripts.tick.sites`) and the wrapper's `hooks`
+(`scripts.swarm.cli`) build their hooks on every pass through
+`hook_reads.guarded`, with the box keys each site may read:
+
+| Map | Site | Keys its hook may read |
+| --- | --- | --- |
+| `scripts.tick.sites.TICK_HOOK_READS` | `agents` | `config`, `doc`, `rows` |
+| `scripts.tick.sites.TICK_HOOK_READS` | `tasks` | `config` |
+| `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper relay` | `judged` |
+| `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper view` | `agents` |
+
+A site missing from its map may read no key. That includes `wrapper phases`,
+whose hook stores the pass state under `doc` and then reads `doc` back to
+record the open fixer branches for the panic sweep, so every pass that reaches
+that read logs `site hook wrapper phases read pass box doc without declaring it`
+under `observe` and raises from the hook under `enforce`. These maps hold plain
+keys, not domains. While a guarded hook runs on its
+thread, `PassBox.__getitem__`, `PassBox.get` and `PassBox.__contains__` pass the
+key to `hook_reads.seen`; listing, counting and copying the box are not
+checked, and neither is a read made outside a hook, such as a step's read
+through its `DeclaredBox` view. A read of a key the site does not list is
+handled by the mode `AGENTIHOOKS_TICK_HOOK_READS` names in the environment of
+the process that runs the pass, read again each time a pass builds its hooks:
+
+| Mode | An undeclared read |
+| --- | --- |
+| `observe`, the default, also used for an unset or unknown value | Logs a warning on the `scripts.tick.hook_reads` logger and returns its answer |
+| `enforce` | Raises `scripts.tick.hook_reads.UndeclaredHookRead`, a `RuntimeError`, from the hook |
+| `off` | Not checked: `guarded` returns the hooks unwrapped |
+
+The value is stripped and lowercased, so `ENFORCE ` selects `enforce`. The
+warning and the exception carry the same text:
+
+```text
+site hook <site> read pass box <key> without declaring it
+```
+
+To clear it, add the key to that site's set in `TICK_HOOK_READS` or
+`WRAPPER_HOOK_READS`, and update
+`test_each_site_hook_declares_exactly_the_box_keys_it_reads`, which pins both
+maps. When the key is one a step or another hook stores, also add its domain to
+the site's reads in `TICK_HOOK_KEYS` or `WRAPPER_HOOK_KEYS`:
+`test_recorded_passes_read_only_declared_values` reads each hook through a
+`DeclaredBox` over those domains.
+
+`tests/tick/test_hook_reads.py` holds the observe warning for a tick site hook,
+the enforce exception for a wrapper site hook, the real tick `agents` and
+`tasks` hooks and wrapper `relay` and `view` hooks reading only their declared
+keys under `enforce`, both maps, `off` returning the hooks
+unwrapped, an unset or unknown value observing, reads outside a hook or after
+it ends going unchecked, and each of the three keyed reads reaching the guard.
+The feature map entry `swarm-tick-hook-reads` links them. The guard was
+delivered by
+[pull request 10555](https://github.com/the-cloud-clockwork/agentihooks/pull/10555).
+
+#### The pass edges test
+
+`tests/tick/test_pass_edges.py` holds these declarations to what the steps do.
+It replays tick scenarios through `scripts.swarm.tick.tick` and
+`scripts.swarm.cli.run_tick` with a recording pass box and recording pass
+views, records which step stored and read each key, and names every gap:
 
 - `<step> reads pass <key> without declaring it`
 - `<step> reads pass <key> without needing its writer [<writers>]`
 - `<step> writes pass <key> without declaring it`
 
-It also fails when a registered step never ran in any scenario. The feature map
-entry `swarm-tick-pass-edges` links this behavior to the test; the delivered
-change is
-[pull request 9623](https://github.com/the-cloud-clockwork/agentihooks/pull/9623).
+A read counts as needing its writer when the writer is the reader itself or is
+on the reader's `needs` path in `registry.waves()`; when the recorder saw no
+writer, any step that declares the key in its `writes` counts. Reads and writes made by
+the `scripts.swarm.cli` wrapper's site hooks are left out; they belong to no
+step.
+
+The check runs as one test case per scenario plus one covering test, so each
+replay stays far below the per test time limit of the CI unit jobs:
+
+| Test | Replays | Asserts |
+| --- | --- | --- |
+| `test_every_pass_box_read_is_declared_with_a_need_on_its_writer[<scenario>]` | One scenario of `SCENARIOS` through both entry points, with its own recorder | No gap in that scenario's reads and writes |
+| `test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value` | Every scenario in `COVERING` through both entry points, into one recorder | Every registered step ran; every value in `WRITTEN` was stored, and every one but `judged` was read |
+| `test_a_planted_undeclared_read_is_named` | `running` through `tick`, with `pass:rows` removed from the reads of `verify` | The step's pass box view raises `UndeclaredRead: step verify reads pass value rows it does not declare` |
+| `test_a_planted_missing_need_is_named` | No scenario; one recorded read of `found` by `bottleneck status` | Both the undeclared read and the missing need on `health findings` are named |
+
+`SCENARIOS` comes from `tests/swarm/tick_scenarios/test_characterisation.py`,
+the same tuple the golden replay uses: `running`, `second-pass`, `paused`,
+`stopping`, `stopped`, `drained`, `finished`, `lost`, `orphan`,
+`failed-spawn`, `full-capacity`, `dependency`, `interval`, `interval-slow` and
+`hive-roll`. The scenario name is the case id, so the CI log names the failing
+scenario, for example
+`tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer[hive-roll]`,
+and its assertion lists one gap per line under a count:
+
+```text
+AssertionError: <n> broken of <reads> pass box reads and <writes> writes:
+<step> reads pass <key> without declaring it
+<step> reads pass <key> without needing its writer [<writers>]
+```
+
+The covering test fails with `<n> registered steps never ran: [<names>]` when
+the `COVERING` scenarios do not run a step, and with a set comparison when a
+`WRITTEN` value is never stored or read. Three module constants set what it
+grades:
+
+| Constant | Value | Change it when |
+| --- | --- | --- |
+| `COVERING` | `("running",)` | A new step runs in no `COVERING` scenario: add a scenario that runs it. Each scenario added here adds its replay time to this one test |
+| `WRITTEN` | `config`, `doc`, `rows`, `sleeping`, `agents`, `view`, `judged`, `live`, `found` | A step stores a new pass value that a covering scenario stores: add it so the test fails when no covering scenario stores or reads it |
+| `KEYS` | `WRITTEN` plus `finished` and `stop` | A step reads a new pass value through its pass view: add it, because a pass view read is recorded only for a key listed here. A read through the pass box itself, not a pass view, is recorded for any key a step stored earlier in the replay |
+
+A scenario added to `SCENARIOS` gets its own case with no change to this test.
+A per scenario case does not check that every step ran; only the covering test
+does, and only over `COVERING`.
+[Probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130)
+was a dispatch on a throwaway branch whose probe cases fail on purpose to print
+what they recorded. In it, every scenario on its own had no gap, and `running`
+alone ran every registered step, stored all nine `WRITTEN` values and read all
+of them but `judged`.
+
+The `unit` job (the sharded full suite) and the `unit-selected` job (the test
+files a pull request selects) of the Tests workflow run pytest with these per
+test limits:
+
+```text
+--timeout=60 --timeout-method=thread -o faulthandler_timeout=45
+```
+
+At 45 seconds faulthandler prints the stack of every thread and the test runs
+on. At 60 seconds pytest-timeout prints the stacks again and ends the worker
+process, so pytest-xdist reports the worker crashed and the test fails.
+`pyproject.toml` sets no per test limit, so a local run has none.
+
+Before the split, one test replayed all fifteen scenarios through both entry
+points, thirty replays. It took 15.4 seconds on a quiet runner, but on
+15 November merge group
+[Tests run 43724674267](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43724674267)
+(job `unit (3.12, 11)`) lost workers `gw4` and `gw2` to the 60 second limit
+while each was still finishing steps, and a third attempt of the same code
+passed in 40.6 seconds. After the split, in the `unit-selected` jobs of
+[Tests run 43785461519](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785461519),
+the slowest case, `interval-slow`, took 6.49 seconds, then `hive-roll`
+5.46 seconds and `second-pass` 3.38 seconds; every other case took under
+3.1 seconds and the covering test 1.78 seconds.
+
+The feature map entry `swarm-tick-pass-edges` links this behavior to the four
+tests. The check was delivered by
+[pull request 9623](https://github.com/the-cloud-clockwork/agentihooks/pull/9623)
+and split per scenario by
+[pull request 11367](https://github.com/the-cloud-clockwork/agentihooks/pull/11367).
 
 ## Groups and their sites
 
@@ -915,13 +1209,13 @@ and placement steps are in bold; the others hold steps from other changes.
 | 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 6 | `drained resume` | After the masters | sleeping, drained resume |
 | 7 | `tasks` | After `drained resume` | orphans |
-| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane) |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane), autoscaler alert (slow lane) |
 | 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
 | 10 | `place` | First line inside the placing lock | |
 | 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
 | 12 | **`placement acks`** | After `placement notices`, inside the placing lock | codex hook order |
 | 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
-| 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat |
+| 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat, expert seats |
 | 15 | **`placement`** | Last site inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy |
 | 16 | `master watch` | After the placing lock | night watch, master alarm |
 | 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
@@ -956,8 +1250,9 @@ the step checks it and returns no actions when it does not hold.
 | `placement` | bottleneck remedy | `bottleneck_remedy.step` |
 
 The placement sites launch only seats: the `master seats` steps place the
-master through `seat_spawn.place` and the `dispatch seat` step launches the
-dispatcher seat. A new lane agent comes from the hub: hives pull lane work and
+master through `seat_spawn.place`, the `dispatch seat` step launches the
+dispatcher seat and the `expert seats` step keeps one expert on the seat of
+each running [expert lineage](expert-lineage.md). A new lane agent comes from the hub: hives pull lane work and
 the hub admits each launch, see
 [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub).
 The one tick step that starts a lane agent is `recover outages` in the
@@ -994,7 +1289,9 @@ working with no import change.
 | `skip_refused(function, *args)` | Calls `function` through `timing.call`. A `LedgerRefused` or a Redis read timeout prints the reason to stderr and returns the single action `skipped <module>.<name>: the ledger refused its write` or `skipped <module>.<name>: its Redis read timed out` instead of raising |
 | `skip_dropped(function, *args)` | Calls `function` through `timing.call` up to twice on a Redis connection drop or timeout, returning its actions or `[]`. Two failures return `skipped <module>.<name>: its Redis connection dropped or timed out twice` |
 | `_operator_line(item)` | True for an inbox item from `operator` that is not an fyi control notice (a ref starting with `control_notifications.CONTROL_REF`); the tick wakes a swarm on such a line |
-| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened` or an empty string |
+| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened`, `, task <id> left to the merge of <url>` when the agent waited on its own pull request's merge, `DROP_REFUSED` when the store refused the drop, or an empty string |
+| `_stop_hive(slug, store, agent, reason, dropped)` | Unless `dropped`, the text `_drop` returned, is `DROP_REFUSED` (`, the store refused its drop, retrying next pass`), sends the execution stop naming `reason` to the hive that recorded the agent's start through `scripts.hub.reconciler.stop_dropped`, which keeps a stop the bus refused for the next `reap` pass. Returns `dropped`. See [Retiring a hub admitted agent](../pillars/hives.md#retiring-a-hub-admitted-agent) |
+| `_retire_or_stop(slug, runtime, agent, reason)` | True when the runtime retires the agent with its task's scratch homes, or, when it cannot, when the execution stop naming `reason` answers `sent` or `pending`. The `reap` step's idle retirement and the `verify` step's mismatch retirement call it before `_drop` |
 | `_collected(slug, store, ledger, rows, agent)` | For a master, saves the task ids of `rows` under the swarm's `master-retired-tasks` key, then calls `_drop` |
 | `_still_held(row, expected)` | True when the row is active and its `claimed_by` and `claim_generation` (missing counts as 0) match `expected`; a missing row is not held |
 | `_follow(slug, store, runtime, agent, pid)` | Returns an `(agent, actions)` tuple. With no process id: `(agent, [])`. Otherwise it calls `_rebind`: when that finds the pane, `(rebound agent, ["rebound <agent> to its resumed process <pid> in pane <pane>"])`; when it does not, `(None, ["held <agent> until one pane holds its resumed process <pid>"])` |
@@ -1455,7 +1752,7 @@ The delivered proof and limitations are recorded in
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `start`, `pass setup` and `observe` steps in their groups and orders, the stopped branch endings, the observe calls with the pass state, and a raising step holding its exception and stopping the later steps |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
-| `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
+| `tests/tick/test_pass_edges.py` | In each tick scenario on its own, one case per scenario, every pass box read is declared with a need on its writer and every pass box write is declared; the `COVERING` scenarios run every registered step and store and read every `WRITTEN` value; a planted undeclared read and a planted missing need are named. See [The pass edges test](#the-pass-edges-test) |
 | `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
 | `tests/tick/steps/test_common.py` | Each of the eleven helpers is defined in `scripts.tick.steps.common` and is the same object on `scripts.swarm.tick`; a patch on the tick module reaches `_follow`; the held, owner, ended, operator line, reopen, rebind, follow, skip, drop and collected behavior described under [Shared helpers](#shared-helpers-scriptstickstepscommon) |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
@@ -1478,6 +1775,13 @@ The delivered proof and limitations are recorded in
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
+| `test_pass_edges` names `reads pass <key> without needing its writer [<writers>]` | No listed writer is on the reader's `needs` path; add one of them, or a step that needs it, to the reader's `needs` |
+| `test_pass_edges` names `writes pass <key> without declaring it` | The step stores that key in the pass box; add `pass_domain("<key>")` to its `writes` |
+| `UndeclaredRead: step <name> reads pass value <key> it does not declare` from a tick pass or a test | Step `<name>` read `<key>` through its reader or its box view with no `pass:<key>` or `hook:<key>` domain in its `reads` or `writes`; declare it as shown under [Undeclared pass reads](#undeclared-pass-reads). A `<name>` of `hook <site>` comes from `test_recorded_passes_read_only_declared_values`: add the domain to that site's reads in `WRAPPER_HOOK_KEYS` or `TICK_HOOK_KEYS` |
+| `site hook <site> read pass box <key> without declaring it` as a warning from the `scripts.tick.hook_reads` logger | The live hook of `<site>` read `<key>` outside its set in `TICK_HOOK_READS` or `WRAPPER_HOOK_READS`; the read still answered. Declare the key as shown under [Site hook reads](#site-hook-reads). The line naming `wrapper phases` and `doc` comes from the phases hook's own read of the pass state it stored, described in that section |
+| `UndeclaredHookRead: site hook <site> read pass box <key> without declaring it` | The same read with `AGENTIHOOKS_TICK_HOOK_READS=enforce`; declare the key as shown under [Site hook reads](#site-hook-reads) |
+| `<n> registered steps never ran: [<names>]` from the covering pass edges test | No scenario in `COVERING` runs the named steps; add a scenario that runs them to `COVERING`. See [The pass edges test](#the-pass-edges-test) |
+| A `test_pass_edges` case prints a thread dump at 45 seconds or its worker crashes at 60 seconds in CI | Each case replays one scenario, named in its id, and took at most 6.49 seconds when the split landed; that scenario's replay has slowed. A stack dump is one sample of where each thread was, not proof of a hang |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |
@@ -1491,7 +1795,7 @@ The delivered proof and limitations are recorded in
 | `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
-| No lane agent launches after the placement sites run | Expected: the `master seats` and `dispatch seat` steps launch only the master and the dispatcher seat, and `recover outages` only restarts a dead agent from its handoff. New lane agents come from hub offers that hives take and the hub admits; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
+| No lane agent launches after the placement sites run | Expected: the `master seats` and `dispatch seat` steps launch only the master, the dispatcher seat and the expert of each running expert lineage, and `recover outages` only restarts a dead agent from its handoff. New lane agents come from hub offers that hives take and the hub admits; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |

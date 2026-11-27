@@ -30,11 +30,13 @@ python3 tests/chart_hive_rollout.py
 python3 tests/chart_hive_only.py "$chart"
 python3 tests/chart_hub.py "$chart"
 python3 tests/chart_ledger_rollout.py "$chart"
+python3 tests/chart_api.py "$chart"
 python3 tests/chart_controller_rollout.py "$chart"
 python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 python3 tests/chart_hive_capabilities.py "$chart"
+python3 tests/chart_hive_pinned.py "$chart"
 
 finish() {
   status=$?
@@ -46,7 +48,7 @@ finish() {
   if [[ -n $terminal ]]; then
     wait "$terminal" || true
   fi
-  rm -f "$load_lock" "${ledger_values:-}"
+  rm -f "$load_lock" "${ledger_values:-}" || true
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -54,7 +56,7 @@ finish() {
     wait "$drain_proof" || true
   fi
   if [[ -n $ca_dir ]]; then
-    rm -rf "$ca_dir"
+    rm -rf "$ca_dir" || true
   fi
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
@@ -99,7 +101,7 @@ keep_layers() {
   touch "$KIND_LAYER_CACHE/complete"
 }
 (
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t terminal_layers < <(layers terminal)
   docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
@@ -193,7 +195,8 @@ if [[ $rendered != *":dev@$digest"* ]]; then
   printf 'the chart did not render the image updater tag dev@%s\n' "$digest" >&2
   exit 1
 fi
-for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
+sha_tag="$(printf 'b%.0s' $(seq 40))"
+for tag in "$digest" "@$digest" "$sha_tag"; do
   refusal="$(helm template "$release" "$chart" --set image.tag="$tag" 2>&1 >/dev/null || true)"
   if [[ $refusal != *"must be a floating tag"* ]]; then
     printf 'the chart did not refuse image.tag %s as a non floating tag: %s\n' "$tag" "$refusal" >&2
@@ -339,7 +342,7 @@ refuse_workers() {
     exit 1
   fi
 }
-for tag in "dev@$digest" "$digest" "$(printf 'b%.0s' $(seq 40))"; do
+for tag in "dev@$digest" "$digest" "$sha_tag"; do
   refuse_workers "controller.workers.imageTag must be a floating tag" --set controller.workers.imageTag="$tag"
 done
 for setting in profile brain; do
@@ -498,7 +501,7 @@ read_lease() {
 }
 owner_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("owner", ""))' "$1"; }
 
-kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HIVE="$hive" python - <<'LEASE'
+kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HIVE="$hive" python - <<'LEASE' &
 import dataclasses, json, os, sys, time
 
 from scripts.swarm import lease
@@ -531,6 +534,17 @@ if not taken:
     sys.exit(f"the controller never renewed the lease for {slug}; last read: {json.dumps(renewed)}")
 print(f"controller lease renewed: {json.dumps(renewed)}")
 LEASE
+lease_wait=$!
+while kill -0 "$lease_wait" 2>/dev/null; do
+  restarts="$(kubectl get pods "${controller[@]}" --field-selector=status.phase=Running -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' || true)"
+  if [[ -n $restarts && $restarts != 0 ]]; then
+    printf 'the controller restarted %s times while the proof waited for its lease\n' "$restarts" >&2
+    kill "$lease_wait"
+    break
+  fi
+  sleep 0.5
+done &
+wait "$lease_wait"
 
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $restarts != 0 ]]; then
@@ -573,7 +587,7 @@ frozen_runtime_state() {
     | python3 -c 'import json, sys; found = json.load(sys.stdin).get("containers") or []; print(found[0]["state"] if found else "REMOVED")'
 }
 confirmed=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
   current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
   if [[ $current != "$frozen_container" ]]; then
@@ -607,7 +621,7 @@ assert store.redis.get(store.key(slug, "tick-lock")) != token
 print("released only the captured tick lock after its frozen container terminated")
 RELEASE
 retaken=""
-for _ in $(seq 180); do
+for _ in {1..180}; do
   held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" ]]; then
     retaken="$held"
@@ -633,7 +647,7 @@ helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${database[@]}
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
 built=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   built="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: built the Kubernetes runtime for $slug" || true)"
   [[ -n $built ]] && break
   sleep 1
@@ -653,7 +667,26 @@ for probe in startup liveness readiness; do
     printf 'the controller %s HTTP probe has path %s port %s host %s\n' "$probe" "$wired" "$port" "$host" >&2
     exit 1
   fi
-  kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.request; request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]}); print(urllib.request.urlopen(request, timeout=8).read().decode())'
+  deadline=$((SECONDS + 60))
+  passed=false
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    if kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.error, urllib.request
+request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]})
+try:
+    print(urllib.request.urlopen(request, timeout=8).read().decode())
+except urllib.error.HTTPError as error:
+    print(error.read().decode(), flush=True)
+    raise'; then
+      passed=true
+      break
+    fi
+    [[ "$probe" == readiness ]] || break
+    sleep 1
+  done
+  if [[ "$passed" != true || "$SECONDS" -ge "$deadline" ]]; then
+    printf 'controller %s HTTP probe failed\n' "$probe" >&2
+    exit 1
+  fi
   printf 'controller %s HTTP probe passed\n' "$probe"
 done
 kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m
@@ -970,7 +1003,7 @@ while read -r line; do
   fi
   printf 'the %s launch record names the session exporter: %s\n' "$profile" "$recorded"
   phase=""
-  for _ in $(seq 120); do
+  for _ in {1..120}; do
     phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
     [[ $phase == Succeeded || $phase == Failed ]] && break
     sleep 1
@@ -998,7 +1031,7 @@ while read -r line; do
   printf 'the %s worker exporter exported the agent session and its supervisor reported the checkpoint complete\n' "$profile"
   kubectl delete pod "$worker_pod" --wait --timeout 1m
   collected=""
-  for _ in $(seq 60); do
+  for _ in {1..60}; do
     remaining="$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)"
     if [[ -z $remaining ]]; then
       collected=yes
@@ -1017,7 +1050,7 @@ node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" anton.io/capacity-type=spot --overwrite
 kubectl rollout restart deployment "$release-controller"
 placement=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   placement="$(kubectl get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name} {.message}{"\n"}{end}' | grep "$release-controller" || true)"
   [[ $placement == *"node affinity"* ]] && break
   sleep 1
@@ -1043,7 +1076,7 @@ if [[ $calm != "0" ]]; then
 fi
 kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.incidents import PRESSURE_OFF_KEY; from scripts.swarm.store import connect; store = connect(); store.update('$slug', memory_per_agent_mb=10**9); store.redis.delete(store.key('$slug', PRESSURE_OFF_KEY)); print('simulated host pressure: one agent now needs more memory than the node has')"
 pressure=""
-for _ in $(seq 120); do
+for _ in {1..120}; do
   pressure="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOST="$host" python - <<'EOF'
 import json
 import os
@@ -1092,7 +1125,7 @@ python3 -c 'import json, sys; print(json.dumps({"clients": {"namespace": "defaul
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 kept=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   kept="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: kept saved herdr machines for $slug on start" || true)"
   [[ -n $kept ]] && break
   sleep 1

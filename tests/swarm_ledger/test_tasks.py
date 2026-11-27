@@ -294,6 +294,54 @@ class OwnershipOperationContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "^if_match claim_generation must be a nonnegative integer$"):
                 ledger_tasks.check(change)
 
+    def test_an_update_advances_an_open_unclaimed_claim_generation_by_one_under_its_guard(self) -> None:
+        from scripts.swarm_ledger import ledger_tasks
+
+        doc = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        ctx = core.Context(doc["_meta"], 1_000, SLUG)
+        task = doc["tasks"][0]
+        advance = op(
+            "task_update",
+            1,
+            item="tasks/t1",
+            fields={"claim_generation": 1},
+            if_state=["open"],
+            if_match={"claimed_by": "", "claim_generation": 0},
+        )
+        ledger_tasks.check(advance)
+        self.assertTrue(ledger_tasks.apply(doc, advance, ctx))
+        self.assertEqual((task["state"], task.get("claimed_by", ""), task["claim_generation"]), ("open", "", 1))
+        self.assertTrue(ledger_tasks.apply(doc, {**advance, "id": "task_update-2"}, ctx))
+        self.assertEqual(task["claim_generation"], 1)
+
+    def test_the_operation_validator_refuses_a_claim_generation_not_one_above_its_guard(self) -> None:
+        from scripts.swarm_ledger import ledger_tasks
+
+        unclaimed = {"claimed_by": "", "claim_generation": 0}
+        for value, state, expected in (
+            (2, ["open"], unclaimed),
+            (0, ["open"], unclaimed),
+            (True, ["open"], unclaimed),
+            (1.0, ["open"], unclaimed),
+            ("1", ["open"], unclaimed),
+            (1, ["open"], {"claimed_by": ""}),
+            (1, ["open"], {"claim_generation": 0}),
+            (1, ["open"], {"claimed_by": "engineer-1", "claim_generation": 0}),
+            (1, None, unclaimed),
+            (1, ["open", "claimed"], unclaimed),
+            (1, ["open"], None),
+        ):
+            guard = {} if state is None else {"if_state": state}
+            matched = {} if expected is None else {"if_match": expected}
+            change = op("task_update", 1, item="tasks/t1", fields={"claim_generation": value}, **guard, **matched)
+            with self.assertRaises(ValueError) as raised:
+                ledger_tasks.check(change)
+            self.assertEqual(
+                str(raised.exception),
+                "claim_generation may be set only on a task if_state names open and if_match names unclaimed, "
+                "to one above the claim_generation if_match names",
+            )
+
     def test_the_operation_guard_matches_size_and_group_members_with_legacy_defaults(self) -> None:
         from scripts.swarm_ledger import ledger_tasks
 

@@ -14,7 +14,7 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_remains_required_during_promotion_trigger_rollout():
+def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     workflow = _workflow()
     event = workflow[True]["pull_request"]
     assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
@@ -23,7 +23,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -40,10 +40,19 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
 
 
-def test_sonar_gives_dev_push_runs_thirty_minutes_and_keeps_fifteen_elsewhere():
+@pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
+def test_sonar_runs_when_test_count_is_skipped_or_failed() -> None:
+    """A status function in a job condition drops GitHub's implicit success check on its needs."""
+    condition = _workflow()["jobs"]["sonar"]["if"]
+    assert condition.startswith("${{ !cancelled() && ")
+    assert "test-count" not in condition
+    assert "collect" not in condition
+
+
+def test_sonar_gives_dev_push_runs_ninety_minutes_and_keeps_sixty_elsewhere() -> None:
     assert (
         _workflow()["jobs"]["sonar"]["timeout-minutes"]
-        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 30 || 15 }}"
+        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}"
     )
 
 
@@ -227,6 +236,18 @@ def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
     assert properties["sonar.sources"] == "."
     assert "tests/**" in properties["sonar.exclusions"].split(",")
     assert ".git/**" in properties["sonar.exclusions"].split(",")
+
+
+def test_sonar_skips_the_coverage_files_its_job_writes_into_the_checkout() -> None:
+    properties = dict(
+        line.split("=", 1)
+        for line in (_ROOT / "sonar-project.properties").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    excluded = set(properties["sonar.exclusions"].split(","))
+    assert {"coverage.xml", "lcov.info", "sonar-scope.txt", ".coverage-shards/**"} <= excluded
+    assert properties["sonar.python.coverage.reportPaths"] == "coverage.xml"
+    assert properties["sonar.javascript.lcov.reportPaths"] == "lcov.info"
 
 
 @pytest.mark.parametrize(

@@ -4,52 +4,29 @@ path every swarm, agent and service client reads and writes a ledger through; th
 import io
 import json
 import logging
+import sys
+import time
 import urllib.error
-from collections.abc import Callable, Generator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from email.message import Message
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
-from scripts.swarm_ledger.api import client as api_client
+from scripts.swarm import timing
+from scripts.swarm_ledger import request_metrics
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
 from scripts.swarm_ledger.api import task_list
-from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.api_service import Writes
+from scripts.tick.adapters.writer_client import ACTING, acting, client, decoded, principal, written
 
-__all__ = ["acting", "client", "exchanged", "principal", "request", "upload"]
+__all__ = ["ACTING", "acting", "client", "exchanged", "principal", "request", "upload"]
 
-ACTING: ContextVar[str | None] = ContextVar("ledger_acting", default=None)
 routes: Any = api_routes
 resources: Any = api_resources
-writer_header: Any = cast(Any, api_client).writer_header
-
-
-def principal() -> str:
-    """The caller the route code judges a call by: the name set by ``acting``, else a pinned agent by its name, else
-    the swarm's own service, the empty name."""
-    from scripts.gates import Who
-
-    named = ACTING.get()
-    if named is not None:
-        return named
-    who: Any = cast(Any, Who).from_env()
-    return str(who.name) if who.pinned else ""
-
-
-@contextmanager
-def acting(name: str) -> Generator[None]:
-    """Judge every ledger call inside as ``name``; the empty name is the swarm's own service, as a tick pass."""
-    token = ACTING.set(name)
-    try:
-        yield
-    finally:
-        ACTING.reset(token)
 
 
 def services() -> Services:
@@ -130,27 +107,63 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return settled(exchange, path, route)
 
 
-def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
+def replied(
+    slug: str, path: str, payload: dict[str, Any] | None, extra: Mapping[str, str]
+) -> tuple[Message, int, bytes]:
+    """The headers one ledger API request is sent with in process, ``extra`` beside its body headers, and the status
+    and body the route code answers it with for the caller ``principal`` names."""
     encoded = b"" if payload is None else json.dumps(payload).encode()
     headers = Message()
     headers["Content-Type"] = "application/json"
     headers["Content-Length"] = str(len(encoded))
-    extra: dict[str, str] = writer_header() if path == "operations" else {}
     for name, value in extra.items():
         headers[name] = value
     url = f"/api/v1/ledgers/{slug}/{path}"
     exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
     status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
-    if status >= 400:
-        raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
-    reply: dict[str, Any] = json.loads(body)
-    return reply
+    return headers, status, body
 
 
-def client(base: str, timeout: float) -> ResourceClient:
-    """A ledger API client whose requests run the ledger server's route code in this process."""
-    return ResourceClient(base, {}, timeout, transport=request)
+def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
+    headers, status, body = replied(slug, path, payload, written(path))
+    return decoded(slug, path, headers, status, body)
+
+
+def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``journaled`` does, timed through request metrics as the ledger
+    server times its requests."""
+    with request_metrics.command("GET" if payload is None else "POST", f"/api/v1/ledgers/{slug}/{path}"):
+        return journaled(slug, path, payload)
+
+
+def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``answered`` does; inside a tick pass, also journal one
+    ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
+    current = timing.PASS.get()
+    if current is None:
+        return answered(slug, path, payload)
+    started = time.monotonic()
+    outcome = "error"
+    try:
+        reply = answered(slug, path, payload)
+        outcome = "ok"
+        return reply
+    except urllib.error.HTTPError as exc:
+        outcome = str(exc.code)
+        raise
+    finally:
+        line = {
+            "event": "swarm_tick_ledger_call",
+            "slug": timing.SWARM.get(),
+            "pass_id": current["pass_id"],
+            "ledger": slug,
+            "method": "GET" if payload is None else "POST",
+            "path": urlsplit(path).path,
+            "outcome": outcome,
+            "wall_s": time.monotonic() - started,
+        }
+        print(json.dumps(line), file=sys.stderr)
 
 
 def upload(slug: str, route: str, data: bytes, headers: Mapping[str, str]) -> dict[str, Any]:

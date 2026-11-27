@@ -1,0 +1,13 @@
+rules:
+  - id: ci-stage-budget-direct-table-read
+    languages: [python]
+    severity: ERROR
+    message: Use the collected stage budget lookup so findings and metrics compare each stage with the allowance used by CI gates.
+    paths:
+      include:
+        - /scripts/swarm/metrics_ci.py
+        - /scripts/ci_budget/defects.py
+        - ci-stage-budget-direct-table-read.py
+    pattern-either:
+      - pattern: $MODULE.BUDGETS
+      - pattern: from scripts.ci_budget import BUDGETS

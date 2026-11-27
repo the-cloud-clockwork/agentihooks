@@ -7,6 +7,7 @@ import pytest
 from hooks import hook_manager
 from hooks.context import master_question, operator_mode
 from scripts.swarm.health.findings import Finding, master_blocked_on_prompt
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 
@@ -91,12 +92,14 @@ def typed_at(at):
         },
     ],
 )
-def test_unattributed_suggestions_are_denied_without_ledger_writes(master, monkeypatch, question):
+def test_unattributed_suggestions_are_denied_without_ledger_writes(
+    master: Ledger, monkeypatch: pytest.MonkeyPatch, question: dict[str, object]
+) -> None:
     from scripts.swarm import ledger_client
 
     payload = ask(question)
     Path(payload["transcript_path"]).write_text("")
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(master))
     assert hook_manager._operator_question(payload) == operator_mode.question_block("AskUserQuestion", SID)
     assert master.questions == []
 
@@ -171,10 +174,12 @@ def test_unrelated_records_do_not_hide_a_deliberate_question_call(master):
     assert len(master.questions) == 1
 
 
-def test_explicit_priority_commands_pass_the_question_hook_without_automatic_questions(master, monkeypatch):
+def test_explicit_priority_commands_pass_the_question_hook_without_automatic_questions(
+    master: Ledger, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import ledger_client
 
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(master))
     payload = {
         "session_id": SID,
         "tool_name": "Bash",
@@ -348,10 +353,10 @@ def test_a_seated_master_without_swarm_env_moves_under_its_ledger_binding(master
     assert [(slug, by) for slug, _, by, _ in master.questions] == [("rig", "master@rig-1")]
 
 
-def test_the_ledger_client_is_built_when_none_is_given(master, monkeypatch):
+def test_the_ledger_client_is_built_when_none_is_given(master: Ledger, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import ledger_client
 
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(master))
     assert master_question.move(ask(FREEZE), now=NOW)
     assert len(master.questions) == 1
 

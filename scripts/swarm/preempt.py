@@ -9,7 +9,7 @@ from typing import Any
 
 from scripts.inbox import store as inbox_store
 from scripts.swarm import dispatcher, freeze, hash_pages
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -18,7 +18,10 @@ REF = "preempt"
 WAITING = "preempt-waiting"
 ASKED = "preempt-asked"
 VICTIMS = "preempt-victims"
+EPISODE = "preempt-episode"
+RECENT = "preempt-recent-victim"
 ANSWER_MS = 10 * 60_000
+VICTIM_MS = 30 * 60_000
 URGENT = "urgent"
 YIELDED = 0.5
 TEXT = (
@@ -127,16 +130,23 @@ def step(
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):
             waiting.add(task["id"])
-            if task["id"] not in seen or _pending(asked, task["id"], now_ms):
+            if task["id"] not in seen or _pending(redis, store.key(slug, EPISODE, task["id"]), now_ms):
                 continue
             if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
-            victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
+            victim = _victim(
+                [a for a in holders if a.name not in asked and not _recent_victim(slug, store, a.task, now_ms)],
+                rows,
+                doc,
+                graph,
+            )
             if victim is not None and not probe(lane, task):
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
-                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"])
+                redis.set(store.key(slug, EPISODE, task["id"]), now_ms, px=ANSWER_MS)
+                redis.set(store.key(slug, RECENT, victim.task), now_ms, px=VICTIM_MS)
+                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"], now_ms)
     redis.delete(store.key(slug, WAITING))
     if waiting:
         redis.sadd(store.key(slug, WAITING), *waiting)
@@ -144,8 +154,13 @@ def step(
     return actions
 
 
-def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
-    return any(target == task_id and now_ms - at < ANSWER_MS for target, at in map(json.loads, asked.values()))
+def _pending(redis: Any, key: str, now_ms: int) -> bool:
+    at = redis.get(key)
+    return at is not None and now_ms - int(at) < ANSWER_MS
+
+
+def attempted(store: RedisStore, slug: str, task_id: str, now_ms: int) -> None:
+    store.redis.set(store.key(slug, EPISODE, task_id), now_ms, px=ANSWER_MS, xx=True)
 
 
 def _refused(wait, lane, now_ms):
@@ -158,14 +173,21 @@ def take_victim(store, slug: str, name: str) -> bool:
     return bool(store.redis.hdel(store.key(slug, VICTIMS), name))
 
 
+def _recent_victim(slug: str, store: RedisStore, task: str, now_ms: int) -> bool:
+    at = store.redis.get(store.key(slug, RECENT, task))
+    return at is not None and now_ms - int(at) < VICTIM_MS
+
+
 def _victim(holders, rows, doc, graph):
     lower = [a for a in holders if not preferred(rows.get(a.task, {}), doc, graph)]
     return max(lower, key=lambda a: (ledger_rank.order(rows[a.task]), a.started_at), default=None)
 
 
-def _ask(inbox, slug, lane, victim, waiting):
+def _ask(
+    inbox: inbox_store.InboxStore, slug: str, lane: str, victim: AgentRecord, waiting: str, now_ms: int
+) -> list[str]:
     text = TEXT.format(slug=slug, waiting=waiting, lane=lane, task=victim.task)
-    item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{waiting}", task=victim.task)
+    item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{waiting}:{now_ms}", task=victim.task)
     return [f"asked {victim.name} to hand off task {victim.task} for urgent task {waiting} as message {item.id}"]
 
 

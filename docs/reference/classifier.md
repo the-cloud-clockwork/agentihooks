@@ -206,7 +206,7 @@ Sonnet step and takes the picked effort; otherwise the Opus or Sol steps use the
 harness default model, which `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL`
 can name.
 Explicit lane efforts never consult the classifier, planners launch the medium
-default, and a master always launches on the frontier model at high effort for its
+default, and a master always launches on the frontier model at xhigh effort for its
 harness, whatever its lane or the environment names, and records `frontier`.
 Each decision it asks for uses purpose `model-pick` in the classifier log.
 
@@ -220,3 +220,59 @@ Agent records, swarm status and the page carry `model_source` and
 an explicit lane records `lane-default` and an unavailable classifier `band`, both without confidence.
 A running session that reports another model or effort replaces both on the
 record with source `session` and no confidence.
+
+### Lane models on the other harness
+
+An eng or ci lane's `model` is matched to the harness of the agent being launched
+before its effort is read. A Codex agent on a lane fixed to a Claude model, one whose
+name starts with `claude`, `opus`, `sonnet`, `haiku` or `fable`, launches on the
+swarm's Codex model instead, and the lane's effort is kept. A lane with `agent` set to
+`auto` can therefore fix `opus` for its Claude agents and still launch Codex agents:
+
+```bash
+agentihooks swarm <id> set eng-agent=auto eng-model=opus eng-effort=xhigh
+agentihooks swarm <id> set codex-model=gpt-6.1-sol
+```
+
+| Harness | Lane model | Lane effort | Launch |
+|---|---|---|---|
+| codex | `opus` | `xhigh` | the swarm's Codex model at `xhigh`, with no classifier call |
+| codex | `opus` | `auto` | the Codex band on the swarm's Codex model, with no Sonnet step |
+| claude | `opus` | `xhigh` | `opus` at `xhigh` |
+| codex | `gpt-6.1-sol` | `xhigh` | `gpt-6.1-sol` at `xhigh` |
+
+The swarm's Codex model is its `codex-model` setting, `gpt-6.1-sol` unless `swarm set`
+names another model from the Codex catalog. A caller of the pick that passes no swarm
+model gets the Codex launch default: `AGENTIHOOKS_CODEX_MODEL`, else `gpt-6.1-sol`.
+After the pick the spawn runtime makes the same check in both directions: a Codex
+model (`gpt`, `codex`, `o1`, `o3` or `o4`) on a Claude agent, or a Claude model on a
+Codex agent, is replaced with the swarm's model for that harness, including a model
+saved in a handoff. A launch never asks one harness for the other harness's model.
+
+Before this check, the pick returned an explicit lane effort together with the lane's
+model before it looked at the harness. Every Codex engineer on the eng lane, fixed to
+`opus` at `xhigh`, asked Codex for `opus`, failed with model not found before its
+first tool call and never reported its profile canary, while ci lane agents on `auto`
+validated ([#11477](https://github.com/the-cloud-clockwork/agentihooks/issues/11477)).
+Three guards hold the fix: the parametrized
+`test_lane_model_matches_harness_before_explicit_effort_returns` and
+`test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model`
+in `tests/swarm/test_model_pick.py`, the `feature-map.json` entry
+`lane-model-harness-compatibility`, and the Semgrep incident rule
+`lane-model-before-harness`, which fails a `ModelPick` built from the lane in
+`scripts/swarm/model_pick.py` that returns on an explicit effort with no Codex harness
+or `foreign` model check replacing its model before it.
+
+Troubleshooting:
+
+- **A Codex agent exits with model not found before its canary.** Read the agent's
+  model in `agentihooks swarm <id> status`; until the session reports its own, the row
+  shows the launch model. A Claude model there means the host that spawned it runs a
+  release without this check, so roll that host onto the current release. The rendered
+  Codex `config.toml` can name the right model while the launch asks for another, so
+  it does not prove which model the agent requested.
+- **`swarm set codex-model=M` is refused** with `codex_model must be a model listed in
+  the codex catalog`: name a model the Codex catalog lists. A lane model is refused
+  only when no harness catalog lists it (`eng-model must be auto or a model listed in a
+  harness catalog, not <model>`), so a Claude model on a lane that also launches
+  Codex agents is accepted.

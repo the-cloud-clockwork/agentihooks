@@ -4,6 +4,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -257,7 +258,7 @@ class FakeBrowser:
         return self.tab
 
 
-def answered(handler, url=""):
+def answered(handler: Any, url: str = "") -> Any:
     route = FakeRoute(url)
     handler(route)
     return route.answer
@@ -281,11 +282,20 @@ def test_the_harness_serves_each_asset_with_its_type_and_refuses_an_unknown_one(
     }
 
 
-def test_the_harness_streams_the_ledger_as_one_snapshot():
-    assert answered(lambda r: sanity._events(r, {"title": "t"})) == {
-        "body": 'id: c0\nevent: snapshot\ndata: {"ledger": {"title": "t"}, "swarm": null}\n\n',
+def test_the_harness_streams_the_ledger_revision_as_an_open_frame():
+    assert answered(lambda r: sanity._events(r, {"_meta": {"rev": 1}})) == {
+        "body": 'id: c0\nevent: open\ndata: {"rev": 1, "swarm": null}\n\n',
         "content_type": "text/event-stream",
     }
+
+
+def test_the_harness_answers_the_summary_and_an_open_page_from_the_sanity_doc():
+    doc = sanity.ledger_doc([])
+    summary = answered(lambda r: sanity._summary(r, doc))["json"]
+    assert summary["data"]["title"] == "Artifact sanity"
+    assert summary["data"]["sections"]["tasks"] == {"open": 0, "states": {}}
+    page = answered(lambda r: sanity._open_page(r, doc), "http://x/api/v1/ledgers/artifact-sanity/tasks?state=open")
+    assert page["json"] == {"data": [], "revision": "r", "total": 0, "next_offset": None}
 
 
 def test_the_harness_shell_fills_every_placeholder_with_the_sanity_values():
@@ -322,14 +332,19 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
         }"""
     ]
     assert tab.closed
+    assert list(tab.routes)[-1] == "**/artifacts/**"
     assert answered(tab.routes[sanity.PAGE_URL]) == {
         "body": sanity.page_html(),
         "content_type": "text/html; charset=utf-8",
     }
     css = "http://127.0.0.1:9/static/000000000000/css/home.css"
     assert answered(tab.routes["**/static/*/**"], css)["body"] == sanity.assets()["css/home.css"].read_text()
-    snapshot = answered(tab.routes["**/api/v1/ledgers/*/events"])["body"]
-    assert json.loads(snapshot.split("data: ", 1)[1]) == {"ledger": sanity.ledger_doc([]), "swarm": None}
+    events_url = "http://127.0.0.1:9/api/v1/ledgers/artifact-sanity/events"
+    opened = answered(tab.routes["**/api/v1/ledgers/**"], events_url)["body"]
+    assert json.loads(opened.split("data: ", 1)[1]) == {"rev": 1, "swarm": None}
+    summary_url = "http://127.0.0.1:9/api/v1/ledgers/artifact-sanity/summary"
+    summary = answered(tab.routes["**/api/v1/ledgers/**"], summary_url)["json"]
+    assert summary["data"]["title"] == "Artifact sanity"
 
 
 def test_the_pages_option_reads_the_shell_and_every_asset_from_the_given_folder(tmp_path: Path) -> None:
@@ -357,4 +372,64 @@ def test_the_harness_serves_the_page_and_assets_of_the_given_folder(tmp_path: Pa
     assert answered(browser.tab.routes["**/static/*/**"], css) == {
         "body": "head styles",
         "content_type": "text/css; charset=utf-8",
+    }
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_feed_answers_404_for_a_path_it_does_not_recognize() -> None:
+    doc: dict[str, Any] = {"_meta": {"rev": 1}}
+    url = "http://x/api/v1/ledgers/artifact-sanity/unknown"
+    assert answered(lambda r: sanity._feed(r, doc), url) == {"status": 404, "body": "no such route"}
+
+
+@pytest.mark.feature("ledger-summary-read")
+@pytest.mark.parametrize("suffix", ["/swarm", "/swarm/agents"])
+def test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route(suffix: str) -> None:
+    doc: dict[str, Any] = {"_meta": {"rev": 1}}
+    url = f"http://x/api/v1/ledgers/artifact-sanity{suffix}"
+    assert answered(lambda r: sanity._feed(r, doc), url) == {"json": {"data": {}, "collections": []}}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_swarm_route_answers_the_empty_data_and_collections_body() -> None:
+    assert answered(lambda r: sanity._swarm(r)) == {"json": {"data": {}, "collections": []}}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_open_page_names_the_section_from_the_last_path_segment_and_numbers_its_rows() -> None:
+    doc: dict[str, Any] = {"artifacts": [{"id": "a1"}, {"id": "a2"}]}
+    url = "http://x/api/v1/ledgers/artifact-sanity/artifacts?state=open"
+    assert answered(lambda r: sanity._open_page(r, doc), url) == {
+        "json": {
+            "data": [{"id": "a1", "position": 0}, {"id": "a2", "position": 1}],
+            "revision": "r",
+            "total": 2,
+            "next_offset": None,
+        }
+    }
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_summary_reads_each_paged_section_by_its_own_name_and_answers_revision_r() -> None:
+    doc: dict[str, Any] = {
+        "title": "x",
+        "tasks": [{"id": "t1", "state": "blocked"}],
+        "slices": [{"id": "s1"}],
+        "_meta": {"rev": 1},
+    }
+    assert answered(lambda r: sanity._summary(r, doc))["json"] == {
+        "data": {
+            "title": "x",
+            "_meta": {"rev": 1},
+            "sections": {
+                "tasks": {"open": 1, "states": {"blocked": 1}},
+                "phases": {"open": 0, "states": {}},
+                "followups": {"open": 0, "states": {}},
+                "alerts": {"open": 0, "states": {}},
+                "notifications": {"open": 0, "states": {}},
+                "slices": {"open": 1, "states": {"open": 1}},
+                "freezes": {"open": 0, "states": {}},
+            },
+        },
+        "revision": "r",
     }

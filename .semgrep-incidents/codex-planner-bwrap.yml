@@ -1,0 +1,10 @@
+rules:
+  - id: codex-planner-bwrap
+    languages: [generic]
+    severity: ERROR
+    message: The worker Codex artifact lock must include the bubblewrap companion required by the planner sandbox.
+    paths:
+      include:
+        - docker/swarm-node/versions.lock
+        - '**/codex-planner-bwrap*.py'
+    pattern-regex: '(?s)"tools"\s*:\s*\{(?=.*"codex"\s*:)(?!.*"bwrap"\s*:).*'

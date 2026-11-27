@@ -55,7 +55,13 @@ class Ledger(FakeLedger):
 
 
 class Swarm:
-    def __init__(self, pull=GREEN, task=None, live=True, environ=None):
+    def __init__(
+        self,
+        pull: PullRequest = GREEN,
+        task: dict | None = None,
+        live: bool = True,
+        environ: dict[str, str] | None = None,
+    ) -> None:
         import fakeredis
 
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -65,7 +71,7 @@ class Swarm:
         )
         self.pulls = {URL: pull}
         self.retired, self.posted, self.envs, self.refusal = [], [], [], ""
-        self.ready = {"eng": [], "ci": []}
+        self.ready = {"eng": [], "ci": [], "review": []}
         self.live = {OWNER} if live else set()
         self.environ = {stall_watch.NTFY: "https://ntfy.example/alerts", **(environ or {})}
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
@@ -459,6 +465,7 @@ def test_a_ready_task_unclaimed_while_the_lane_is_full_and_seats_are_free_alerts
     swarm.tick(START + 15 * MINUTE)
     [item] = swarm.inbox()
     assert "unclaimed while its lane is full for 15 minutes" in item.text
+    assert item.ref == f"sw:stall:t1:unclaimed:{START}:alert"
     assert swarm.retired == [] and swarm.ledger.rows["t1"]["state"] == "open"
     swarm.tick(START + 16 * MINUTE)
     assert len(swarm.inbox()) == 1
@@ -648,7 +655,7 @@ def test_a_reopen_writes_the_exact_ledger_update_comment_alert_and_seat_exit():
     assert swarm.ledger.comments == [("t1", comment, "swarm")]
     [item] = swarm.inbox()
     assert item.text == _alert(case="green", minutes=10, wait=20, title="Fix it")
-    assert (item.sender, item.ref) == ("swarm", "sw:stall:t1")
+    assert (item.sender, item.ref) == ("swarm", f"sw:stall:t1:green:{START}:reopen")
     exit_record = InboxStore(swarm.store.redis).seats.exit_of(OWNER)
     assert (exit_record["seat"], exit_record["reason"]) == ("eng-1@sw", "stopped")
 
@@ -868,6 +875,91 @@ def test_an_answered_alert_does_not_block_the_next_reopen():
     InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, "master@sw", "done", "handled")
     swarm.ledger.rows["t1"].update(state="pr", claimed_by=OWNER)
     assert len(swarm.tick(START + 11 * MINUTE)) == 1 and len(swarm.inbox()) == 2
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_each_stall_of_a_task_passes_the_seen_claim() -> None:
+    """A task that stalls again after a new push alerts the master again through the seen claim."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    (first,) = seen.claim(inbox, LEAD)
+    inbox.close(first.id, LEAD, "done", "handled")
+    swarm.pulls[URL] = replace(GREEN, pushed_at=START + 20 * MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    assert [item.ref for item in seen.claim(inbox, LEAD)] == [f"sw:stall:t1:green:{START + 20 * MINUTE}:alert"]
+    assert first.ref == f"sw:stall:t1:green:{START}:alert"
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_a_reopen_after_an_alert_on_the_same_stall_passes_the_seen_claim() -> None:
+    """A stall the watchdog alerted on and then reopens tells the master of the reopen through the seen claim."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    seen.claim(inbox, LEAD)
+    swarm.store.update(SLUG, gates={"stall": "enforce"})
+    swarm.tick(START + 11 * MINUTE)
+    assert _reopened(swarm)
+    assert [item.ref for item in seen.claim(inbox, LEAD)] == [f"sw:stall:t1:green:{START}:reopen"]
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_the_same_stall_answered_once_is_not_shown_again() -> None:
+    """A stall alert the master answered is not shown again while the same stall lasts."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    (first,) = seen.claim(inbox, LEAD)
+    inbox.close(first.id, LEAD, "done", "handled")
+    swarm.tick(START + 11 * MINUTE)
+    assert seen.claim(inbox, LEAD) == []
+    assert [item.id for item in swarm.inbox()] == [first.id]
+
+
+@pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
+def test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows() -> None:
+    """An answered stall alert is not sent again while that stall lasts; a new stall alerts."""
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    [first] = swarm.inbox()
+    InboxStore(swarm.store.redis).close(first.id, LEAD, "done", "handled")
+    assert [swarm.tick(START + minutes * MINUTE) for minutes in (11, 12, 25)] == [[], [], []]
+    assert [item.id for item in swarm.inbox()] == [first.id]
+    swarm.pulls[URL] = replace(GREEN, pushed_at=START + 20 * MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    refs = [item.ref for item in swarm.inbox() if item.id != first.id]
+    assert refs == [f"sw:stall:t1:green:{START + 20 * MINUTE}:alert"]
+
+
+@pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
+def test_an_answered_stall_is_forgotten_once_its_task_leaves_review() -> None:
+    """The answered alert a held task keeps is dropped on the first pass that no longer holds the task."""
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    answered = swarm.store.key(SLUG, stall_watch.ANSWERED)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, LEAD, "done", "handled")
+    swarm.tick(START + 11 * MINUTE)
+    assert swarm.store.redis.hkeys(answered) == ["t1"]
+    swarm.ledger.rows["t1"]["state"] = "done"
+    swarm.tick(START + 12 * MINUTE)
+    assert swarm.store.redis.hkeys(answered) == []
 
 
 def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():
@@ -1579,7 +1671,7 @@ def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_m
     assert ledger.read.count("watched") == 1
     capacity.apply(SLUG, store.config(SLUG), store, ledger, runtime, 1_000)
     counted = {lane: len(ready_tasks(lane)) for lane in capacity.LANES}
-    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0}]
+    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0, "review": 0}]
 
 
 def test_a_task_a_fresh_placement_refusal_holds_is_ready_again_once_the_refusal_expires() -> None:
@@ -1607,7 +1699,7 @@ def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_uncl
     swarm.store.redis.set(swarm.store.key(SLUG, "quota-capacity"), json.dumps(decision))
     doc = ledger.state(SLUG)
     ready_tasks = stall_watch.ready_lanes(SLUG, swarm.store, ledger, doc, START)
-    swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci")}
+    swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci"), "review": ready_tasks("review")}
     swarm.tick(START, doc)
     assert swarm.tick(START + 30 * MINUTE, doc) == [] and swarm.inbox() == []
 

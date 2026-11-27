@@ -1,7 +1,8 @@
 """Launch and step the operator's troubleshooting crew on one swarm ledger.
 
 The launch-troubleshooting-crew skill runs this through its entry point, with one stage per call; every stage takes
---dry-run, which prints the commands and writes nothing.
+--dry-run, which prints the commands and writes nothing. A stage whose task title the ledger would refuse stops
+before its first write, dry run or not.
 
 plan     prints the whole crew plan for the given counts, models and efforts and runs nothing.
 scout    saves the earlier focus, eng lane and working agents, sets the eng lane to the scout model and effort, adds
@@ -23,6 +24,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, astuple, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from scripts.swarm_ledger import ledger_comments
 
 ORDER = (
     "You will send 5 scouts agents running opus effort max each to trouble shoot. You will continue this until the "
@@ -93,6 +96,7 @@ NO_HARDEN = "this crew was launched with --no-harden"
 NO_AGENTS = "every crew stage needs at least one agent"
 NO_PROBLEM = "state the problem with --problem"
 NO_NAME = "name this session with --as or AGENTIHOOKS_AGENT_NAME"
+REFUSED_TITLE = "the ledger would refuse the title of crew task {task}: {reasons}; nothing was written"
 
 Runner = Callable[[list[str]], str]
 
@@ -138,8 +142,8 @@ class State:
 
 
 def crew_id(now: float) -> str:
-    """Name a crew from the UTC second it launched."""
-    return "crew-" + time.strftime("%m%d%H%M%S", time.gmtime(now))
+    """Name a crew from the UTC second it launched, as its date and its time of day in two groups of six digits."""
+    return "crew-" + time.strftime("%y%m%d-%H%M%S", time.gmtime(now))
 
 
 def numbered(cid: str, kind: str, count: int, start: int = 0) -> list[str]:
@@ -182,10 +186,13 @@ def focus_commands(slug: str, tasks: Sequence[str], quote: str, lead: str) -> li
 
 
 def add_task(slug: str, who: str, task: str, kind: str, *rest: str) -> list[str]:
-    """Add one urgent eng lane crew task with a title naming its id."""
+    """Add one urgent eng lane crew task named by its id, refusing a title the ledger would refuse."""
+    title = f"Troubleshooting crew {task}"
+    if found := ledger_comments.problems(title, "item"):
+        sys.exit(REFUSED_TITLE.format(task=task, reasons="; ".join(found)))
     lane = ("--lane", "eng", "--kind", "troubleshoot" if kind == "scout" else "code", "--rank", "urgent")
     distinct = ("--not-duplicate", DISTINCT[kind])
-    return ledger(slug, who, "task", "add", task, f"Troubleshooting crew {task}", *distinct, *lane, *rest)
+    return ledger(slug, who, "task", "add", task, title, *distinct, *lane, *rest)
 
 
 def scout_task(slug: str, who: str, task: str, problem: str, hypothesis: str) -> list[str]:
@@ -219,7 +226,7 @@ def canon_note(slug: str, crew: Crew) -> list[str]:
 
 
 def cron(slug: str, crew: Crew) -> dict[str, Any]:
-    """The session cron the master sets: the verbatim intent every thirty minutes and this run's layout."""
+    """The seat cron the master sets on the scheduler: the verbatim intent every thirty minutes and this run's layout."""
     prompt = CRON_TEXT.format(slug=slug, order=ORDER, layout=layout(crew))
     return {"cron": CRON, "recurring": True, "prompt": prompt}
 

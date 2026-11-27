@@ -68,6 +68,7 @@ Every key of a migrated swarm carries the swarm slug as its hash tag, so one scr
 | `agentihooks:swarm:{<slug>}:fence:meta` | hash | The scalars `lease`, `legacy_owner`, `epoch`, `leader_changes`, `grants_disabled`, and `layout` set to `"records"` |
 | `agentihooks:swarm:{<slug>}:fence:<section>` | hash | One field per record for each section: `executions`, `archive`, `intents`, `orphans`, `grants`, `registrations`, `claims`, `journals`, `fences`, `operations` |
 | `agentihooks:swarm:{<slug>}:fence:by-name` | hash | Agent name to the execution id with the highest generation, derived from `executions` on every write |
+| `agentihooks:swarm:{<slug>}:fence:by-seat` | hash | Seat to the execution id with the highest generation, derived from `executions` on every write |
 | `agentihooks:swarm:{<slug>}:fence:revision` | counter | The swarm's record revision, raised once per committed batch |
 | `agentihooks:swarm:{<slug>}:fence:log` | stream | One entry per committed batch with `revision`, `owner` and `records` (the batch size), capped at 1000 entries (`LOG_CAP`) |
 
@@ -101,14 +102,18 @@ the same way a document write does.
 
 `fencing.write(store, slug, change, fence)` on a migrated swarm:
 
-1. Reads `meta`, every section except `archive`, and `by-name` in one pipeline, and assembles them into a document
+1. Reads `meta`, every section except `archive`, `by-name` and `by-seat` in one pipeline, and assembles them into a document
    shaped like the old one. The assembled document carries a `records_slug` field naming the swarm.
 2. Runs `change` on that document. Each section is handed over as a dict that remembers which keys the change read,
    and whether it iterated, counted, compared or copied the whole section.
 3. Compares the result with what was read. Every changed or new key becomes a `put` and every removed key a `delete`,
-   each expecting the revision it was read at. The `by-name` index is recomputed and written the same way.
+   each expecting the revision it was read at. The `by-name` and `by-seat` indexes are recomputed and written the
+   same way.
 4. Adds a `check` for every record the change read but did not write. A section read whole adds a check for every
    record it held when read. When the write is fenced, the `lease` record is left to the lease fence and gets no check.
+   A record added after the read is not checked, so two admissions that each insert a new execution for one seat
+   collide only on the `by-seat` record both write: the later batch is refused, reruns, and the registry refuses it
+   as a replacement that does not match the current execution.
 5. Sends the batch. A change that wrote nothing sends no batch and returns its result.
 
 The `archive` section is not loaded. `fencing.execution_row` reads one archived row by key. `fencing.replace` is the

@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -17,6 +18,7 @@ from scripts.swarm import (
     master_lock,
     master_start,
     model_pick,
+    seat_heads,
     seat_spawn,
     take_master,
 )
@@ -29,6 +31,7 @@ from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
 LAST, NEW, REPLACE = "last", "new", "replace"
+FORCED = "forced"
 STARTER = "master up"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
 QUESTION = (
@@ -120,14 +123,15 @@ def _profile(config):
     return config.lanes.get(MASTER, {}).get("profile") or DEFAULT_PROFILES[MASTER]
 
 
-def _why(previous, config, live):
+def _why(previous: Previous | None, config: Any, live: set[str]) -> str:
     if previous is None:
         return NONE_RECORDED
     if previous.agent.name in live:
         return "it is still running"
     if not previous.agent.harness:
         return "its harness is not recorded"
-    return blocker(previous.agent, config.repo)
+    agent = replace(previous.agent, profile=previous.agent.profile or _profile(config))
+    return blocker(agent, config.repo)
 
 
 def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previous) -> Launched:
@@ -153,7 +157,7 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             launched_at=at,
             idle_ticks=0,
         )
-        store.put_agent(slug, record)
+        store.revive_agent(slug, record)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
         store.seats.record_exit(agent.name, seat, "its resumed record was refused")
@@ -169,7 +173,7 @@ def fill(saved, config):
     kept = {key: value for key, value in saved.items() if value}
     if harness not in effort_range.EFFORTS:
         return {**defaults, **kept}
-    pick = model_pick.frontier(harness)
+    pick = model_pick.master(config, harness)
     effort = effort_range.clamp(harness, kept.get("effort", pick.effort), effort_range.bounds(config, MASTER))
     return {**defaults, "harness": harness, "model": pick.model, **kept, "effort": effort}
 
@@ -188,7 +192,7 @@ def _filled(task, config):
     return task
 
 
-def _new(store, slug, runtime, at):
+def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> Launched:
     config = store.ensure_code(slug)
     name = store.next_name(slug, MASTER, at)
     record = AgentRecord(name, MASTER, MASTER, started_at=at, state="starting", seat=seat_address(slug, MASTER))
@@ -199,6 +203,7 @@ def _new(store, slug, runtime, at):
         transfer = transfers.attach(store, slug, record)
         task = {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer}
         task = _filled(primed(store, slug, record.seat, task), config)
+        task = {**task, "forced": True} if forced else task
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
         capacity.feed_spent(runtime, store, at)
@@ -224,11 +229,14 @@ def _new(store, slug, runtime, at):
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
-    return Launched(name, record.pane_id, record.seat, NEW)
+    return Launched(name, record.pane_id, record.seat, FORCED if forced else NEW)
 
 
-def _front_doors(store, slug, live):
-    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
+def _front_doors(store: RedisStore, slug: str, live: set[str]) -> list[AgentRecord]:
+    listed = store.agents(slug)
+    return [
+        a for a in listed if master_seats.is_lead(slug, a) and a.name in live and not seat_heads.superseded(a, listed)
+    ]
 
 
 def _starting_leads(store, slug):
@@ -260,15 +268,25 @@ def _beside(store, slug, runtime, at, live):
     return Launched(record.name, record.pane_id, record.seat, NEW)
 
 
-def _fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool = False) -> Launched:
+def _fresh(
+    store: RedisStore,
+    slug: str,
+    runtime: Any,
+    at: int,
+    live: set[str],
+    replace_live: bool = False,
+    forced: bool = False,
+) -> Launched:
     """Start a new master under the swarm's master launch lock, refusing while another starter holds it."""
     with master_lock.held(store, slug, STARTER) as refused:
         if refused:
             raise SwarmError(refused)
-        return _start_fresh(store, slug, runtime, at, live, replace_live)
+        return _start_fresh(store, slug, runtime, at, live, replace_live, forced)
 
 
-def _start_fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool) -> Launched:
+def _start_fresh(
+    store: RedisStore, slug: str, runtime: Any, at: int, live: set[str], replace_live: bool, forced: bool
+) -> Launched:
     from scripts.swarm import tick_master
 
     tick_master.finish_dead_starting(store, slug, runtime, at)
@@ -284,7 +302,7 @@ def _start_fresh(store: RedisStore, slug: str, runtime: Any, at: int, live: set[
     seat = seat_address(slug, MASTER)
     if (occupant := _seat_occupant(store, seat)) in runtime.live_names():
         raise SwarmError(OCCUPIED.format(seat=seat, name=occupant))
-    return _new(store, slug, runtime, at)
+    return _new(store, slug, runtime, at, forced)
 
 
 def _seat_occupant(store: Any, seat: str) -> str:
@@ -292,11 +310,20 @@ def _seat_occupant(store: Any, seat: str) -> str:
     return store.seats.occupant(seat).occupant
 
 
-def up(store, slug, runtime, at, choice, ask, say):
+def up(
+    store: RedisStore,
+    slug: str,
+    runtime: Any,
+    at: int,
+    choice: str,
+    ask: Callable[[str], str],
+    say: Callable[[str], None],
+) -> Launched:
     """Launch the chosen master; ask last or new when no choice is given. Refuses beside a live master only when
     every counted master seat is held: a new master takes a free counted seat beside a live front door, and a
-    replacing one retires the front door first."""
-    replace_live = choice == REPLACE
+    replacing one retires the front door first. A forced one replaces and launches where no quota floor refuses it."""
+    replace_live = choice in (REPLACE, FORCED)
+    forced = choice == FORCED
     choice = NEW if replace_live else choice
     live = runtime.live_names()
     previous = _previous(store, slug)
@@ -306,7 +333,7 @@ def up(store, slug, runtime, at, choice, ask, say):
         say(QUESTION)
         choice = _choose(ask)
     if choice == NEW:
-        return _fresh(store, slug, runtime, at, live, replace_live)
+        return _fresh(store, slug, runtime, at, live, replace_live, forced)
     front = _front_doors(store, slug, live)
     why = _why(previous, store.config(slug), live) or (front and f"the front door master {front[0].name} is live")
     if not why:

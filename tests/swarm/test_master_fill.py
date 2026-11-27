@@ -163,7 +163,7 @@ def test_a_live_seat_two_master_keeps_a_down_lead_from_counting_as_an_outage(sto
     runtime.full = True
     InboxStore(store.redis).send("operator", "master@sw", "anyone there")
     tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 5)
-    assert MASTER_DOWN not in ledger.notes
+    assert not [note for note in ledger.notes if note.startswith(MASTER_DOWN)]
     assert tick_master.read(store, "sw") == {}
 
 

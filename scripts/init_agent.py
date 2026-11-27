@@ -3,6 +3,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -56,6 +57,13 @@ def _runtime_dir(environ: dict[str, str]) -> Path:
 
 def _started_marker(launcher: Path) -> Path:
     return launcher.with_suffix(".started")
+
+
+def _started_at(marker: Path, environ: dict[str, str]) -> int:
+    started_at = int(marker.stat().st_mtime * 1000)
+    if not environ.get("AGENTIHOOKS_QUICK_SWARM"):
+        marker.unlink(missing_ok=True)
+    return started_at
 
 
 def _route_report(launcher: Path) -> Path:
@@ -392,6 +400,10 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _auth_route(auth: str) -> str:
+    return "native-default" if auth == "default" else auth
+
+
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
@@ -418,7 +430,7 @@ def _app_server_command(
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *_codex_otel_args(environ),
         *_codex_trust_args(directory, environ),
         *_model_args("codex", agent_args, environ),
@@ -475,7 +487,7 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
-            *(["--route", spec.auth] if spec.auth else []),
+            *(["--route", _auth_route(spec.auth)] if spec.auth else []),
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
@@ -493,7 +505,7 @@ def _agent_command(
     command = [
         agentihooks_bin,
         "claude",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
         *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
         "--agentihooks-report",
@@ -518,6 +530,22 @@ def _opening_prompt(prompt: str, path: Path) -> str:
     from scripts.profiles import binding
 
     return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
+
+
+def _replace_quick_launchers(launcher: Path, safe_name: str) -> None:
+    from scripts.herdr_gc import _alive, _launch_pid
+
+    for previous in launcher.parent.glob(f"{safe_name}-*.sh"):
+        if (
+            previous == launcher
+            or re.fullmatch(r"\d{6}-\d{6}-\d+\.sh", previous.name.removeprefix(f"{safe_name}-")) is None
+        ):
+            continue
+        pid = _launch_pid(previous)
+        if pid is None or _alive(pid):
+            continue
+        for suffix in (".sh", ".prompt", ".opening", ".route", ".started"):
+            previous.with_suffix(suffix).unlink(missing_ok=True)
 
 
 def _write_launcher(
@@ -565,14 +593,15 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
+    quick = bool(environ.get("AGENTIHOOKS_QUICK_SWARM"))
+    cleanup = [] if quick else [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
         "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
-        f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f'echo "$$" > {shlex.quote(str(_started_marker(launcher)))}\n'
         f"{operator_env.source_line(environ)}"
         f"{_access_export()}"
         f"{_predecessor_export(environ)}"
@@ -599,6 +628,8 @@ def _write_launcher(
         encoding="utf-8",
     )
     launcher.chmod(0o700)
+    if quick:
+        _replace_quick_launchers(launcher, safe_name)
     return launcher, prompt_file
 
 
@@ -662,13 +693,16 @@ def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     return environ.get(binding.HOMES[agent])
 
 
-def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
+def _binding_request(args: Any, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
     from scripts.profiles import binding
 
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
+    root = _runtime_dir(environ)
+    if agent == "codex" and args.profile == "planner":
+        root = Path(environ.get("HOME") or Path.home()) / ".agentihooks" / "swarm" / "profile-reports"
+    report = root / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     if not args.defer_canary:
@@ -677,12 +711,26 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     return f"{binding.PROMPT}\n\n{prompt}"
 
 
-def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> list[str]:
+Start = Callable[[list[str], dict[str, str]], None]
+Canary = Callable[[Path, float], dict[str, Any]]
+
+
+def _open_terminal(command: list[str], environ: dict[str, str]) -> None:
+    subprocess.Popen(command, env=environ, start_new_session=True)
+
+
+def _wait_binding(report: Path, timeout: float) -> dict[str, Any]:
+    from scripts.profiles import binding
+
+    return binding.wait(report, timeout)
+
+
+def _binding_result(environ: dict[str, str], timeout: float, route: dict, canary: Canary = _wait_binding) -> list[str]:
     from scripts.profiles import binding
 
     if not environ.get(binding.REPORT):
         return []
-    result = binding.wait(Path(environ[binding.REPORT]), timeout)
+    result = canary(Path(environ[binding.REPORT]), timeout)
     if route.get("account") and result["account"] != route["account"]:
         raise ValueError("live process account differs from requested route")
     return [
@@ -700,11 +748,13 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
     return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
 
 
-def _profile_canary(args, environ: dict[str, str], launch, route: dict) -> list[str]:
+def _profile_canary(
+    args: argparse.Namespace, environ: dict[str, str], launch: LaunchDeadline, route: dict, canary: Canary
+) -> list[str]:
     if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
-    canary = math.inf if args.canary_timeout is None else args.canary_timeout
-    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
+    limit = math.inf if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", limit, lambda seconds: _binding_result(environ, seconds, route, canary))
 
 
 def _detach() -> bool:
@@ -845,6 +895,12 @@ def _transport(args: argparse.Namespace, agent: str) -> str:
     return APP_SERVER
 
 
+def _auth_value(value: str) -> str:
+    if value in ("", "interactive", "default") or (value.startswith("named:") and value != "named:"):
+        return value
+    raise argparse.ArgumentTypeError("authentication must be interactive, default or named:reference")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -909,7 +965,9 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
-    parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
+    parser.add_argument(
+        "--auth", type=_auth_value, default="", help="interactive, default or named:reference authentication"
+    )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
@@ -935,22 +993,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _herdr_enabled(environ: dict[str, str]) -> bool:
-    home = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
-    try:
-        state = json.loads((home / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True
-    herdr = state.get("herdr") if isinstance(state, dict) else None
-    return not (isinstance(herdr, dict) and herdr.get("enabled") is False)
-
-
 def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
-    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed and enabled."""
+    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed."""
     choice = requested or environ.get("AGENTIHOOKS_TERMINAL_HOST", "")
     if choice:
         return choice, True
-    return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
+    return ("herdr" if herdr_host.binary() else "native"), False
 
 
 def _start_herdr(
@@ -1099,11 +1147,17 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
 
     if args.auth and native("sign-ins", "init-agent-auth", environ):
         raise ValueError("explicit authentication refused by the sign ins gate")
+    if args.auth and args.auth != "interactive" and args.routed_only:
+        raise ValueError("explicit authentication cannot combine with --routed-only")
+    if args.auth and args.auth != "interactive":
+        from scripts.quick.authentication import selections
+
+        mode, account = selections(args.auth, [args.agent or "claude"], environ)[0]
+        args.auth = mode if mode == "default" else f"named:{account}"
 
 
 def _routed_only(args: argparse.Namespace) -> bool:
-    """A handoff must land on another account and a --routed-only launch on a routed one; neither starts bare."""
-    return bool(args.handoff or args.routed_only)
+    return bool(args.handoff or args.routed_only or (args.auth and args.auth != "interactive"))
 
 
 def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str] | None:
@@ -1115,7 +1169,13 @@ def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str
     return "routed_only=failed", "the agent was not routed to an account, so the launch failed"
 
 
-def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    environ: dict[str, str] | None = None,
+    *,
+    start: Start = _open_terminal,
+    canary: Canary = _wait_binding,
+) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
@@ -1130,10 +1190,13 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
+        rotation_default = args.agent or ("claude" if _flag_value(claude_args, ("--route",)) == "claude-ai" else "")
         agent, reason = (
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
+            else (
+                (args.agent or "claude", args.auth) if args.auth else agent_choice.choose(rotation_default, active_env)
+            )
         )
         agent = agent or "claude"
         if args.handoff:
@@ -1234,7 +1297,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     try:
         if host != "herdr":
             report.append(f"command={shlex.join(command)}")
-            subprocess.Popen(command, env=active_env, start_new_session=True)
+            start(command, active_env)
     except OSError as exc:
         discard()
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
@@ -1250,8 +1313,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             )
             return 2
         time.sleep(0.25)
-    launcher_at = int(marker.stat().st_mtime * 1000)
-    marker.unlink(missing_ok=True)
+    launcher_at = _started_at(marker, active_env)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
     if _detached(args, active_env):
@@ -1294,7 +1356,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        report += _profile_canary(args, active_env, launch, route)
+        report += _profile_canary(args, active_env, launch, route, canary)
     except (OSError, ValueError) as exc:
         _refuse_binding(active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))

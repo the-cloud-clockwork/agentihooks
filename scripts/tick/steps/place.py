@@ -18,7 +18,7 @@ from scripts.tick.adapters.calls import (
 )
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, TASKS, CallStep, pass_domains
-from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
+from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
 Who: Any = import_module("scripts.gates").Who
 modes: Any = import_module("scripts.gates.modes")
@@ -167,7 +167,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
 def primed(store: Any, slug: str, seat: str, task: dict[str, Any]) -> dict[str, Any]:
     priming_trace: Any = import_module("scripts.swarm.priming_trace")
 
-    memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
+    memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.scoped(slug, seat)}
     envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
     previous = store.execution_occupants(slug).get(seat)
     task = {
@@ -222,14 +222,29 @@ def placed_record(record: Any, placed: Any) -> Any:
 
 
 STEPS = (
-    CallStep("quota notice", NOTICES, held(placing(_quota_notice)), RESUMED, CONFIG_DOC),
+    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC, placing=True),
     CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
     CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
     CallStep(
-        "codex hook order", ACKS, held(placing(_codex_hook_order)), frozenset({"sleeping"}), pass_domains("sleeping")
+        "codex hook order",
+        ACKS,
+        held(_codex_hook_order),
+        frozenset({"sleeping"}),
+        pass_domains("sleeping"),
+        kept=True,
+        placing=True,
+        feature="kept-placing-steps-first-on-the-placement-worker",
     ),
     WriteStep(
-        "rank pass", PLACEMENT, held(placing(_rank_pass)), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC
+        "rank pass",
+        PLACEMENT,
+        held(_rank_pass),
+        writes=frozenset({RANK}),
+        needs=RESUMED,
+        reads=CONFIG_DOC,
+        kept=True,
+        placing=True,
+        feature="kept-placing-steps-first-on-the-placement-worker",
     ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")

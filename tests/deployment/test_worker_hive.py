@@ -1,7 +1,10 @@
 import json
 import os
+import signal
 import ssl
 import subprocess
+import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -23,7 +26,16 @@ MOVED = "AGENTIHOOKS_HIVE_URL=https://tailnet.example:8770\n" + REFRESHED
 SAVED = {"refreshed": REFRESHED, "rejoined": OTHER, "moved": MOVED}
 
 
-def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
+def startup(
+    tmp_path: Path,
+    *,
+    credential: str = "mounted",
+    refuse: str = "",
+    ssh: bool = False,
+    sshd_dies: bool = False,
+    bundle: bool = False,
+    bundle_url: str = "",
+) -> tuple[subprocess.CompletedProcess[str], str, Path, Path]:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -39,9 +51,34 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     cli = tools / "agentihooks"
     cli.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$*" == "ledger writer serve" ]]; then\n'
+        '  printf "%s|%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" "${MALLOC_ARENA_MAX:-}" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
+        '  if [[ "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
+        "    trap 'printf stopped > \"$AGENTIHOOKS_HOME/writer-stopped\"; exit 0' TERM INT\n"
+        '    printf %s "$$" > "$AGENTIHOOKS_HOME/writer.pid"\n'
+        "    for _ in {1..300}; do sleep 0.01; done\n"
+        "    exit 8\n"
+        "  fi\n"
+        '  exit "${WRITER_TEST_STATUS:-0}"\nfi\n'
+        'if [[ "$*" == "hive run" && "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
+        "  trap 'printf stopped > \"$AGENTIHOOKS_HOME/hive-stopped\"; exit 0' TERM INT\n"
+        '  printf %s "$$" > "$AGENTIHOOKS_HOME/hive.pid"\n'
+        "  for _ in {1..300}; do\n"
+        '    if [[ "${WRITER_TEST_STOP:-}" == hive && -f "$AGENTIHOOKS_HOME/writer.pid" ]]; then exit 9; fi\n'
+        "    sleep 0.01\n"
+        "  done\n"
+        "  exit 8\nfi\n"
+        'if [[ "$*" == "hive run" && -n "${WRITER_TEST_STATUS:-}" ]]; then\n'
+        "  for _ in {1..700}; do\n"
+        '    if [[ -f "$AGENTIHOOKS_HOME/writer-calls" ]] && (( $(wc -l < "$AGENTIHOOKS_HOME/writer-calls") >= 2 )); then exit 9; fi\n'
+        "    sleep 0.01\n"
+        "  done\n"
+        "  exit 8\nfi\n"
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
+        '  [[ -f "$AGENTIHOOKS_HOME/state-at-init.json" || ! -f "$AGENTIHOOKS_HOME/state.json" ]] || '
+        'cp "$AGENTIHOOKS_HOME/state.json" "$AGENTIHOOKS_HOME/state-at-init.json"\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$*" != "init --bundle "* ]] || git -C "$3" rev-parse HEAD > "$AGENTIHOOKS_HOME/bundle-head-at-init"\n'
@@ -122,8 +159,67 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
             "HIVE_SSH_AUTHORIZED_KEYS_FILE": str(keys / "authorized_keys"),
             "HIVE_SSH_HOST_KEY_FILE": str(keys / "host_key"),
         }
-    result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
+    result = run_startup(env)
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
+
+
+def run_startup(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if env.get("WRITER_TEST_STATUS") != "active":
+        return subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
+    home = Path(env["AGENTIHOOKS_HOME"])
+    markers = [home / "writer.pid", home / "hive.pid"]
+    process = subprocess.Popen(
+        ["bash", str(START)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+    completed = False
+    try:
+        if env["WRITER_TEST_STOP"] == "term":
+            for _ in range(1500):
+                if all(marker.exists() for marker in markers) or process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            process.terminate()
+        stdout, stderr = process.communicate(timeout=15)
+        for marker in markers:
+            with pytest.raises(ProcessLookupError):
+                os.kill(int(marker.read_text()), 0)
+        completed = True
+        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+    finally:
+        if not completed:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=10)
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+@pytest.mark.parametrize("stop", ["hive", "term"])
+def test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str
+) -> None:
+    monkeypatch.setenv("WRITER_TEST_STATUS", "active")
+    monkeypatch.setenv("WRITER_TEST_STOP", stop)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == (143 if stop == "term" else 9), result.stderr
+    assert (home / "writer-stopped").read_text() == "stopped"
+    if stop == "term":
+        assert (home / "hive-stopped").read_text() == "stopped"
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+@pytest.mark.parametrize("writer_status", ["0", "7"])
+def test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer_status: str
+) -> None:
+    monkeypatch.setenv("WRITER_TEST_STATUS", writer_status)
+    monkeypatch.setenv("MALLOC_ARENA_MAX", "13")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://writer.example.test/swarm")
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 9, result.stderr
+    assert (home / "writer-calls").read_text().splitlines() == [
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15|2",
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15|2",
+    ]
 
 
 def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):
@@ -190,6 +286,30 @@ def test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities(
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert not any("capabilities=" in line for line in commands.splitlines())
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+@pytest.mark.parametrize("pinned", ["yes", "no"])
+def test_the_charted_pin_is_registered_on_every_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: str
+) -> None:
+    monkeypatch.setenv("HIVE_PINNED", pinned)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        f"prefer= pinned={pinned}"
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+def test_a_pod_from_a_chart_without_the_pin_setting_writes_no_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HIVE_PINNED", raising=False)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not any("pinned=" in line for line in commands.splitlines())
 
 
 def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
@@ -477,7 +597,7 @@ def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_pat
     assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
 
 
-def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
+def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     origin = tmp_path / "linked-origin"
     origin.mkdir()
     subprocess.run(["git", "init", "--initial-branch=dev", str(origin)], check=True, capture_output=True)
@@ -511,8 +631,9 @@ def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeyp
     assert result.returncode == 0, result.stderr
     cloned = next((worker / "repos/.linked-profiles/memory").glob("*/profiles/memory"))
     assert (cloned / "profile.yml").read_text() == "name: memory\n"
-    registration = f"link-profile link {cloned} --name memory --no-append --no-init"
-    assert commands.splitlines().index(registration) < commands.splitlines().index("init")
+    registered = json.loads((home / "state-at-init.json").read_text())["linked_profiles"]
+    assert [(entry["name"], Path(entry["path"]).resolve()) for entry in registered] == [("memory", cloned.resolve())]
+    assert "init" in commands.splitlines()
     assert "HIVE_LINKED_PROFILES=" in (home / "hive-container.env").read_text()
 
 

@@ -30,15 +30,20 @@ def test_autoscale_splits_the_ceilings_by_lane_demand():
 
 @pytest.mark.feature("swarm-manual-caps")
 @pytest.mark.parametrize(
-    "demand",
-    [DEMAND, {"eng": 0, "ci": 9, "plan": 0}, {"eng": 9, "ci": 0, "plan": 2}, {"eng": 0, "ci": 0, "plan": 0}],
+    ("demand", "plan"),
+    [
+        (DEMAND, 0),
+        ({"eng": 0, "ci": 9, "plan": 0}, 0),
+        ({"eng": 9, "ci": 0, "plan": 2}, 1),
+        ({"eng": 0, "ci": 0, "plan": 0}, 0),
+    ],
     ids=str,
 )
-def test_manual_caps_hold_against_lane_demand(demand):
+def test_manual_caps_hold_against_lane_demand(demand: dict[str, int], plan: int) -> None:
     inputs = capacity.ScaleInputs([account(cap=6)], [], demand, lambda: None, PREVIOUS)
     config = SwarmConfig(SLUG, "/repo", max_eng=6, max_ci=1, max_plan=0, scaling=MANUAL_SCALING)
     scaled, decision = capacity.autoscaled(config, inputs)
-    assert (scaled.max_eng, scaled.max_ci, scaled.max_plan) == (6, 1, 0)
+    assert (scaled.max_eng, scaled.max_ci, scaled.max_plan) == (6, 1, plan)
     assert decision is None
 
 

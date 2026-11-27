@@ -1,0 +1,35 @@
+name: Clean fixture for the for loop word list gate
+on: push
+defaults:
+  run:
+    shell: bash
+jobs:
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - run: for _ in {1..3}; do sleep 1; done
+      - name: Word lists from an assignment, GitHub expressions and parameters
+        run: |
+          nodes="$(kind get nodes)"
+          for node in $nodes; do
+            docker exec "$node" true
+          done
+          for name in ${{ matrix.names }} "${{ inputs.extra }}" "$@"; do
+            echo "$name $(date)"
+          done
+          for ((count = 1; count <= ${{ inputs.limit }}; count++)); do
+            echo "$count"
+          done
+      - name: A python step is never read as shell
+        shell: python
+        run: for name in $(ls); do pass; done
+      - run: |
+          echo the key after this block is not shell
+        name: for name in $(ls); do :; done
+  python-by-default:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: python
+    steps:
+      - run: for name in $(ls); do pass; done

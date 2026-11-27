@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x__resolve:f5aac594b279a1068a7356bbeaa4071ba499c1ec491ae20186389c39285f5236": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and ignores its first argument at runtime. Replacing dict[str, Any] with None passes the identical current.runtime_target object to _binding_conflict, preserving output and exceptions."
+  }
+}

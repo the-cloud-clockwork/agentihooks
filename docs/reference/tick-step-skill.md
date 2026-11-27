@@ -50,7 +50,10 @@ task loads `tick-step` first, and that a tick step is:
    `budgets.FLOORS` at an interval of 60, 120 or 600 seconds.
 2. A body declaring what it reads and writes, reaching other systems only
    through the ports in `effects`, with no new function in
-   `scripts/swarm/tick.py`.
+   `scripts/swarm/tick.py`. One exception: a health check keeps its own value
+   between passes through `scripts/swarm/health/kept.py`, read and written by
+   that check's module alone and undeclared; a value another module reads is
+   a declared domain through a port.
 3. A scenario row in `tests/swarm/tick_scenarios/steps.json`, a feature test
    in `tests/tick/steps/` and a `feature-map.json` entry.
 4. A catalogue entry: `python -m scripts.tick.catalogue check` holds the
@@ -143,6 +146,16 @@ Changing only an interval means editing the floor row in `FLOORS`.
 - The stub is a `CallStep`: a function of the tick module and a pass state
   reader, `(tick, get)`, returning the step's action lines. Fill `needs`,
   `reads` and `writes` with what the body uses.
+- A health check may keep its own value between passes, only through
+  `scripts/swarm/health/kept.py` and under a key named for that check. Only
+  the check's own module reads and writes it: its observe half writes it in
+  the check's step and its findings half reads it in the health findings
+  step, so it is not declared in `writes`; the focus unclaimed and order
+  waiting steps register no write for theirs. A value any other module reads
+  is a declared domain written through a port. Two Semgrep feature rules hold
+  this: one refuses a health check that gets or sets a key of the swarm on
+  its own, the other refuses a module that calls the helper with a key that
+  is not its own or names another check's key.
 - A step written as a `WriteStep` or a `Step` dataclass acts only through
   `ctx.tools`, the view of the ports declared in `effects`, reads the pass view
   with `ctx.view.read(domain, key)` (never `ledger.state`), finishes under
@@ -219,7 +232,7 @@ and its feature map id, so the engineer can run the scaffold from the spec
 alone:
 
 ```bash
-agentihooks ledger --slug <slug> --as <name> task add <id> "Reap stale waits" --lane eng --phase <phase> --kind code \
+agentihooks api --slug <slug> --as <name> task add <id> "Reap stale waits" --lane eng --phase <phase> --kind code \
   --description "Add tick step reap_stale_waits in group observe, lane tick, every 60 seconds, effects inbox, feature swarm-tick-characterisation, module observe. Done when new_step --check reports five true and the three checks pass." \
   --territory scripts/tick
 ```

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ STEP = "Cancel superseded and dead merge queue runs"
 RUN = 500
 QUEUE = "gh-readonly-queue/dev/pr-123-"
 OWN = QUEUE + "fff666"
+MERGED = "gh-readonly-queue/dev/pr-99-abc999"
+HEADS = {480: "dead", 490: "merged"}
 RUNS = {
     "queued": [(410, QUEUE + "aaa111"), (420, "gh-readonly-queue/dev/pr-1234-bbb222")],
     "in_progress": [
@@ -22,6 +25,8 @@ RUNS = {
         (510, QUEUE + "ddd444"),
         (440, "gh-readonly-queue/dev/pr-12-eee555"),
         (480, "gh-readonly-queue/dev/pr-77-abc777"),
+        (485, "gh-readonly-queue/dev/pr-66-abc666"),
+        (490, MERGED),
         (520, "gh-readonly-queue/dev/pr-88-abc888"),
     ],
     "waiting": [(450, QUEUE + "not-a-sha"), (455, QUEUE + "0a0b0c")],
@@ -78,13 +83,35 @@ def _step():
     return step
 
 
-def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
+def _git(path: Path, *args: str) -> str:
+    """Run git in the base checkout and return its trimmed output."""
+    command = ["git", "-C", str(path), "-c", "user.name=queue", "-c", "user.email=queue@example.com", *args]
+    return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _checkout(path: Path) -> dict[str, str]:
+    """Return the heads of a base checkout whose history holds a merged group head and not a dead one."""
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    tree = _git(path, "hash-object", "-w", "-t", "tree", "/dev/null")
+    merged = _git(path, "commit-tree", tree, "-m", "merged group")
+    base = _git(path, "commit-tree", tree, "-p", merged, "-m", "queue base")
+    dead = _git(path, "commit-tree", tree, "-p", merged, "-m", "dead group")
+    return {"merged": merged, "base": base, "dead": dead}
+
+
+def _run(
+    tmp_path: Path, ref: str = "refs/heads/" + OWN, live: Sequence[str] = LIVE, **env: str
+) -> tuple[subprocess.CompletedProcess[str], list[int]]:
     fixtures, bin_dir = tmp_path / "fixtures", tmp_path / "bin"
     fixtures.mkdir()
     bin_dir.mkdir()
+    heads = _checkout(tmp_path / "provenance-grader")
     for status, runs in RUNS.items():
-        runs = [{"id": run, "head_branch": branch, "status": status} for run, branch in runs]
-        (fixtures / status).write_text(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
+        rows = [
+            {"id": run, "head_branch": branch, "head_sha": heads.get(HEADS.get(run, ""), "0" * 40), "status": status}
+            for run, branch in runs
+        ]
+        (fixtures / status).write_text(json.dumps({"total_count": len(rows), "workflow_runs": rows}))
     (fixtures / "refs").write_text(json.dumps([{"ref": f"refs/heads/{branch}"} for branch in live]))
     gh = bin_dir / "gh"
     gh.write_text(GH)
@@ -101,6 +128,8 @@ def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
             URLS=str(tmp_path / "urls"),
             QUEUE_REF=ref,
             RUN=str(RUN),
+            BASE=heads["base"],
+            GITHUB_WORKSPACE=str(tmp_path),
             GITHUB_REPOSITORY="owner/repo",
             **env,
         ),
@@ -137,7 +166,7 @@ def test_the_sweep_runs_on_merge_group_runs_from_trusted_queue_actors(github, ru
     assert resolve("${{ " + _step()["if"] + " }}", **github) is runs
 
 
-def test_the_sweep_runs_on_the_app_token_minted_to_cancel():
+def test_the_sweep_runs_on_the_app_token_minted_to_cancel() -> None:
     job = _workflow()["jobs"].get("durations", _workflow()["jobs"]["select"])
     names = [step.get("name") for step in job["steps"]]
     mint = job["steps"][names.index("Mint the tcc main ci App token")]
@@ -148,16 +177,44 @@ def test_the_sweep_runs_on_the_app_token_minted_to_cancel():
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",
         "RUN": "${{ github.run_id }}",
+        "BASE": "${{ github.event.merge_group.base_sha }}",
     }
     assert job["permissions"] == {"contents": "read", "actions": "read"}
 
 
-def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path):
+@pytest.mark.feature("queue-sweep-keeps-merged-group-runs")
+def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path: Path) -> None:
     result, cancelled = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert cancelled == [410, 430, 480, 455, 460, 470]
+    assert cancelled == [410, 430, 480, 485, 455, 460, 470]
     assert f"Cancelled queue run 410 ({QUEUE}aaa111): superseded by run {RUN}" in result.stdout
     assert "Cancelled queue run 480 (gh-readonly-queue/dev/pr-77-abc777): its queue branch is gone" in result.stdout
+    assert "Cancelled queue run 485 (gh-readonly-queue/dev/pr-66-abc666): its queue branch is gone" in result.stdout
+
+
+@pytest.mark.feature("queue-sweep-keeps-merged-group-runs")
+def test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone(tmp_path: Path) -> None:
+    result, cancelled = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 490 not in cancelled
+    assert f"Kept queue run 490 ({MERGED}): its head is in this group's base history" in result.stdout
+    assert "Cancelled queue run 490" not in result.stdout
+
+
+@pytest.mark.feature("queue-sweep-keeps-merged-group-runs")
+def test_the_sweep_reads_the_full_base_history_checked_out_before_it() -> None:
+    job = _workflow()["jobs"].get("durations", _workflow()["jobs"]["select"])
+    names = [step.get("name") for step in job["steps"]]
+    [(index, checkout)] = [
+        (index, step)
+        for index, step in enumerate(job["steps"])
+        if step.get("with", {}).get("path") == "provenance-grader"
+    ]
+    assert index < names.index(STEP)
+    assert resolve("${{ " + checkout["if"] + " }}", **event("merge_group")) is True
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+    assert checkout["with"]["fetch-depth"] == 0
+    assert 'git -C "$GITHUB_WORKSPACE/provenance-grader" merge-base --is-ancestor "$sha" "$BASE"' in _step()["run"]
 
 
 def test_the_live_branches_are_read_after_every_run_listing(tmp_path):

@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
@@ -16,6 +17,7 @@ READ_RESERVE = 1000
 READ_VERBS = frozenset({"list", "view", "download", "checks", "diff", "status", "watch"})
 WRITE_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")
 LOCAL_GROUPS = frozenset({"alias", "auth", "completion", "config", "extension"})
+CLIENT = "/usr/bin/gh"
 
 
 def token_file() -> Path:
@@ -51,9 +53,9 @@ def credential(operation: str, source: TextIO, output: TextIO) -> int:
     return 0
 
 
-def environment() -> dict[str, str]:
+def environment(base: Mapping[str, str] = os.environ) -> dict[str, str]:
     value = token()
-    env = {**os.environ, "GH_TOKEN": value, "GITHUB_TOKEN": value, "AGENTIHOOKS_GITHUB_AUTH_READY": "1"}
+    env = {**base, "GH_TOKEN": value, "GITHUB_TOKEN": value, "AGENTIHOOKS_GITHUB_AUTH_READY": "1"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     index = int(env.get("GIT_CONFIG_COUNT", "0"))
     for offset, value in enumerate(("", f"!{sys.executable} -P -m scripts.github_app_cli credential")):
@@ -144,6 +146,21 @@ def reserve_refusal(command: list[str], value: str) -> str | None:
         f"GitHub read refused: the shared App limit has {remaining} of {limit} calls left, below the reserve of "
         f"{reserve} kept for launches, queueing and merges; reads resume after the reset at {at}"
     )
+
+
+def signed(command: list[str], base: Mapping[str, str]) -> tuple[list[str], dict[str, str]] | None:
+    """Return the gh client the wrapper runs and the caller's environment signed with this process's cached token.
+
+    None leaves the call to the gh wrapper, which answers a token this process cannot mint or a read below the shared
+    reserve exactly as before.
+    """
+    try:
+        env = environment(base)
+    except (OSError, KeyError, ValueError, jwt.PyJWTError, requests.RequestException):
+        return None
+    if reserve_refusal(command, env["GH_TOKEN"]):
+        return None
+    return [CLIENT, *command[1:]], env
 
 
 def main(argv: list[str] | None = None) -> int:

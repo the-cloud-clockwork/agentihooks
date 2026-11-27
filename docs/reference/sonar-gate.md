@@ -12,6 +12,8 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
+When the gate fails, the `SonarQube Quality Gate` step prints its error line, then every page of unresolved new bugs and vulnerabilities and new security hotspots still to review for the branch or pull request it graded. Each finding occupies one line with component, line or zero, rule and message. The searches use the existing read token through the job's Access proxy; task and gate polling keep the scan token. Both lists and all retries share one thirty second timeout. A refused or empty later page leaves earlier findings visible and reports the remaining count when known. A timeout can end the read before that count prints. Diagnostic failures preserve the original error and failed exit.
+
 The job's `Hold the Delivery L2 conditions` step runs after the quality gate step and fails when:
 
 - the `Delivery L2` gate on the server holds conditions other than the five above, so a loosened threshold turns the job red;
@@ -105,7 +107,15 @@ Flattening removes that repeated context data from the scan's combined database
 while retaining measured files, including files with no hits, and file tracer
 metadata. It leaves the downloaded shard databases intact.
 
-The merge produces `coverage.xml`, the coverage report table and `lcov.info`.
+The merge produces `coverage.xml`, a TOTAL line naming the lines and branches
+it covers, and `lcov.info`. `.github/coverage/parallel_xml.py` writes the XML
+with one `coverage xml` process per part, as many parts as
+`scripts/ci_cpu_quota.py` allows. It splits the measured files by directory, so
+every package lands whole in one part, puts each directory on the part with
+the fewest source bytes so far, and joins the parts sorted by package with the
+root totals summed. The joined report carries the same files, packages, lines
+and totals as one process's report. The merge prints no per file table; the
+per file view is in Sonar and in the uploaded `coverage.xml`.
 Python XML still covers `hooks` and `scripts`; JavaScript LCOV still includes
 node and browser captures. The optimization changes coverage preparation only:
 Sonar sensors, rules, scan inputs and Delivery L2 conditions remain enabled.
@@ -116,7 +126,50 @@ the original per test contexts with `--keep` into
 builder needs those contexts to associate tests with code. Using the flattened
 scan database for that build would lose those associations.
 
-`Merge shard coverage` runs in the background during proxy and cache setup.
+### Taking coverage as shards land
+
+The `sonar` job needs only `select`, `reuse`, `admission`, `lab-verdict` and
+`collect`, so it starts beside the unit shards on a standard runner, after
+`collect` has uploaded both reused test plan artifacts that its pattern
+download fetches by one listing of the run. Its runner wait, checkout
+and carried coverage finish while the shards run. The job holds that runner
+while it waits, because a light runner requests a quarter CPU and ran the scan
+three to four times slower. `Take each shard's coverage as it lands` runs
+`.github/coverage/arrivals.py` from `actions/github-script` with
+`github-token: none`. Every 3 seconds it lists the run's artifacts through the
+results service, the same service `download-artifact` uses for the current run,
+with the job's runtime token. It holds no GitHub token, so it spends no REST
+quota. It downloads each shard's coverage artifact into
+`.coverage-shards/<artifact name>` when the artifact is listed. While shards
+still run, it flattens each database it holds into `flat-<name>` beside it.
+
+A push to `dev` runs the analysis in `sonar-after-unit`, which also needs
+`unit` and shows as `sonar` on that push. It runs the same steps once every unit
+leg has finished, so the coverage wait lists all twenty legs on its first poll
+and the analysis never holds a runner while the legs wait for one. The `sonar`
+job still runs on that push as `sonar hand off`: it skips its checkout and
+evidence upload, marks the run test only and ends in seconds. Promotion reads
+the analysis of `sonar-after-unit`. Pull requests and dispatches keep the
+`sonar` job starting beside the unit shards.
+
+A shard ends when its coverage is taken, or when its flake report is listed with
+no coverage of it beside. `unit` and `unit-selected` upload the flake report after
+their coverage, so a listed flake report means no more coverage is coming. A
+rerun attempt counts only a flake report whose artifact changed since the
+wait's first listing. Coverage that an earlier attempt left counts at once. A
+shard that leaves neither coverage nor a flake report, such as one that lost
+its runner or ran past its job timeout, holds the wait to its deadline, and so
+does listed coverage that never downloads. The wait gives up after 44 minutes.
+It never fails the job itself, so a shard still missing reaches `combine.sh`,
+which names it.
+
+`combine.sh` moves each `flat-<report>` it finds into its combine input and
+flattens only the reports that have no flat copy. After the last shard lands,
+only that shard's flatten, the combine and the XML parts remain before the
+scan. A failed part fails the merge with its exit code and leaves no
+`coverage.xml`.
+
+`Merge shard coverage` runs in the background while the proxy starts.
 `Wait for the coverage merge` must succeed before `SonarQube Scan` starts. The
 manifest build also runs in the background, starts before the cache restores,
 and is checked after the scan. Moving it off the scan's prerequisite path does
@@ -130,10 +183,11 @@ The workflow supplies the merge inputs:
 | Input | Current meaning |
 |---|---|
 | `SHARDS` | Full scope uses 20; selected scope uses the selection job's shard count. Every numbered primary shard database must be present and nonempty. |
-| `SCOPE` | `selected` passes `--selected` to the JavaScript LCOV builder. Scope `none` skips the shard download and merge; only `full` builds the dependency manifest. |
-| Download layout | `.coverage-shards/coverage-3.12-<shard>/.coverage`; each shard's optional `reused-coverage/.coverage` is included when nonempty. |
+| `SCOPE` | `selected` passes `--selected` to the JavaScript LCOV builder and lets the coverage wait take `branch-coverage-3.12-<leg>-<attempt>`. Scope `none` skips the coverage wait and the merge; only `full` builds the dependency manifest. |
+| Download layout | `.coverage-shards/coverage-3.12-<shard>/.coverage`; each shard's optional `reused-coverage/.coverage` is included when nonempty. A `flat-<name>` beside a database is its flat copy from the coverage wait. |
 | Coverage configuration | `.github/coverage/coverage.ini` enables branch coverage and relative filenames and includes `hooks/*` and `scripts/*` in reports. |
 | Scanner report settings | `sonar.python.coverage.reportPaths=coverage.xml` and `sonar.javascript.lcov.reportPaths=lcov.info`. |
+| Scan inputs | `sonar.exclusions` lists `coverage.xml`, `lcov.info`, `sonar-scope.txt` and `.coverage-shards/**`, the files this job writes into the checkout that `.gitignore` does not already drop, so the scan and its secret detection grade repository files only. Sonar still reads both reports from their report paths on disk. |
 
 For example, the current full scope workflow invokes the merge as follows from
 the checkout root, after downloading that run's artifacts:
@@ -197,7 +251,8 @@ gh run download "$RUN_ID" \
 
 | Failure or symptom | Inspection |
 |---|---|
-| `Missing coverage for shard N` | Compare the expected count with the run's downloaded primary shard artifacts; an optional reused report does not replace the required primary database. |
+| `Missing coverage for shard N` | Read `Take each shard's coverage as it lands` for the artifacts it logged as landed, and compare the expected count with them; an optional reused report does not replace the required primary database. |
+| `Shards N had not ended after 44 minutes` | The coverage wait gave up on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
 | Coverage merge fails or ends without a status | Read the log printed by the merge wait for flattening, combine, XML or LCOV errors. Keep the wait and all coverage inputs. |
 | Merge wait times out | Inspect the merge process and runner resource timings; the short background launch step does not measure merge completion. |
 | No browser or node coverage | Inspect the shard capture artifacts and the LCOV diagnostic; retain both input types required for that scope. |

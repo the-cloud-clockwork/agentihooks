@@ -90,6 +90,16 @@ TEST_ONLY_SONAR = (
     ),
 )
 
+LEDGER_REQUIRED = (
+    '\n      + (if $mutation == "true"',
+    '\n      + (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)\n      + (if $mutation == "true"',
+)
+SPLIT_REQUIRED = (
+    ('"test-count", "lint", ', '"collect", "test-count", "lint", "lint-actions", '),
+    ('"shard-check", "test-count"', '"shard-check", "test-count", "collect"'),
+    ('.key == "lint" or ', '.key == "lint" or .key == "lint-actions" or .key == "collect" or '),
+)
+
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
 
@@ -228,6 +238,27 @@ def test_only_sonar(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     run = aggregation["run"]
     for old, new in TEST_ONLY_SONAR:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
+
+
+def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": aggregation["run"].replace(*LEDGER_REQUIRED)}, *rest]
+
+
+def split_lists(steps: list[dict[str, Any]]) -> bool:
+    """Whether the aggregation holds the pull request, merge group and dev push job lists once each."""
+    return all(steps[0]["run"].count(old) == 1 for old, _ in SPLIT_REQUIRED)
+
+
+def split_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the aggregation that requires the collect and lint-actions jobs split out of test-count and lint."""
+    if not split_lists(steps):
+        raise ValueError("The split needs an aggregation that holds each of its three job lists once")
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in SPLIT_REQUIRED:
         run = run.replace(old, new)
     return [{**aggregation, "run": run}, *rest]
 

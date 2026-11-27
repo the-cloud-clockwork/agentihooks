@@ -82,8 +82,11 @@ ended once its group stays over the threshold.
 At 22:06 UTC on 19 October the `agentihooks` group had stayed at 30 or more
 processes for an hour, and the guard ended all of them. One was the swarm tick,
 in the middle of a merge priority replay, and two pull requests were left out
-of the merge queue. The `excludes` list matches process names only, so it could
-not spare the tick without sparing every `agentihooks` process.
+of the merge queue. That replay is retired: a merge priority now applies in the
+command that requests it, and the swarm refresh job requeues any entry it left
+out ([Merge priority](delivery-tiers.md#merge-priority)). The `excludes` list
+matches process names only, so it could not spare the tick without sparing
+every `agentihooks` process.
 [#4962](https://github.com/the-cloud-clockwork/agentihooks/pull/4962) added
 `excludeCommands` and two patterns for the tick:
 
@@ -478,7 +481,7 @@ done
   `swarm waker-report` probes are `KILLED`. Before the pattern the test failed
   on the daemon probes ([Proofs run
   39369840962](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369840962));
-  with it, [Mutation preflight
+  with it, [mutation run
   39369956185](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369956185)
   passed.
 - `~/guard-config.json` links to the repository file, so the exclusion went

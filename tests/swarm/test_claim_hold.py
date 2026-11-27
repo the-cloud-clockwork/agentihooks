@@ -35,7 +35,7 @@ def test_tick_tells_the_master_once_when_a_verification_hold_has_no_window_for_o
     assert items[0].text == (
         "Task t1 (Hive telemetry) awaits verification without a proof window "
         "for more than an hour. Set contract.after_at to its proof time, or reopen it with "
-        "agentihooks ledger --slug sw --as master task set t1 awaiting="
+        "agentihooks api --slug sw --as master task set t1 awaiting="
     )
     tick("sw", store, ledger, runtime, 90_000_001)
     assert len(notices(store)) == 1
@@ -244,3 +244,48 @@ def test_the_tick_claims_no_eng_task_while_the_lab_is_behind_and_resumes_below_t
     assert (ready("eng"), ready("ci")) == ([], ["t2"])
     store.redis.set(store.key("sw", "lab-capacity"), json.dumps(lab(5 * 60)))
     assert (ready("eng"), ready("ci")) == (["t1", "t3"], ["t2"])
+
+
+@pytest.mark.feature("swarm-lab-behind-hold")
+def test_a_full_lab_pool_the_swarm_reads_holds_eng_claims_and_the_same_queue_on_an_idle_pool_does_not(
+    running: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from scripts.ci_lab import metrics as lab_metrics
+    from scripts.ci_lab.capacity import Load
+    from scripts.swarm import claim_hold, lab_capacity
+    from scripts.swarm import tick as tick_module
+
+    monkeypatch.delenv("AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES", raising=False)
+    queued = {"pull_request": (900.0, 600.0)}
+    full = Load(queued, {"pull_request": 2}, slots_total=2, slots_busy=2, frees_in=(900.0, 600.0))
+    served: list[Load] = [full]
+    server = lab_metrics.serve("127.0.0.1", 0, lambda: served[0], lab_metrics.Registry())
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    rows = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
+    eng = {"id": "t1", "lane": "eng", "phase": ""}
+
+    def ready(lane: str) -> list[str]:
+        return [task["id"] for task in tick_module.ready_in_order("sw", running, rows.rows, rows.state("sw"), lane)]
+
+    try:
+        lab_capacity.capture(running, "sw", url, int(time.time() * 1000))
+        reading = lab_capacity.status(running, "sw")
+        hold = claim_hold.lab_reason(running, "sw", "fix")
+        named = (hold(eng), hold({**eng, "lane": "ci"}), hold({**eng, "phase": "fix"}))
+        held = (ready("eng"), ready("ci"))
+        served[0] = Load(queued, {}, slots_total=2, slots_busy=0)
+        lab_capacity.capture(running, "sw", url, int(time.time() * 1000))
+        resumed = (claim_hold.lab_reason(running, "sw", "fix")(eng), ready("eng"), ready("ci"))
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert reading is not None
+    assert reading["capacity"]["slots"] == {"total": 2, "busy": 2, "free": 0}
+    assert reading["capacity"]["classes"]["pull_request"]["predicted_wait_s"] == 1500.0
+    assert named == (BEHIND.format(25), "", "")
+    assert held == ([], ["t2"])
+    assert resumed == ("", ["t1"], ["t2"])

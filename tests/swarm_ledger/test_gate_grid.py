@@ -6,13 +6,16 @@ from tests.swarm_ledger.test_swarm_layout import browser, open_page, status
 __all__ = ["browser", "open_page"]
 
 ORDER = [
+    "first-read",
     "identity",
     "watch",
     "subagents",
     "reruns",
     "intent",
+    "recon",
     "build",
     "claim-stop",
+    "expert-stop",
     "push-stop",
     "quiet",
     "one-push",
@@ -24,6 +27,7 @@ ORDER = [
     "nightwatch",
     "reset",
     "feature",
+    "review",
     "talk",
 ]
 

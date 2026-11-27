@@ -14,7 +14,7 @@ A hive is a machine or a Kubernetes pod that runs swarm agents. It joins a runni
 - A running hub: the [Kubernetes quick start](kubernetes-quick-start.md) or the [single machine quick start](single-machine-quick-start.md).
 - On the hub side, a shell with the swarm Redis settings, `OPENBAO_URL` and `OPENBAO_TOKEN` set, and the hive endpoint (`agentihooks hive serve`, or the chart's `hive.join`) reachable over HTTPS from the new hive.
 - The NATS address the new hive reaches, such as `nats://swarm-bus.example.internal:4222`.
-- On a new machine: Python 3.12 or later, `uv tool install agentihooks`, and Claude Code or Codex signed in. In a cluster: Helm 3.8 or later and a namespace for the hive.
+- On a new machine: Python 3.12 or later, `uv tool install "agentihooks[nats]"`, and Claude Code or Codex signed in. In a cluster: Helm 3.8 or later and a namespace for the hive.
 
 ## Issue the invite
 

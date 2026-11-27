@@ -454,11 +454,14 @@ def with_master_routes(rows: list[QuotaRow], routes: Mapping[str, str]) -> list[
 def _master_routes() -> dict[str, str]:
     from redis.exceptions import RedisError
 
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.status import live_agents
     from scripts.swarm.store import RedisStore, redis_client  # pyright: ignore[reportUnknownVariableType]
     from scripts.swarm_v2 import front_door
 
     try:
-        return front_door.master_routes(RedisStore(redis_client()))
+        runtime = HerdrRuntime()
+        return front_door.master_routes(RedisStore(redis_client()), lambda agents: live_agents(agents, runtime))
     except (RedisError, OSError):
         return {}
 

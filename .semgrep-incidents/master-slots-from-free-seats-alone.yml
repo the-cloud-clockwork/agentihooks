@@ -1,0 +1,26 @@
+rules:
+  - id: master-slots-from-free-seats-alone
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A master selection must not take its slot accounts from rows with a free seat alone, because a drained or full
+      account has none and a hive without a master or native login then offers a forced front door master no slot.
+      Fall back to every Claude row for a forced start when no row has a free seat.
+    paths:
+      include:
+        - /scripts/hive/
+        - master-slots-from-free-seats-alone.py
+    patterns:
+      - pattern-inside: |
+          def $SELECTION(...):
+              ...
+      - metavariable-regex:
+          metavariable: $SELECTION
+          regex: ^_master_selection
+      - pattern: |
+          $ACCOUNTS = {$KEY: $ROW for $ROW in $ROWS if <... capacity.free_seats($ROW) ...>}
+      - pattern-not-inside: |
+          $ACCOUNTS = {$KEY: $ROW for $ROW in $ROWS if <... capacity.free_seats($ROW) ...>}
+          ...
+          if <... $TASK.get("forced") ...>:
+              $ACCOUNTS = $FALLBACK

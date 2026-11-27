@@ -7,7 +7,8 @@ rules:
       publishes the work folder of every execution it runs and keeps one copy per task under its own key, and the hub
       seeds a successor from the hive that last launched the task. Consumer.sync_workspaces must take the host target,
       else the hive on the execution record; ledger_workspace.sync must write each hosted task's copy under
-      task_files_key; Admission.launched must record the launching hive under WORK_FOLDER; Admission._seeds must read
+      task_files_key with no expiry (#12195); Admission.launched must record the launching hive under WORK_FOLDER;
+      Admission._seeds must read
       that hive's task copy.
     patterns:
       - pattern-either:
@@ -29,7 +30,7 @@ rules:
                     ...
                     for ... in hosted:
                       ...
-                      $REDIS.set(task_files_key(...), ..., ex=FILES_SECONDS)
+                      $REDIS.set(task_files_key(...), $COPY)
                     ...
           - patterns:
               - pattern: |

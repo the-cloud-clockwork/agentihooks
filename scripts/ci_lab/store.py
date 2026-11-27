@@ -7,11 +7,12 @@ from typing import Any
 
 from scripts.ci_lab.objects import ROOT, Objects, is_report, unit_path
 
-__all__ = ["DISABLED", "INDEX", "PREFIX", "Store", "Verdict"]
+__all__ = ["DISABLED", "INDEX", "PREFIX", "UNFILED", "Store", "Verdict"]
 
 PREFIX = "agentihooks-ci:"
 INDEX = f"{PREFIX}verdict:"
 DISABLED = f"{PREFIX}disabled"
+UNFILED = f"{PREFIX}unfiled"
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,18 @@ class Store:
     def enable(self, kind: str) -> None:
         """Resume reuse of a kind."""
         self.client.srem(DISABLED, kind)
+
+    def keep_unfiled(self, kind: str, record: str) -> None:
+        """Record a kind's mismatches whose task is not filed yet, replacing the kind's earlier record."""
+        self.client.hset(UNFILED, kind, record)
+
+    def unfiled(self) -> dict[str, str]:
+        """Return the record of every kind whose mismatch task is not filed yet."""
+        return dict(self.client.hgetall(UNFILED))
+
+    def filed(self, kind: str) -> None:
+        """Drop a kind's unfiled record once its task is filed."""
+        self.client.hdel(UNFILED, kind)
 
     def reindex(self) -> int:
         """Rebuild the index from the stored report objects; return how many entries it added."""

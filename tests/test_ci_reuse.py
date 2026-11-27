@@ -268,7 +268,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert "type-gate" in workflow["jobs"]["gate-required"]["needs"]
-    assert steps in [
+    unsplit = [
         ci_reuse.typing_required(
             ci_reuse.test_only_sonar(
                 diagnostic(
@@ -299,12 +299,35 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         for finish in (list, ci_reuse.pipefail_summary)
         for lab in (list, ci_reuse.lab_verdict)
     ]
+    assert steps in [ci_reuse.split_required(rendering) for rendering in unsplit if ci_reuse.split_lists(rendering)]
     [collected, *collected_rest] = ci_reuse.collected_stats(steps)
     assert collected == {**steps[0], "run": ci_reuse.COLLECTED_STATS + steps[0]["run"]}
     assert collected_rest == steps[1:]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
+
+
+@pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
+def test_the_rendered_reuse_and_provenance_installs_run_their_template_lines() -> None:
+    from scripts import ci_reuse
+
+    workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
+    for rendered, template, name in (
+        (workflow["jobs"]["reuse"]["steps"], ci_reuse.reuse_job()["steps"], "Install metadata dependencies"),
+        (workflow["jobs"]["select"]["steps"], ci_reuse.duration_provenance_steps(), "Install provenance dependencies"),
+    ):
+        [step] = [step for step in rendered if step.get("name") == name]
+        [canonical] = [step for step in template if step.get("name") == name]
+        assert step["run"] == canonical["run"]
+
+
+@pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
+def test_the_reuse_template_installs_pyyaml_at_the_parser_pin() -> None:
+    from scripts import ci_reuse
+
+    [reuse] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == "Install metadata dependencies"]
+    assert reuse["run"] == "python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3"
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
@@ -1243,7 +1266,7 @@ def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(wat
     jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     assert SELF in jobs
     assert SELF in jobs["gate-required"]["needs"]
-    required = {"select", "split", "unit", "shard-check", "test-count"}
+    required = {"select", "split", "unit", "shard-check", "test-count", "collect"}
     needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
     if watcher is None:
         del needs[SELF]

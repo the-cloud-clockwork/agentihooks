@@ -6,13 +6,20 @@ from dataclasses import replace
 import pytest
 
 from scripts.hub import admission
-from scripts.swarm import effort_range, profile_choice, store, successor_fill, tick
+from scripts.swarm import effort_range, model_catalog, profile_choice, store, successor_fill, tick
 from tests.helpers.seat import seat_agent
 from tests.swarm.test_tick import tasks
 
 pytestmark = pytest.mark.unit
 
 SAVED = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1"}
+PINNED = ("opus", "sonnet-lane", "gpt-6.1-sol", "gpt-6-luna")
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A harness catalog that lists every lane model these swarms pin."""
+    monkeypatch.setattr(model_catalog, "catalog", lambda *_: {"claude": [{"model": model} for model in PINNED]})
 
 
 def swarm(lanes: dict, low: str = "high", high: str = "xhigh") -> store.RedisStore:
@@ -76,9 +83,9 @@ def test_a_lane_effort_is_kept_and_a_codex_launch_names_its_own_level() -> None:
     assert successor_fill.filled(SAVED, held, "eng")["effort"] == "medium"
 
 
-def test_a_master_bound_lifts_a_lane_effort_below_high() -> None:
+def test_a_master_bound_lifts_a_lane_effort_below_xhigh() -> None:
     lifted = swarm({"master": {"effort": "medium"}}, "medium", "high").config("sw")
-    assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "high"
+    assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "xhigh"
 
 
 @pytest.mark.feature("launch-model-suits-harness")

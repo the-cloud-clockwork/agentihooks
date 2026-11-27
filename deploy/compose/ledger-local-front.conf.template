@@ -2,9 +2,9 @@ server {
     listen 127.0.0.1:${LEDGER_PORT};
     client_max_body_size 64m;
     location / {
-        set $upstream http://127.0.0.1:${LEDGER_READ_PORT};
+        set $upstream ${LEDGER_SCHEME}://127.0.0.1:${LEDGER_READ_PORT};
         if ($request_method !~ ^(GET|HEAD)$) {
-            set $upstream http://127.0.0.1:${LEDGER_API_PORT};
+            set $upstream ${LEDGER_SCHEME}://127.0.0.1:${LEDGER_API_PORT};
         }
         proxy_pass $upstream;
         proxy_http_version 1.1;

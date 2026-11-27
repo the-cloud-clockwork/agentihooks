@@ -23,6 +23,13 @@ def _job(name, created, completed, conclusion="success"):
     }
 
 
+COLLECTED = "Take the local actions from the workflow revision for the stats"
+
+
+def _plan(completed: str, collected: str = "success") -> dict[str, object]:
+    return {**_job("mutation-plan", "00:00", completed), "steps": [{"name": COLLECTED, "conclusion": collected}]}
+
+
 JOBS = [
     _job("select", "00:05", "00:40"),
     _job("unit (3.12, 1)", "02:00", "05:00"),
@@ -120,6 +127,53 @@ def test_dispatch_admission_and_mutation_planning_have_bounded_wall_times(name, 
     assert ci_budget.verdict(result["stages"][0]) == expected
 
 
+@pytest.mark.parametrize(
+    ("collected", "budget"),
+    [
+        ("success", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("failure", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("skipped", ci_budget.BUDGETS["mutation-plan"]),
+    ],
+)
+def test_a_mutation_plan_takes_the_collected_budget_only_when_it_took_the_collected_path(
+    collected: str, budget: int
+) -> None:
+    jobs = [_job("select", "00:00", "00:10"), _plan("00:10", collected)]
+    assert ci_budget.budget("mutation-plan", jobs) == budget
+    assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
+
+
+@pytest.mark.parametrize(
+    ("collected", "budget"),
+    [
+        ("success", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("skipped", ci_budget.BUDGETS["mutation-plan"]),
+    ],
+)
+def test_the_collected_budget_follows_the_plan_stage_and_no_other_stage(collected: str, budget: int) -> None:
+    jobs = [
+        {**_job("select", "00:00", "00:10"), "steps": [{"name": COLLECTED, "conclusion": "success"}]},
+        {**_plan("00:10", collected), "name": "mutation-plan (1)"},
+    ]
+    assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
+    assert ci_budget.budget("mutation-plan", jobs) == budget
+
+
+@pytest.mark.parametrize(("completed", "expected"), [("05:30", "ok"), ("05:31", "over")])
+def test_a_collected_mutation_plan_inside_its_budget_reports_ok_and_a_slow_one_over(
+    completed: str, expected: str
+) -> None:
+    result = ci_budget.report({"run_started_at": START}, [_plan(completed)], 0)
+    assert ci_budget.verdict(result["stages"][0]) == expected
+
+
+def test_the_collected_step_is_the_first_mutation_plan_step_the_collect_output_guards() -> None:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    steps = workflow["jobs"]["mutation-plan"]["steps"]
+    first = next(step for step in steps if "steps.collect.outputs.collected" in step.get("if", ""))
+    assert (first["name"], first["if"]) == (ci_budget.COLLECTED_STEP, "steps.collect.outputs.collected == 'true'")
+
+
 def test_render_prints_every_stage_and_the_run_against_the_budget():
     result = ci_budget.report({"run_started_at": START}, JOBS, ci_budget.seconds("2026-10-09T07:16:00Z"))
     assert [line.split() for line in ci_budget.render(result)] == [
@@ -136,17 +190,22 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
 def test_every_job_of_the_tests_workflow_has_a_budget() -> None:
     jobs = set(_workflow_jobs())
     assert jobs <= set(ci_budget.BUDGETS) <= jobs | {"type-gate"}
+    assert set(ci_budget.COLLECTED_BUDGETS) <= set(ci_budget.BUDGETS)
 
 
-def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes():
+def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes() -> None:
     jobs = _workflow_jobs()
+    skipped = {"mutation-stats": 0, "mutation-refine": 0}
+    assert all("needs.mutation-plan.outputs.collected != 'true'" in jobs[job]["if"] for job in skipped)
+    collected = {**ci_budget.BUDGETS, **ci_budget.COLLECTED_BUDGETS, **skipped}
 
-    def chain(job):
+    def chain(job: str, budgets: dict[str, int]) -> int:
         needs = jobs[job].get("needs", [])
         needs = [needs] if isinstance(needs, str) else needs
-        return ci_budget.BUDGETS[job] + max((chain(need) for need in needs), default=0)
+        return budgets[job] + max((chain(need, budgets) for need in needs), default=0)
 
-    assert chain("gate-required") <= ci_budget.RUN_BUDGET_S
+    assert chain("gate-required", ci_budget.BUDGETS) <= ci_budget.RUN_BUDGET_S
+    assert chain("gate-required", collected) <= ci_budget.RUN_BUDGET_S
 
 
 def _files(tmp_path, jobs):

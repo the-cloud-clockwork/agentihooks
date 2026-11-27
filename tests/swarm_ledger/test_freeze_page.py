@@ -54,6 +54,7 @@ def page(browser, request):
     sent = {"ops": [], "changes": []}
     freezes = list(setup["freezes"])
     doc = copy.deepcopy({**DOC, **setup.get("doc", {})})
+    rev = {"value": 1}
 
     def answer(route):
         if route.request.url == URL:
@@ -70,15 +71,19 @@ def page(browser, request):
                     freezes.append(freeze(op["target"], op["verb"]))
                 elif op["op"] == "freeze_clear":
                     freezes[:] = [row for row in freezes if row["target"] != op["target"]]
+            if body.get("ops") or body.get("changes"):
+                rev["value"] += 1
             applied = [op["id"] for op in body.get("ops", [])]
-            return route.fulfill(json={"applied": applied, "rejected": [], "_meta": {"rev": 1, "warnings": []}})
+            return route.fulfill(
+                json={"applied": applied, "rejected": [], "_meta": {"rev": rev["value"], "warnings": []}}
+            )
         return route.abort()
 
     context.route("**/*", answer)
     serve_modules(context)
 
     def view():
-        return ledger_server.page_view(ledger_state({**doc, "freezes": freezes}), "", False)
+        return ledger_server.page_view(ledger_state({**doc, "freezes": freezes}, rev=rev["value"]), "", False)
 
     context.route(is_events, lambda route: fulfill_events(route, view(), SWARM))
     # The first server import inside the route handler can outlast the page load timeout on a loaded runner.

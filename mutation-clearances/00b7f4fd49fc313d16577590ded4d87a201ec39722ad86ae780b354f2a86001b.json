@@ -1,0 +1,6 @@
+{
+  "scripts/ci_queue_retry.py:scripts.ci_queue_retry.x_main:6542f9db1cb70faa706c92a006fc97d919cc733202b78418195aede5f62ae30f": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: main imports cast from typing. typing.cast returns its second argument unchanged and never checks or converts the type argument. Replacing the first argument int with None preserves the exact number object passed to pull_state, all API inputs, decisions, printed output and step outputs."
+  }
+}

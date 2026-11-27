@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_invalidated:e3d7395438c02597baedbbc7605f34de401a40321904c7e57ca90fee977e6da8": {
+    "reader": "standards_reader",
+    "reason": "split(\"::\", n)[0] is the text before the first \"::\" for every n >= 1."
+  }
+}

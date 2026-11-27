@@ -279,6 +279,39 @@ def test_the_launch_lands_in_the_seat_pane_with_the_quick_variables(tmp_path):
     assert env[member.DIR_ENV] == str(tmp_path) and "AGENTIHOOKS_SWARM" not in env and env["PATH"] == "/bin"
 
 
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize(
+    ("mode", "account", "tail"),
+    [
+        ("routed", "", ["--routed-only"]),
+        ("default", "", ["--auth", "default"]),
+        ("named", "alpha", ["--auth", "named:alpha"]),
+    ],
+)
+def test_saved_native_authentication_reaches_the_launcher(
+    harness: str, mode: str, account: str, tail: list[str], tmp_path: Path
+) -> None:
+    seat = registry.Seat(2, "eng-1", "w1:p2", harness, "quick-proof-eng-1", auth=mode, account=account)
+    swarm = registry.Swarm("quick-proof", str(tmp_path), (seat,))
+    prompt = tmp_path / "prompt.md"
+    assert launch.argv(swarm, seat, prompt) == [
+        "--host",
+        "herdr",
+        "--pane",
+        "w1:p2",
+        "--name",
+        "quick-proof-eng-1",
+        "--agent",
+        harness,
+        "--dir",
+        str(tmp_path),
+        "--prompt-file",
+        str(prompt),
+        *tail,
+    ]
+
+
 def test_a_successor_opening_carries_its_seed_and_the_handoff(tmp_path):
     swarm = _swarm(tmp_path, eng_state=registry.LAUNCHING)
     paths.handoff(tmp_path, "eng-1").write_text("# Handoff v2\nthe body\n")
@@ -295,6 +328,7 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: P
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append(argv)
+        registry.bind(tmp_path, "eng-1", "w1:p2", "successor")
         return 0
 
     naps: list[float] = []
@@ -377,6 +411,7 @@ def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append("eng-1")
+        registry.bind(tmp_path, "eng-1", "w1:p2", "successor")
         return 0
 
     assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=naps.append) == "started"
@@ -438,6 +473,7 @@ def _ended(folder: Path, eng_state: str) -> tuple[list[tuple[str, str]], list[li
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append(argv)
+        registry.bind(folder, "eng-1", "w1:p2", "successor")
         return 0
 
     naps: list[float] = []
@@ -462,7 +498,7 @@ def test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor(t
 
 
 @pytest.mark.feature("quick-swarm")
-def test_force_never_ends_the_master_nor_a_seat_being_launched(tmp_path: Path) -> None:
+def test_force_never_ends_a_seat_being_launched_or_a_missing_seat(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.LAUNCHING)
     ended: list[str] = []
 
@@ -472,10 +508,51 @@ def test_force_never_ends_the_master_nor_a_seat_being_launched(tmp_path: Path) -
     def force(seat: str) -> str:
         return launch.force(tmp_path, seat, {}, bare=lambda pane: True, end=ended.append, start=start)
 
-    assert (force("master"), force("eng-1"), force("eng-9")) == ("master", "launching", "no-seat")
+    assert (force("eng-1"), force("eng-9")) == ("launching", "no-seat")
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert ended == [] and seat is not None and seat.state == registry.LAUNCHING
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.feature("quick-master-force-relaunch")
+def test_force_ends_the_master_and_starts_a_bound_successor(tmp_path: Path) -> None:
+    _swarm(tmp_path)
+    registry.set_state(tmp_path, "master", registry.LAUNCHING)
+    registry.bind(tmp_path, "master", "w1:p1", "old-master-session")
+    registry.set_state(tmp_path, "master", registry.READY)
+    ended: list[tuple[str, str]] = []
+    started: list[list[str]] = []
+
+    def end(name: str) -> None:
+        swarm = registry.load(tmp_path)
+        seat = swarm.seat("master") if swarm else None
+        assert seat is not None
+        ended.append((name, seat.state))
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        started.append(argv)
+        registry.bind(tmp_path, "master", "w1:p1", "new-master-session")
+        return 0
+
+    assert (
+        launch.force(
+            tmp_path,
+            "master",
+            {},
+            bare=lambda pane: bool(ended) and not started,
+            end=end,
+            start=start,
+            sleep=lambda seconds: None,
+        )
+        == "started"
+    )
+    swarm = registry.load(tmp_path)
+    seat = swarm.seat("master") if swarm else None
+    assert ended == [("quick-abc-master", registry.LAUNCHING)]
+    assert len(started) == 1
+    assert seat is not None
+    assert (seat.pane_id, seat.session_id, seat.state) == ("w1:p1", "new-master-session", registry.READY)
 
 
 def test_force_never_ends_a_seat_whose_state_changed_since_it_was_read(

@@ -540,6 +540,8 @@ HANDOFF_MARGIN: int = int(os.getenv("AGENTIHOOKS_HANDOFF_MARGIN", "50"))
 CLAUDE_MD_SANITY_CHECK = _env_bool("AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK", "true")
 CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 
+CODEREVIEW_FILELIMIT: int = int(os.getenv("AGENTIHOOKS_CODEREVIEW_FILELIMIT", "20"))
+
 
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
 _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().strip()
@@ -663,17 +665,23 @@ def _resolve_manifesto_paths(
     if explicit:
         path = Path(explicit).expanduser()
         return [str(path)] if path.is_file() else []
+    from hooks.context.profile_chain import layer_root
+
     manifests_dir = os.getenv("MANIFESTOS_DIR")
     root = bundle_root or os.getenv("AGENTIHOOKS_BUNDLE_ROOT")
     directory = (
         Path(manifests_dir).expanduser()
         if manifests_dir
-        else Path(root).expanduser() / "manifestos"
+        else layer_root(Path(root).expanduser()) / "manifestos"
         if root
         else Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos"
     )
-    user_directory = Path(user_root).expanduser() / "manifestos" if user_root and not manifests_dir else None
-    shared_directory = Path(shared_root).expanduser() / "manifestos" if shared_root and not manifests_dir else None
+    user_directory = (
+        layer_root(Path(user_root).expanduser()) / "manifestos" if user_root and not manifests_dir else None
+    )
+    shared_directory = (
+        layer_root(Path(shared_root).expanduser()) / "manifestos" if shared_root and not manifests_dir else None
+    )
     skip = _manifesto_skip_names()
     layers = [layer for layer in (directory, shared_directory, user_directory) if layer and layer.is_dir()]
     if layers:

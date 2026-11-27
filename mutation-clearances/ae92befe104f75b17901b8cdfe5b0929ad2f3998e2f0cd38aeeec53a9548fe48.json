@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x\u01c1StatsInputs\u01c1for_test:44f2699dfc3cc708bb7868f906217f945727af93706be7d77b95d695b2370d8f": {
+    "reader": "standards-reader",
+    "reason": "The `False` to `None` replacement of the dynamic_imports argument in StatsInputs.for_test is equivalent because test_inputs tests dynamic_imports only for truthiness, so None and False select the same empty tuple."
+  }
+}

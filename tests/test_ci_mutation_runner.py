@@ -2,6 +2,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -231,7 +232,8 @@ def test_existing_nested_output_folder_and_multiple_empty_modules_pass(tmp_path)
     assert run_gate(tmp_path, {}, output, 60)["failed"] is False
 
 
-def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
+@pytest.mark.feature("mutation-workspace-semgrep-incidents")
+def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path: Path) -> None:
     import tomllib
 
     from scripts.ci_mutation.runner import prepare_workspace
@@ -247,6 +249,8 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs",
         ".github",
         ".semgrep",
+        ".semgrep-incidents",
+        "feature-map.d",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -275,6 +279,8 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs/",
         ".github/",
         ".semgrep/",
+        ".semgrep-incidents/",
+        "feature-map.d/",
         "evidence/",
         "observability/",
         "docker/swarm-node/",
@@ -307,6 +313,8 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs",
         ".github",
         ".semgrep",
+        ".semgrep-incidents",
+        "feature-map.d",
         "evidence",
         "observability",
         "docker/swarm-node",

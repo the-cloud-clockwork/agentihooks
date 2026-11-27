@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm.ledger_client import LedgerClient
@@ -23,7 +25,7 @@ def close_op(item, op_id="c"):
 
 def apply(doc, op, ctx=None):
     ledger_alerts.check(op)
-    return ledger_alerts.apply(doc, op, ctx or Ctx())
+    return ledger_alerts.apply(doc, op, cast(Any, ctx or Ctx()))
 
 
 def test_an_inbox_alert_is_raised_once_per_item_and_carries_the_item():
@@ -102,8 +104,8 @@ def test_a_setup_alert_carries_its_item_and_closes_by_it():
 
 
 INBOX_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
-    "a text of up to 2000 characters and, for inbox and setup, an item"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup', "
+    "'autoscaler'), a text of up to 2000 characters and, for inbox and setup, an item"
 )
 CLOSE_REFUSED = "alert_close takes target, an alert id, and an optional by, or an inbox item instead of target"
 

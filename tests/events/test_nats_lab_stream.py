@@ -3,8 +3,9 @@
 import pytest
 from nats.js.api import StreamInfo
 
+from scripts.ci_lab import scheduler
 from scripts.ci_lab.webhooks import HeadEvent, envelope
-from scripts.events import memory, nats
+from scripts.events import factory, memory, nats
 from scripts.events.bus import NoStream
 from scripts.events.config import BusConfig
 from scripts.events.nats_legacy import LEGACY_EVENTS
@@ -82,3 +83,27 @@ def test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters()
     assert [subject for subject, _ in bus.lab_heads.entries] == ["ci.lab.head.push"]
     assert bus._legacy_events.entries == []
     assert bus.lab_heads.dead is bus.dead
+
+
+def _scheduler_heads(url: str) -> list[scheduler.Head]:
+    """Start the scheduler's bind mode bus, read one batch through its durable consumer, then stop it."""
+    bus = factory.open_bus(BusConfig(backend="nats", url=url, provision=False))
+    try:
+        return scheduler.BusInbox(bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)).heads()
+    finally:
+        bus.close()
+
+
+@pytest.mark.feature("lab-head-durable-consumer")
+def test_a_bound_scheduler_reads_the_heads_published_while_it_was_stopped(url: str) -> None:
+    down = HeadEvent("push", "https://github.com/o/r", "c" * 40, "b" * 40, "dev", "pushed")
+    controller = nats.open_bus(BusConfig(url=url))
+    receiver = nats.open_bus(BusConfig(url=url, provision=False))
+    try:
+        assert receiver.lab_heads.publish("ci.lab.head.push", envelope(HEAD))
+        assert [head.event for head in _scheduler_heads(url)] == [HEAD]
+        assert receiver.lab_heads.publish("ci.lab.head.push", envelope(down))
+        assert [head.event for head in _scheduler_heads(url)] == [down]
+    finally:
+        receiver.close()
+        controller.close()

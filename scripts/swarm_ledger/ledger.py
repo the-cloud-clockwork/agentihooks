@@ -107,6 +107,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -138,9 +139,20 @@ WRITE_TIMEOUT = postgres.LOCK_TRIES * postgres.LOCK_WAIT + REQUEST_TIMEOUT
 EXPORT_TIMEOUT = 30
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
+NOT_HIS = "refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
+ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"tasks|freezes|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+ITEM_ID = "[A-Za-z0-9][A-Za-z0-9._-]*"
+FOCUS_TARGET = f"(?:(?:plans|phases|slices|tasks)/{ITEM_ID}|(?:lane|kind):{ITEM_ID})"
+FOCUS_TASKS = re.compile(f"focus/{FOCUS_TARGET}/tasks")
+LEDGER_ITEM = re.compile(
+    f"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/{ITEM_ID}|focus/{FOCUS_TARGET}(?:/tasks)?"
+)
+ITEM_FORMS = (
+    "tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, focus/<target>, focus/<target>/tasks, "
+    "tasks, freezes, focus or orders"
+)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -219,10 +231,11 @@ def launch_token(slug: str, name: str) -> str:
 
 
 def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
-    """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
-    from scripts.tick.adapters import database_ledger
+    """The ledger API client for slug: this host's warm writer first, else the ledger API route code run in this
+    process over the shared database."""
+    from scripts.tick.adapters import writer_client
 
-    return database_ledger.client(base(slug), timeout)
+    return writer_client.client(base(slug), timeout)
 
 
 def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
@@ -239,7 +252,7 @@ def resource(
     collection: bool = False,
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
-) -> dict | list:
+) -> dict[str, Any] | list[Any]:
     """One resource or collection of ledger slug, read again while the database answers a storage failure."""
 
     def read() -> Any:
@@ -351,16 +364,27 @@ def held(state):
     return {"queued": True} if state.get("queued") else {}
 
 
-def send(args, kind, /, **fields):
-    ops = [op(kind, args, **fields)]
-    lead = f"task {fields['task']} was not added: " if kind == "task_add" else ""
+def declined(state: dict[str, Any], sent: dict[str, Any]) -> bool:
+    """Whether the server refused the op."""
+    return sent["id"] in (state.get("rejected") or ())
+
+
+def send(args: Any, kind: str, /, **fields: Any) -> dict[str, Any]:
+    return post(args, [op(kind, args, **fields)])
+
+
+def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """One ledger call for the ops, exiting with the server's reasons when it refuses the first of them."""
+    first = ops[0]
+    lead = f"task {first['task']} was not added: " if first["op"] == "task_add" else ""
     try:
-        state = call(args.slug, ops)
+        state: dict[str, Any] = call(args.slug, ops)
     except SystemExit as exc:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    refused(state, ops, lead=lead)
+    if len(ops) == 1 or declined(state, first):
+        refused(state, ops, lead=lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
     for warning in state.get("_meta", {}).get("warnings", []):
@@ -377,8 +401,10 @@ def cmd_join(args: Any) -> None:
     send(args, "join", role=args.role)
     if args.role == "orchestrator":
         from scripts.swarm_ledger.adapters.safety_nudge import record_master
+        from scripts.swarm_ledger.adapters.seat_crons import ensure_master
 
         record_master(os.environ)
+        ensure_master(args.slug, args.name)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 
@@ -402,7 +428,8 @@ def cmd_tree(args):
 
 
 def cmd_get(args: argparse.Namespace) -> None:
-    print(SHOW_JSON(resource(args.slug, args.item, collection="/" not in args.item)))
+    listed = "/" not in args.item or bool(FOCUS_TASKS.fullmatch(args.item))
+    print(SHOW_JSON(resource(args.slug, args.item, collection=listed)))
 
 
 def cmd_tasks(args):
@@ -432,8 +459,8 @@ def cmd_status(args):
     )
 
 
-def cmd_ack(args):
-    rev = args.rev if args.rev is not None else call(args.slug)["_meta"]["rev"]
+def cmd_ack(args: Any) -> None:
+    rev = args.rev if args.rev is not None else resource(args.slug, "metadata")["_meta"]["rev"]
     send(args, "ack", rev=rev)
     print(json.dumps({"acked": rev}))
 
@@ -498,9 +525,11 @@ def cmd_artifact(args):
     refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
-def cmd_publish_plan(args):
+def cmd_publish_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_ranges
 
+    if args.task:
+        return publish_task_plan(args)
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
@@ -515,19 +544,12 @@ def cmd_publish_plan(args):
     except ValueError as exc:
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
-    stored = {}
-
-    def artifact(path, title):
-        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
-        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
-        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
-        stored["plan"] = ledger_plans.plan_id(file["id"])
-        return stored["url"]
-
+    stored: dict[str, Any] = {}
     try:
         issue_title = ", ".join(phase["title"] for phase in selected)
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=issue_title
+        )
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
@@ -557,14 +579,82 @@ def cmd_publish_plan(args):
     state = call(args.slug, ops)
     linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
     if state.get("rejected") and where == "issue" and url not in linked:
-        try:
-            ledger_publish.close_issue(url)
-        except ledger_publish.PublishError as exc:
-            print(exc, file=sys.stderr)
+        withdraw_issue(url)
     refused(state, ops)
     tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
+
+
+def plan_artifact(args: argparse.Namespace, stored: dict[str, Any]) -> Callable[[str, str], str]:
+    def artifact(path: str, title: str) -> str:
+        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
+        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
+        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
+        return stored["url"]
+
+    return artifact
+
+
+def withdraw_issue(url: str) -> None:
+    try:
+        ledger_publish.close_issue(url)
+    except ledger_publish.PublishError as exc:
+        print(exc, file=sys.stderr)
+
+
+def plan_target(slug: str, task_id: str) -> dict[str, Any]:
+    try:
+        task: dict[str, Any] = resource(slug, f"tasks/{task_id}")  # pyright: ignore[reportAssignmentType]
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        sys.exit("publish-plan names an unknown task")
+    if phase := task.get("phase"):
+        sys.exit(
+            f"publish-plan --task takes a task with no phase: task {task_id} is in phase {phase}, use --phase {phase}"
+        )
+    return task
+
+
+def plan_links(slug: str) -> set[str]:
+    rows: list[dict[str, Any]] = resource(slug, "plans", collection=True)  # pyright: ignore[reportAssignmentType]
+    return {str(row.get("url")) for row in rows}
+
+
+def publish_task_plan(args: argparse.Namespace) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    target = plan_target(args.slug, args.task)
+    text = Path(args.path).read_text(encoding="utf-8")
+    anchors = [found[1] for _, _, line in plan_ranges.sections(text) if (found := plan_ranges.ANCHOR.fullmatch(line))]
+    if len(anchors) != 1:
+        sys.exit(
+            "publish-plan --task needs exactly one slice marker, <!-- slice: name --> on its own line above the "
+            "task's section"
+        )
+    heading = ledger_publish.HEADING_RE.search(text)
+    title = args.title or (heading[1].strip() if heading else str(target["title"]))
+    stored: dict[str, Any] = {}
+    try:
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=str(target["title"])
+        )
+    except ledger_publish.PublishError as exc:
+        sys.exit(str(exc))
+    fields = {"plan_url": stored["url"], "plan_slice": anchors[0]}
+    ops = [
+        stored["add"],
+        op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url),
+        op("task_update", args, item=f"tasks/{args.task}", fields=fields),
+    ]
+    state = call(args.slug, ops)
+    if state.get("rejected") and where == "issue" and url not in plan_links(args.slug):
+        withdraw_issue(url)
+    refused(state, ops)
+    print(json.dumps({"plan_url": url, "published_to": where, "task": args.task, "plan_slice": anchors[0]}))
 
 
 def cmd_plan(args):
@@ -595,13 +685,14 @@ def cmd_artifact_purge(args):
     print(json.dumps({"purged": event["count"], "artifacts": resource(args.slug, "counts")["artifacts"]}))
 
 
-def cmd_phase(args):
+def cmd_phase(args: argparse.Namespace) -> None:
+    if vars(args).get("quote") and args.id != "add":
+        sys.exit("phase takes --quote only with add: run order phases/<id> --quote <his words>")
     if args.id in ("add", "set") and args.values:
         from scripts.swarm_ledger import ledger_phase_cli
 
         kind, fields = ledger_phase_cli.operation(args)
-        send(args, kind, **fields)
-        print(json.dumps(fields))
+        print(json.dumps({**fields, **filing(args, kind, f"phases/{args.state}", fields)}))
         return
     if args.state not in ("done", "open") or args.values:
         sys.exit("phase takes ID done|open, add ID TITLE, or set ID FIELD=VALUE")
@@ -668,13 +759,49 @@ def cmd_alert(args):
     print(json.dumps({"alert": args.id, "action": args.action}))
 
 
-def cmd_relay(args):
+def his_words(args: argparse.Namespace, what: str) -> None:
+    """Exit unless the quoted words are the operator's."""
     import ledger_relay
 
     if not ledger_relay.verified(args.name, args.quote):
-        sys.exit(
-            "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
-        )
+        sys.exit(f"{what} {NOT_HIS}")
+
+
+def order_refusal(state: dict[str, Any], order: dict[str, Any]) -> str:
+    """The server's reason for refusing the order, empty when it took it."""
+    if not declined(state, order):
+        return ""
+    said: list[str] = state.get("_meta", {}).get("warnings", [])
+    return next((text for text in said if text.startswith(f"order on {order['item']} ")), unexplained(order))
+
+
+def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, str]:
+    """Send an add, with its order when the operator's words come with it, and say so when the server files the add
+    and refuses the order."""
+    if not vars(args).get("quote"):
+        send(args, kind, **fields)
+        return {}
+    his_words(args, "order")
+    order = op("order_set", args, item=item, quote=args.quote, filing=True)
+    reason = order_refusal(post(args, [op(kind, args, **fields), order]), order)
+    if not reason:
+        return {}
+    print(f"not ordered: {reason}", file=sys.stderr)
+    return {"not_ordered": reason}
+
+
+def order_command(args: argparse.Namespace) -> None:
+    if bool(args.quote) == bool(args.request) or (args.clear and not args.quote):
+        sys.exit(ORDER_USAGE)
+    if args.quote:
+        his_words(args, "order")
+    proof = {"quote": args.quote} if args.quote else {"request": args.request}
+    state = send(args, "order_clear" if args.clear else "order_set", item=args.item, **proof)
+    print(json.dumps({"cleared" if args.clear else "ordered": args.item, **held(state)}))
+
+
+def cmd_relay(args: argparse.Namespace) -> None:
+    his_words(args, "relay")
     queued = held(send(args, "relay", item=args.item, text=args.text, quote=args.quote))
     print(json.dumps({"relayed": not queued, "item": args.item, **queued}))
 
@@ -748,9 +875,7 @@ def _duration(value):
 
 def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
-        raise argparse.ArgumentTypeError(
-            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
-        )
+        raise argparse.ArgumentTypeError(f"name {ITEM_FORMS}")
     return value
 
 
@@ -782,33 +907,25 @@ def cmd_hierarchy(args) -> None:
     hierarchy_backfill.run(args)
 
 
-def refuse_unset_quote(args):
-    if vars(args).get("quote") and args.action != "set":
+def refuse_unset_quote(args: argparse.Namespace) -> None:
+    if vars(args).get("quote") and args.action not in ("add", "set"):
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
 
-def _add_task(args, title, fields):
+def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> dict[str, str]:
     if args.scaffold:
         task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
         doc = call(args.slug) if args.kind == "plan" else None
         fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
-    send(
-        args,
-        "task_add",
-        task=args.id,
-        title=title,
-        lane=args.lane,
-        phase=args.phase,
-        description=args.description,
-        **fields,
-    )
+    row = {"task": args.id, "title": title, "lane": args.lane, "phase": args.phase, "description": args.description}
+    noted = filing(args, "task_add", f"tasks/{args.id}", {**row, **fields})
     if args.scaffold:
         try:
             ledger_workspace.scaffold(args.slug, task, doc)
         except OSError as exc:
             print(f"task {args.id} was added; its work folder was not created: {exc}", file=sys.stderr)
-            return {"workspace_error": str(exc)}
-    return {}
+            return {"workspace_error": str(exc), **noted}
+    return noted
 
 
 def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
@@ -838,6 +955,7 @@ def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
         ("plan_url", args.plan),
         ("not_duplicate", args.not_duplicate),
         ("plan_slice", args.plan_slice),
+        ("covers_job", args.covers_job),
     )
     lists.update((key, value) for key, value in options if value)
     if args.kind == "workflow":
@@ -957,7 +1075,7 @@ def cmd_url(args):
     print(ledger_link.page_line(args.slug))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
     parser.add_argument("--as", dest="name")
@@ -999,6 +1117,13 @@ def build_parser():
     phase.add_argument(
         "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
     )
+    phase.add_argument("--quote", help="phase add: the operator's words, filing the phase as his order")
+    order = sub.add_parser("order", help="mark phases/<id> or tasks/<id> as the operator's order")
+    order.add_argument("item")
+    order.add_argument("--quote", help="the operator's recorded words")
+    order.add_argument("--request", help="id of the operator chat line or comment that ordered the work")
+    order.add_argument("--clear", action="store_true", help="remove the mark, with --quote")
+    order.set_defaults(handler=order_command)
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
@@ -1030,10 +1155,12 @@ def build_parser():
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
     sub.add_parser(
-        "get", help="print one task, phase, follow up or priority, or every task or freeze, through the ledger API"
-    ).add_argument(
-        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
-    )
+        "get",
+        help=(
+            "print one task, phase, follow up, priority or focus target, the tasks of a focus target, "
+            "or every task, freeze or focus, through the ledger API"
+        ),
+    ).add_argument("item", type=_ledger_item, help=ITEM_FORMS)
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
         tasks.add_argument(flag)
@@ -1061,7 +1188,7 @@ def build_parser():
     task.add_argument("action", choices=["add", "set", "group", "split"])
     task.add_argument("id", help="task id; task add - mints the next free t<n>")
     task.add_argument("values", nargs="+")
-    task.add_argument("--lane", choices=["eng", "ci", "plan"], default="eng")
+    task.add_argument("--lane", choices=ledger_tasks.LANES, default="eng")
     task.add_argument("--phase", default="")
     task.add_argument("--description", default="")
     task.add_argument("--depends-on", default="", help="comma separated task ids that must be done first")
@@ -1116,10 +1243,21 @@ def build_parser():
     task.add_argument(
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
     )
-    task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
+    task.add_argument(
+        "--covers-job",
+        help="the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
+        "the promotion watch files no task for it while this task is open",
+    )
+    task.add_argument(
+        "--quote",
+        help="task set rank=...: the operator's words, so the rank stays his, "
+        "and task add: his words, filing the task as his order",
+    )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
-    publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
+    target = publish.add_mutually_exclusive_group(required=True)
+    target.add_argument("--phase", help="comma separated ids of the phases the plan fills")
+    target.add_argument("--task", help="id of one task with no phase the plan fills; the plan carries one slice marker")
     publish.add_argument("--title", default="", help="default the plan's first heading")
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
     plan = sub.add_parser("plan")
@@ -1128,7 +1266,7 @@ def build_parser():
     return parser
 
 
-def main():
+def main() -> None:
     from scripts.gates import Who
     from scripts.gates.identity import refusal
 
@@ -1140,7 +1278,8 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
+    handler(args)
 
 
 if __name__ == "__main__":

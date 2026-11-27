@@ -29,6 +29,7 @@ from scripts.swarm import (
     ledger_probe,
     lifecycle,
     live_binding,
+    master_critical,
     outage,
     overlays,
     quota_view,
@@ -46,8 +47,11 @@ from scripts.swarm.health import (
     activity,
     checks,
     early_ends,
+    focus_unclaimed,
+    harness_pin,
     merge_stall,
     night_watch,
+    order_waiting,
     ordering_dependencies,
     prompt_backlog,
     quiet_hives,
@@ -87,6 +91,27 @@ def task_counts(tasks):
     return {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
 
 
+def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
+    """A status section's lines, or one line naming the section when the Redis role may not read its keys."""
+    from redis.exceptions import NoPermissionError
+
+    try:
+        return read()
+    except NoPermissionError as exc:
+        return [f"{name} unreadable: {exc}"]
+
+
+def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The live hives whose pending admission count the Redis role may read, and each live hive it may not read with
+    the refusal, so a hive member lists the admission rooms it can read and names the counts it cannot."""
+    from scripts.hive.launch import live_hives, pending_reader
+
+    refused: dict[str, str] = {}
+    live = live_hives(store, pending_reader(refused))
+    unreadable = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
+    return [hive for hive in live if hive["id"] not in unreadable], unreadable
+
+
 def auto_snapshot(config):
     return {
         "last": snapshot.last_auto(config.slug),
@@ -108,7 +133,7 @@ def findings(
         passing = checks.cached_green(store.redis, store.key(slug, "checks"))
     else:
         pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
-    placement_waits.prune(store, slug, tasks)
+    placement_waits.prune(store, slug, tasks, now_ms())
     events = [
         *events,
         *(
@@ -151,11 +176,15 @@ def findings(
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + harness_pin.findings(store, slug, now_ms())
         + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
+        + master_critical.findings(store, slug, now_ms())
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + focus_unclaimed.findings(store, slug)
+        + order_waiting.findings(store, slug)
         + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -194,7 +223,7 @@ def _health_rows(store, slug, agents, quiet, at):
     return rows
 
 
-def talk_since_outcome(store, slug, rows):
+def talk_since_outcome(store: RedisStore, slug: str, rows: list[dict[str, Any]]) -> dict[str, int]:
     marks = progress.Progress(store.redis, slug)
     held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
     return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}
@@ -293,6 +322,15 @@ def transport(agent: AgentRecord) -> dict:
     return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
 
 
+def wait_label(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """The agent's live declared wait as its kind and target, ``bare`` for a bare wait, or ``-`` without one."""
+    held = idle.wait(store.redis, slug, agent.name)
+    if not held:
+        return "-"
+    on = held.get("on")
+    return f"{on['kind']} {on['target']}" if on else "bare"
+
+
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
     from scripts.swarm.commands import hive_id
 
@@ -329,6 +367,7 @@ def status_report(
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
     visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
+    held = front_door.held_seats(store, slug)
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
@@ -347,7 +386,7 @@ def status_report(
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
                 "capabilities": transport(a),
-                "route": front_door.master_route(slug, a),
+                "route": front_door.master_route(slug, a, held),
                 "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
@@ -359,6 +398,7 @@ def status_report(
             for a in visible
         ],
         "outages": outage.open_records(slug),
+        "master_critical": master_critical.read(store, slug),
         "outbox": outbox.status(),
         "lab": lab_capacity.status(store, slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),

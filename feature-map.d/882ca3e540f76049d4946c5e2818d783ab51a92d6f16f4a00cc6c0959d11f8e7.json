@@ -1,0 +1,22 @@
+{
+  "id": "lab-private-repository-refs",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2821",
+  "behaviour": "The scheduler lists and fetches private GitHub repositories with repository scoped contents read App tokens; local origins, relay writes and visible credential refusals retain their behavior.",
+  "seam": "MirrorExpander, Mirror.fetch, GitPusher and Scheduler.tick",
+  "tests": [
+    "tests/ci_lab/test_private_repository_refs.py::test_an_anonymous_private_listing_reproduces_the_credential_refusal",
+    "tests/ci_lab/test_private_repository_refs.py::test_private_pull_heads_are_reachable_with_a_read_token",
+    "tests/ci_lab/test_private_repository_refs.py::test_private_merge_groups_are_listed_with_a_read_token",
+    "tests/ci_lab/test_private_repository_refs.py::test_private_merge_base_lookup_authenticates_dev_listing_and_both_fetches",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_private_mirror_fetch_uses_its_environment_and_then_reuses_the_commit",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_mirror_representation_never_contains_its_credential_environment",
+    "tests/ci_lab/test_private_repository_refs.py::test_the_shared_git_environment_matches_the_relay_header_and_disables_prompts",
+    "tests/ci_lab/test_private_repository_refs.py::test_relay_push_uses_the_shared_environment_builder",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_private_pull_starts_grading_without_an_expansion_refusal",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_token_refusal_is_visible_to_the_waiting_pass_without_logging_the_token",
+    "tests/ci_lab/test_private_repository_refs.py::test_file_origins_need_no_app_credentials",
+    "tests/ci_lab/test_private_repository_refs.py::test_production_reuses_one_scoped_contents_read_auth_per_repository",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_read_token_refusal_preserves_live_merge_groups"
+  ]
+}

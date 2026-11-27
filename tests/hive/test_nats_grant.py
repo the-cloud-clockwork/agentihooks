@@ -755,10 +755,15 @@ def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     for step in ("drain", "forget", "unbank", "unmanifest"):
         monkeypatch.setattr(remove, step, lambda *args: [])
     monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
+    monkeypatch.setattr(remove.machine, "targets", lambda run: {})
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
     store = SimpleNamespace(redis=admin)
     plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
-    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked", f"signer: {remove.NO_SIGNER}"]
+    assert remove.remove(store, None, plan, remove.Host()) == [
+        "host: herdr holds no machine h1, so there is no SSH route to stop its services on",
+        "member: revoked",
+        f"signer: {remove.NO_SIGNER}",
+    ]
     assert calls == [(admin, "m1", signed, False)]
 
 

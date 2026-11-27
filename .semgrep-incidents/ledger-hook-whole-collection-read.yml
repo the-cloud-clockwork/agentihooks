@@ -1,0 +1,24 @@
+rules:
+  - id: ledger-hook-whole-collection-read
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The swarm ledger hook runs on every tool call, prompt and stop of a bound session. Read single items
+      such as tasks/<id>, or the phase and follow up flags through read_flags; never a whole tasks, phases
+      or followups collection or the whole ledger document.
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_hook.py
+        - /hooks/context/swarm_ledger.py
+        - ledger-hook-whole-collection-read.py
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $READ(..., "=~/^(tasks|phases|followups)$/", ...)
+              - pattern: $MODULE.$READ(..., "=~/^(tasks|phases|followups)$/", ...)
+          - metavariable-regex:
+              metavariable: $READ
+              regex: ^read_ledgers?$
+      - pattern: $NAME = (..., "=~/^(tasks|phases|followups)$/", ...)
+      - pattern: read_document(...)
+      - pattern: $MODULE.read_document(...)

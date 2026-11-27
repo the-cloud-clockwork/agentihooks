@@ -148,7 +148,7 @@ def render_released(app_version: str, *settings: str) -> list[dict]:
     """Render a copy of the chart whose appVersion is the one the chart release package stamps."""
     with tempfile.TemporaryDirectory() as scratch:
         copy = Path(scratch) / CHART.name
-        shutil.copytree(CHART, copy)
+        shutil.copytree(CHART, copy, copy_function=shutil.copyfile)
         meta = yaml.safe_load((copy / "Chart.yaml").read_text())
         meta["appVersion"] = app_version
         (copy / "Chart.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
@@ -184,6 +184,79 @@ def test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused() -> 
         raise AssertionError("a malformed appVersion must not fall back to the floating worker tag")
 
 
+def release_stamps(objects: list[dict]) -> list[str | None]:
+    """Name the release stamp on every worker hive pod template."""
+    return [
+        item["spec"]["template"]["metadata"]["annotations"].get("agentihooks.io/release")
+        for item in objects
+        if item["kind"] == "Deployment"
+    ]
+
+
+def test_each_released_chart_restamps_a_leased_release_tag_hive_with_its_own_version() -> None:
+    second = (
+        "workers.hives[0].name=second",
+        "workers.hives[0].credentialSecret.name=second",
+        "workers.hives[0].credentialSecret.key=credential",
+    )
+    assert release_stamps(render_released("2.17.467", "workers.image.tag=release")) == ["2.17.467"]
+    assert release_stamps(render_released("2.17.468", "workers.image.tag=release", *second)) == ["2.17.468"] * 2
+    explicit = render_released("2.17.467", "workers.image.tag=release", "workers.rollout.release=by-hand")
+    assert release_stamps(explicit) == ["by-hand"]
+    for settings in (
+        ("workers.image.tag=2.17.400",),
+        ("workers.image.tag=dev",),
+        ("workers.image.tag=release", "workers.rollout.enabled=false"),
+    ):
+        assert release_stamps(render_released("2.17.467", *settings)) == [None]
+    assert release_stamps(render_released("dev", "workers.image.tag=release")) == [None]
+
+
+def test_worker_sandbox_profiles_preserve_shared_security() -> None:
+    objects = render(
+        "hiveOnly=false",
+        "workers.sandboxProfiles.seccomp=ci-lab-worker.json",
+        "workers.sandboxProfiles.apparmor=ci-lab-worker",
+    )
+    hives = 0
+    for item in objects:
+        if item["kind"] != "Deployment":
+            continue
+        pod = item["spec"]["template"]["spec"]
+        security = pod["securityContext"]
+        if item["metadata"]["labels"].get("app.kubernetes.io/component") == "worker-hive":
+            hives += 1
+            assert security["seccompProfile"] == {"type": "Localhost", "localhostProfile": "ci-lab-worker.json"}
+            assert security["appArmorProfile"] == {"type": "Localhost", "localhostProfile": "ci-lab-worker"}
+            assert security["runAsUser"] == 10001
+            assert security["runAsNonRoot"] is True
+            assert pod["automountServiceAccountToken"] is False
+            assert pod["containers"][0]["securityContext"]["capabilities"]["drop"] == ["ALL"]
+            assert pod["containers"][0]["securityContext"]["allowPrivilegeEscalation"] is False
+        else:
+            assert security["seccompProfile"] == {"type": "RuntimeDefault"}
+            assert "appArmorProfile" not in security
+    assert hives == 1
+
+
+def test_default_worker_sandbox_security_is_unchanged() -> None:
+    for item in render():
+        if item["kind"] == "Deployment":
+            security = item["spec"]["template"]["spec"]["securityContext"]
+            assert security["seccompProfile"] == {"type": "RuntimeDefault"}
+            assert "appArmorProfile" not in security
+
+
+def test_worker_sandbox_profiles_require_a_pair() -> None:
+    for name in ("seccomp", "apparmor"):
+        try:
+            render(f"workers.sandboxProfiles.{name}=profile")
+        except subprocess.CalledProcessError as error:
+            assert "is required with" in error.stderr
+        else:
+            raise AssertionError("a native worker sandbox requires both profiles")
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -194,4 +267,8 @@ if __name__ == "__main__":
     test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
     test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version()
     test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused()
+    test_each_released_chart_restamps_a_leased_release_tag_hive_with_its_own_version()
+    test_worker_sandbox_profiles_preserve_shared_security()
+    test_default_worker_sandbox_security_is_unchanged()
+    test_worker_sandbox_profiles_require_a_pair()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")

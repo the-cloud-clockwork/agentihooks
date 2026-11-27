@@ -1,6 +1,7 @@
 import { COMMENTS_KEY, NOUN } from "./config.js";
 import { grow, h, newId, store, stored, when } from "./dom.js";
 import { queue } from "./sync.js";
+import { loadThread, remoteComments } from "./seed.js";
 import { attachable, attaching, attachmentsView, withAttachments } from "./media.js";
 import { render } from "./render.js";
 import { jumpTo } from "./outline.js";
@@ -97,11 +98,16 @@ export function threadView(path, list, cls, page) {
 }
 
 export function commentsView(key, list) {
-  const count = list.filter((e) => !e.deleted).length;
+  const unread = list.length ? 0 : remoteComments(key);
+  const count = unread || list.filter((e) => !e.deleted).length;
   const box = h("details", { "data-key": key }, h("summary", {}, `Comments`, h("span", { class: "count", text: count ? `· ${count}` : "" })));
   const shown = toggles[`sec-${key.split("/")[0]}`];
   box.open = openComments.has(key) || (!closedComments.has(key) && shown === true);
   box.addEventListener("toggle", () => rememberComment(key, box.open));
+  if (unread) {
+    if (box.open) loadThread(key).catch(() => null);
+    else box.addEventListener("toggle", () => loadThread(key).catch(() => null), { once: true });
+  }
   return lazy(box, () => threadView(`${key}/comments`, list, "thread flat", COMMENT_PAGE));
 }
 

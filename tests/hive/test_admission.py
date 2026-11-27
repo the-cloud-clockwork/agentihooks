@@ -1,13 +1,16 @@
+import json
 import threading
-from typing import TYPE_CHECKING
+from fnmatch import fnmatchcase
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from scripts.hive import admission
+from scripts.hive import admission, auth, headroom
 from tests.swarm.test_cli import env as env
 
 if TYPE_CHECKING:
     import fakeredis
+    from redis import Redis
 
 pytestmark = pytest.mark.unit
 
@@ -37,7 +40,7 @@ def test_an_idle_hive_has_room_until_projected_cpu_passes_eighty_percent():
     assert found == admission.Room(
         25,
         admission.CPU,
-        "five minute load 0.00 on 16 CPUs, 0.5 CPU per agent, fits 25 more under the 80 percent line",
+        "five minute load 0.00 on 16 CPUs, 0.5 CPU per agent by default, fits 25 more under the 80 percent line",
     )
 
 
@@ -45,7 +48,7 @@ def test_a_loaded_hive_refuses_on_cpu():
     found = admission.room(reading(cpus=8, load5=6.2))
     assert (found.room, found.reason) == (0, admission.CPU)
     assert admission.refusal(found) == (
-        "cpu: five minute load 6.20 on 8 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+        "cpu: five minute load 6.20 on 8 CPUs, 0.5 CPU per agent by default, fits 0 more under the 80 percent line"
     )
 
 
@@ -104,7 +107,7 @@ def test_the_workstation_keeps_swarm_agents_to_forty_percent_of_its_cpu():
     assert found == admission.Room(
         2,
         admission.CPU,
-        "10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share",
+        "10 swarm agents at 0.5 CPU each by default on 16 CPUs, fits 2 more under the 40 percent swarm share",
     )
 
 
@@ -132,7 +135,7 @@ def test_the_swarm_share_never_binds_below_the_hive_max_agents_on_a_quiet_host()
     assert found == admission.Room(
         16,
         admission.CPU,
-        "five minute load 4.32 on 16 CPUs, 0.5 CPU per agent, fits 16 more under the 80 percent line",
+        "five minute load 4.32 on 16 CPUs, 0.5 CPU per agent by default, fits 16 more under the 80 percent line",
     )
 
 
@@ -141,14 +144,17 @@ def test_the_swarm_share_still_binds_when_it_equals_the_hive_slots_left():
     assert found == admission.Room(
         2,
         admission.CPU,
-        "10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share",
+        "10 swarm agents at 0.5 CPU each by default on 16 CPUs, fits 2 more under the 40 percent swarm share",
     )
 
 
 def test_the_host_cpu_line_still_binds_under_the_hive_max_agents():
     found = admission.room(reading(cpus=16, load5=12.0), swarm_agents=12, max_agents=20)
     assert (found.room, found.reason) == (1, admission.CPU)
-    assert found.detail == "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+    assert (
+        found.detail
+        == "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent by default, fits 1 more under the 80 percent line"
+    )
 
 
 def test_the_host_ram_line_still_binds_under_the_hive_max_agents():
@@ -166,7 +172,7 @@ def test_pending_reservations_use_up_the_room():
     assert admission.refusal(found) == ""
     held = admission.room(reading(cpus=8, load5=5.6), pending=1)
     assert admission.refusal(held) == (
-        "cpu: five minute load 5.60 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "cpu: five minute load 5.60 on 8 CPUs, 0.5 CPU per agent by default with 1 pending launches, "
         "fits 0 more under the 80 percent line"
     )
 
@@ -194,6 +200,55 @@ def test_a_reservation_expires_after_its_lifetime(redis):
     time.sleep(0.01)
     assert admission.pending(redis, "anton") == 0
     assert admission.reserve(redis, "anton", "s/two", 1) == (True, 0)
+
+
+class _Granted:
+    """A Redis client logged in under a hive member's key patterns. It refuses a key as Redis 7.4 does: EVAL declares
+    every key it names read and written and ZCOUNT only read, so a key the member may only read refuses EVAL."""
+
+    def __init__(self, redis: "fakeredis.FakeRedis", patterns: tuple[str, ...]) -> None:
+        self.redis = redis
+        self.written = [pattern[1:] for pattern in patterns if pattern.startswith("~")]
+        self.read = self.written + [pattern[3:] for pattern in patterns if pattern.startswith("%R~")]
+
+    def _reach(self, key: str, patterns: list[str]) -> None:
+        from redis.exceptions import NoPermissionError
+
+        if not any(fnmatchcase(key, pattern) for pattern in patterns):
+            raise NoPermissionError("No permissions to access a key")
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: str) -> Any:
+        for key in keys_and_args[:numkeys]:
+            self._reach(key, self.written)
+        return self.redis.eval(script, numkeys, *keys_and_args)
+
+    def time(self) -> Any:
+        return self.redis.time()
+
+    def zcount(self, name: str, low: str, high: str) -> Any:
+        self._reach(name, self.read)
+        return self.redis.zcount(name, low, high)
+
+
+@pytest.mark.feature("hive-member-reads-every-hive-pending-admission")
+def test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only_grant(
+    redis: "fakeredis.FakeRedis",
+) -> None:
+    admission.reserve(redis, "hive-two", "s/one", 2)
+    admission.reserve(redis, "hive-one", "s/own", 2)
+    admission.reserve(redis, "hive-one", "s/next", 2)
+    member = cast("Redis", _Granted(redis, auth._acl_keys("hive-one")))
+    assert admission.pending(member, "hive-two") == 1
+    assert admission.pending(member, "hive-one") == 2
+
+
+def test_pending_counts_the_reservations_that_expire_after_the_server_clock_millisecond(
+    redis: "fakeredis.FakeRedis", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(redis, "time", lambda: (1_000, 900_400))
+    now = 1_000_900
+    redis.zadd(admission.key("anton"), {"s/gone": now - 1, "s/edge": now, "s/late": now + 0.25, "s/live": now + 1})
+    assert admission.pending(redis, "anton") == 2
 
 
 def test_a_reservation_key_lives_in_the_swarm_keyspace():
@@ -312,6 +367,20 @@ def test_view_lines_join_hive_lines_and_the_binding_line_and_stay_empty_without_
     assert admission.view_lines([], {"host room": 3}) == []
 
 
+@pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
+def test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read() -> None:
+    hives = [hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    refused = {"far": "No permissions to access a key"}
+    assert admission.view_lines(hives, {"host room": 3}, refused) == [
+        "hive vm  admission room 0  cpu: busy",
+        "hive far  admission count unreadable: No permissions to access a key",
+        "binding limit hive admission, room 0: hive vm cpu: busy",
+    ]
+    assert admission.view_lines([], {"host room": 3}, refused) == [
+        "hive far  admission count unreadable: No permissions to access a key"
+    ]
+
+
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
     from scripts.hive import placement_waits
     from scripts.swarm import cli, status
@@ -330,13 +399,15 @@ def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
 def test_pending_launches_lower_only_the_host_line_the_load_has_not_shown_yet():
     measured = reading(cpus=10, load5=2.0)
     assert admission.room(measured, 0) == admission.Room(
-        8, admission.CPU, "0 swarm agents at 0.5 CPU each on 10 CPUs, fits 8 more under the 40 percent swarm share"
+        8,
+        admission.CPU,
+        "0 swarm agents at 0.5 CPU each by default on 10 CPUs, fits 8 more under the 40 percent swarm share",
     )
     assert admission.room(measured, 0, pending=3).room == 8
     assert admission.room(measured, 0, pending=5) == admission.Room(
         7,
         admission.CPU,
-        "five minute load 2.00 on 10 CPUs, 0.5 CPU per agent with 5 pending launches, fits 7 more under the 80 percent line",
+        "five minute load 2.00 on 10 CPUs, 0.5 CPU per agent by default with 5 pending launches, fits 7 more under the 80 percent line",
     )
     assert admission.room(measured, 6, pending=1).room == 2
 
@@ -375,14 +446,16 @@ def test_a_tie_names_the_host_line_first():
     assert admission.room(reading(cpus=10, load5=4.0), 0) == admission.Room(
         8,
         admission.CPU,
-        "five minute load 4.00 on 10 CPUs, 0.5 CPU per agent, fits 8 more under the 80 percent line",
+        "five minute load 4.00 on 10 CPUs, 0.5 CPU per agent by default, fits 8 more under the 80 percent line",
     )
 
 
 def test_an_overloaded_host_floors_its_cpu_line_before_comparing_with_ram():
     measured = reading(cpus=1, load5=1.55, available_mb=1000, total_mb=10_000)
     assert admission.room(measured) == admission.Room(
-        0, admission.CPU, "five minute load 1.55 on 1 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+        0,
+        admission.CPU,
+        "five minute load 1.55 on 1 CPUs, 0.5 CPU per agent by default, fits 0 more under the 80 percent line",
     )
 
 
@@ -415,7 +488,7 @@ def test_a_pod_cpu_limit_counts_the_pod_load_below_the_node_cpus():
     assert admission.room(measured, pending=1) == admission.Room(
         1,
         admission.CPU,
-        "pod load 0.60 on a 2.5 CPU limit, 0.5 CPU per agent with 1 pending launches, "
+        "pod load 0.60 on a 2.5 CPU limit, 0.5 CPU per agent by default with 1 pending launches, "
         "fits 1 more under the 80 percent line",
     )
     assert admission.room({**measured, "pod_load": 0.0}, pending=1).room == 3
@@ -423,7 +496,7 @@ def test_a_pod_cpu_limit_counts_the_pod_load_below_the_node_cpus():
 
 def test_a_pod_limit_binds_alone_and_needs_both_of_its_fields():
     assert admission.room(pod(pod_cpus=1.0, pod_load=0.0)).detail == (
-        "pod load 0.00 on a 1 CPU limit, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+        "pod load 0.00 on a 1 CPU limit, 0.5 CPU per agent by default, fits 1 more under the 80 percent line"
     )
     assert admission.room(pod(pod_total_mb=1400, pod_available_mb=1400)).room == 1
     for partial in ({"pod_cpus": 1.0}, {"pod_load": 0.0}, {"pod_available_mb": 0}, {"pod_total_mb": 0}):
@@ -433,7 +506,9 @@ def test_a_pod_limit_binds_alone_and_needs_both_of_its_fields():
 def test_the_node_binds_when_it_is_tighter_than_the_pod():
     measured = pod(load5=12.0, pod_total_mb=64 * GB, pod_available_mb=64 * GB, pod_cpus=16.0, pod_load=0.0)
     assert admission.room(measured) == admission.Room(
-        1, admission.CPU, "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+        1,
+        admission.CPU,
+        "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent by default, fits 1 more under the 80 percent line",
     )
 
 
@@ -484,7 +559,7 @@ def test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_hol
     assert admission.room(measured, pending=admission.pending(redis, "hive-two")) == admission.Room(
         4,
         admission.CPU,
-        "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent by default with 1 pending launches, "
         "fits 4 more under the 80 percent line",
     )
     assert admission.HOST_PERCENT == 80
@@ -503,7 +578,7 @@ def test_a_first_ranked_hive_refuses_on_saturated_cpu_below_the_memory_line() ->
     assert found == admission.Room(
         0,
         admission.CPU,
-        "five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line",
+        "five minute load 28.70 on 16 CPUs, 0.5 CPU per agent by default, fits 0 more under the 80 percent line",
     )
 
 
@@ -512,7 +587,7 @@ def test_a_first_ranked_hive_takes_the_lower_of_its_cpu_and_memory_room() -> Non
     assert found == admission.Room(
         1,
         admission.CPU,
-        "five minute load 12.10 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line",
+        "five minute load 12.10 on 16 CPUs, 0.5 CPU per agent by default, fits 1 more under the 80 percent line",
     )
 
 
@@ -520,7 +595,7 @@ def test_a_first_ranked_hive_refuses_on_saturated_pod_cpu() -> None:
     measured = reading(pod_available_mb=15000, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
     found = admission.room(measured, first=True)
     assert admission.refusal(found) == (
-        "cpu: pod load 8.00 on a 4 CPU limit, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+        "cpu: pod load 8.00 on a 4 CPU limit, 0.5 CPU per agent by default, fits 0 more under the 80 percent line"
     )
 
 
@@ -590,7 +665,7 @@ def test_a_high_load_average_with_low_cpu_used_still_admits_launches() -> None:
     assert found == admission.Room(
         16,
         admission.CPU,
-        "4.34 of 16 CPUs used, five minute load 10.90 on 16 CPUs, 0.5 CPU per agent, "
+        "4.34 of 16 CPUs used, five minute load 10.90 on 16 CPUs, 0.5 CPU per agent by default, "
         "fits 16 more under the 80 percent line",
     )
     assert admission.room(reading(cpus=16, load5=13.0, used_cpus=6.3)).room == 13
@@ -605,7 +680,9 @@ def test_used_cpu_refuses_a_busy_node_whatever_its_load_average() -> None:
 def test_used_cpu_room_counts_pending_launches() -> None:
     found = admission.room(reading(cpus=16, load5=0.0, used_cpus=4.0), pending=3)
     assert (found.room, found.reason) == (14, admission.CPU)
-    assert found.detail.endswith("0.5 CPU per agent with 3 pending launches, fits 14 more under the 80 percent line")
+    assert found.detail.endswith(
+        "0.5 CPU per agent by default with 3 pending launches, fits 14 more under the 80 percent line"
+    )
 
 
 def test_the_load_average_guard_binds_only_once_used_cpu_reaches_the_swarm_share() -> None:
@@ -618,3 +695,143 @@ def test_the_load_average_guard_binds_only_once_used_cpu_reaches_the_swarm_share
     )
     assert admission.room(reading(cpus=16, load5=12.8, used_cpus=6.4)).room == 12
     assert admission.room(reading(cpus=16, load5=12.81, used_cpus=6.39)).room == 12
+
+
+@pytest.mark.feature("hive-admission-guard-own-cpu")
+def test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=20.84, used_cpus=8.96, pod_cpus=7.0, pod_load=0.27))
+    assert found == admission.Room(
+        7,
+        admission.CPU,
+        "8.96 of 16 CPUs used, five minute load 20.84 on 16 CPUs, 0.5 CPU per agent by default, "
+        "fits 7 more under the 80 percent line",
+    )
+
+
+@pytest.mark.feature("hive-admission-guard-own-cpu")
+def test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share() -> None:
+    found = admission.room(reading(cpus=16, load5=13.0, used_cpus=9.0, pod_cpus=16.0, pod_load=6.4))
+    assert found == admission.Room(
+        0,
+        admission.CPU,
+        "9.00 of 16 CPUs used, five minute load 13.00 on 16 CPUs with pod load 6.40 at or above the 40 percent "
+        "swarm share, fits 0 more",
+    )
+    assert admission.room(reading(cpus=16, load5=13.0, used_cpus=9.0, pod_cpus=16.0, pod_load=6.39)).room == 7
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 0, "codex": 0}))
+    assert (found.room, found.reason) == (12, admission.CPU)
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=4.0, agents={"claude": 9}))
+    assert (found.room, found.reason) == (17, admission.CPU)
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_of_six_point_seven_cores_over_nine_agents_admits_at_three_quarters_of_a_cpu_each() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 6, "codex": 3})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(75, "measured from pod load 6.70 over 9 agents")
+    assert admission.room(measured) == admission.Room(
+        8,
+        admission.CPU,
+        "pod load 6.70 on a 16 CPU limit, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, "
+        "fits 8 more under the 80 percent line",
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_with_no_agents_admits_at_half_a_cpu_by_default() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 0, "codex": 0})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(50, "by default")
+    assert admission.room(measured).detail == (
+        "pod load 6.70 on a 16 CPU limit, 0.5 CPU per agent by default, fits 12 more under the 80 percent line"
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize("fields", [{"pod_load": 6.7}, {"pod_load": 6.7, "agents": {}}, {"agents": {"claude": 9}}])
+def test_a_reading_without_running_agents_or_pod_load_takes_the_default_figure(fields: dict[str, Any]) -> None:
+    assert admission.agent_cpu(reading(**fields)) == admission.AgentCpu(50, "by default")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize(
+    ("load", "agents", "centi"), [(6.7, 9, 75), (6.3, 9, 70), (1.1, 2, 55), (5.05, 5, 105), (2.0, 9, 50)]
+)
+def test_the_measured_figure_rounds_up_to_the_next_twentieth_and_never_drops_below_half_a_cpu(
+    load: float, agents: int, centi: int
+) -> None:
+    found = admission.agent_cpu(reading(pod_load=load, agents={"claude": agents}))
+    assert found == admission.AgentCpu(centi, f"measured from pod load {load:.2f} over {agents} agents")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_the_agent_cpu_setting_overrides_the_measured_figure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "1")
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(100, "set by AGENTIHOOKS_HIVE_AGENT_CPU")
+    assert admission.room(measured).detail == (
+        "pod load 6.70 on a 16 CPU limit, 1 CPU per agent set by AGENTIHOOKS_HIVE_AGENT_CPU, "
+        "fits 6 more under the 80 percent line"
+    )
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "0.7")
+    assert admission.room(reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=5.8)).room == 10
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "0.29")
+    assert admission.agent_cpu(measured) == admission.AgentCpu(29, "set by AGENTIHOOKS_HIVE_AGENT_CPU")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize("value", ["", "0", "0.001", "-1", "half", "nan", "inf"])
+def test_an_agent_cpu_setting_that_names_no_cpu_leaves_the_measured_figure(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", value)
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(75, "measured from pod load 6.70 over 9 agents")
+    assert admission.room(measured).room == 8
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_reading_taken_after_a_stale_one_has_no_pod_load_and_takes_the_default_figure(
+    redis: "fakeredis.FakeRedis",
+) -> None:
+    stale = reading(pod_cpus=7.0, pod_cpu_usec=1_000_000, pod_load=6.7, agents={"claude": 9}, measured_at=0)
+    redis.set(headroom.key("h1"), json.dumps(stale))
+    now = headroom.STALE_MS + 1
+    previous = headroom.read(redis, "h1", now)
+    assert previous is None
+    pod = {"pod_cpus": 7.0, "pod_cpu_usec": 2_000_000, **headroom._load(2_000_000, now, previous)}
+    assert admission.agent_cpu(reading(agents={"claude": 9}, **pod)) == admission.AgentCpu(50, "by default")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_the_swarm_share_counts_swarm_agents_at_the_measured_figure() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.room(measured, swarm_agents=2) == admission.Room(
+        6,
+        admission.CPU,
+        "2 swarm agents at 0.75 CPU each measured from pod load 6.70 over 9 agents on 16 CPUs, "
+        "fits 6 more under the 40 percent swarm share",
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize(
+    ("fields", "detail"),
+    [
+        ({"load5": 4.0}, "five minute load 4.00 on 16 CPUs"),
+        ({"load5": 0.0, "used_cpus": 4.0}, "4.00 of 16 CPUs used, five minute load 0.00 on 16 CPUs"),
+    ],
+)
+def test_each_host_cpu_line_names_the_measured_figure_and_its_source(fields: dict[str, Any], detail: str) -> None:
+    found = admission.room(reading(cpus=16, pod_cpus=64.0, pod_load=6.7, agents={"claude": 9}, **fields))
+    assert found == admission.Room(
+        11,
+        admission.CPU,
+        f"{detail}, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, fits 11 more under the 80 percent line",
+    )
