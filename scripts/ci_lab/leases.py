@@ -2,7 +2,7 @@
 
 import hmac
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 
 from scripts.ci_lab.outcomes import COMPLETED
@@ -10,16 +10,22 @@ from scripts.ci_lab.pods import PodImages, Pods, unmanaged, unread
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "release", "solo", "unstored"]
+__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "Shed", "release", "solo", "unshed", "unstored"]
 
 REQUEUES = 1
 
 Manifests = Callable[[Unit], str]
+Shed = Callable[[], Collection[str]]
 
 
 def unstored(unit: Unit) -> str:
     """The manifests port where no object store holds batch manifests: a lease carries none."""
     return ""
+
+
+def unshed() -> tuple[str, ...]:
+    """The shed port where no daily core budget sheds a class: every pending job may lease."""
+    return ()
 
 
 SOLO = frozenset({("static", "type-gate")})
@@ -54,6 +60,7 @@ class Leases:
     manifests: Manifests = unstored
     image: str = ""
     images: PodImages = unread
+    shed: Shed = unshed
 
     def stale(self, worker: str) -> bool:
         """Whether the worker's pod runs a floating image other than the one the lab wants."""

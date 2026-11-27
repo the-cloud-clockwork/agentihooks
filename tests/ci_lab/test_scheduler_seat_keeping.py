@@ -1,5 +1,5 @@
-"""Scheduler main wires the lease API's stale-restart seam with the wanted image and the pods port reader; kept out
-of tests/ci_lab/test_scheduler.py, which is at the file-lines cap."""
+"""Scheduler main wires the lease API's stale-restart seam with the wanted image and the pods port reader, and its shed
+port with the daily core budget; kept out of tests/ci_lab/test_scheduler.py, which is at the file-lines cap."""
 
 import ssl
 from pathlib import Path
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts.ci_lab import pods, relay, scheduler
+from scripts.ci_lab import budget, pods, relay, scheduler
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.leases import Leases
 from tests.ci_lab.test_scheduler import APP_SETTINGS, Expander, Inbox, Poster, RelayBuilds, fake_redis
@@ -133,3 +133,68 @@ def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
     leases = listened["leases"]
     assert leases.image == ""
     assert leases.images is pods.unread
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    import redis
+
+    from scripts.events import config, factory
+
+    client = fake_redis()
+    listened: dict[str, Leases] = {}
+    spent: dict[str, budget.Budget] = {}
+    bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
+
+    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
+        spent["budget"] = spending
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], pods.unmanaged)
+        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
+
+    def listen(found: Any, leases: Leases, *rest: Any) -> list[Any]:
+        listened["leases"] = leases
+        return []
+
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "classes": list(CLASSES),
+                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5, "promotion": 0.75}},
+                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
+            }
+        )
+    )
+    environ = {
+        scheduler.contract.REDIS_URL: "redis://lab",
+        scheduler.contract.RUNTIME_CONFIG: str(runtime),
+        scheduler.MINIO_ENDPOINT: "endpoint",
+        scheduler.MINIO_ACCESS_KEY: "access",
+        scheduler.MINIO_SECRET_KEY: "secret",
+        scheduler.MINIO_BUCKET: "bucket",
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+    } | APP_SETTINGS
+    bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda url, **options: client)
+    monkeypatch.setattr(boto3, "client", lambda name, **options: "s3 client")
+    monkeypatch.setattr(
+        config.BusConfig, "from_environ", classmethod(lambda cls, found: config.BusConfig("nats", "nats://lab"))
+    )
+    monkeypatch.setattr(factory, "open_bus", lambda found: bus if found == bound else None)
+    monkeypatch.setattr(scheduler, "_now_ms", lambda: 1_795_700_000_000)
+    monkeypatch.setattr(scheduler, "build", build)
+    monkeypatch.setattr(scheduler, "listen", listen)
+    monkeypatch.setattr(scheduler, "serve", lambda *args: 7)
+    monkeypatch.setattr(relay, "build", RelayBuilds())
+
+    assert scheduler.main([], environ) == 7
+
+    leases = listened["leases"]
+    assert tuple(leases.shed()) == ()
+    spent["budget"].charge(1, 300 * 60)
+    assert tuple(leases.shed()) == ("backfill",)
+    spent["budget"].charge(1, 150 * 60)
+    assert tuple(leases.shed()) == ("backfill", "promotion")
