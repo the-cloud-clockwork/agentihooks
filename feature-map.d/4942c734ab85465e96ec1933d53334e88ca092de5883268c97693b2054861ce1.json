@@ -8,6 +8,7 @@
     "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_brief_prints_its_handoff_culture_latest_recap_and_learned_notes",
     "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_with_nothing_kept_names_each_part_as_none",
     "tests/seat_brief/test_seat_brief.py::test_a_corrected_learned_note_stays_withheld_from_the_brief",
+    "tests/seat_brief/test_seat_brief.py::test_a_corrected_culture_line_stays_withheld_by_its_swarm_source",
     "tests/seat_brief/test_seat_brief.py::test_a_quick_seat_brief_prints_its_handoff_culture_derived_recap_and_learned_file",
     "tests/seat_brief/test_seat_brief.py::test_a_quick_seat_with_empty_files_names_each_part_as_none",
     "tests/seat_brief/test_seat_brief.py::test_a_successor_reads_the_handoff_its_transfer_kept_after_the_live_key_is_cleared",

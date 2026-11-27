@@ -131,6 +131,22 @@ def test_a_corrected_learned_note_stays_withheld_from_the_brief(
 
 
 @pytest.mark.feature("seat-brief")
+def test_a_corrected_culture_line_stays_withheld_by_its_swarm_source(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store.culture.set("sw", "# How\n- Push straight to dev because review is slow\n- plain words\n")
+    source = "culture:sw#2"
+    injection_trace.record("sess-culture", "culture", source, "an older wording", {"swarm": "sw", "line": 2})
+    injection_trace.correct("sess-culture", source, "/repos/agentihooks", "dev is protected")
+
+    assert seat_brief.main(["brief"], SEATED) == 0
+
+    culture = _part(capsys.readouterr().out, "Culture")
+    assert "Push straight to dev" not in culture
+    assert "- plain words" in culture
+
+
+@pytest.mark.feature("seat-brief")
 def test_a_quick_seat_brief_prints_its_handoff_culture_derived_recap_and_learned_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -311,6 +327,7 @@ def test_priming_lines_end_with_the_seat_brief_command_with_or_without_history()
         {"seat": SEAT, "culture": "Merge on green.", "recaps": recaps},
     ):
         assert prompt.priming_lines(task)[-1] == prompt.SEAT_BRIEF
+    assert prompt.priming_lines({"seat": SEAT, "culture": "Merge on green."})[-2] == "5. Older recaps: none."
     assert prompt.SEAT_BRIEF == (
         "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap "
         "and learned notes from the store that keeps them."
