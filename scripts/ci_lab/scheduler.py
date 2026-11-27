@@ -673,6 +673,11 @@ def _quiet(state: State, revision: int) -> _Quiet:
     )
 
 
+def _revision(revisions: Mapping[str, str], run: str) -> int:
+    """Return a live grade's stored revision, a missing one reading as 0."""
+    return int(revisions.get(run, 0))
+
+
 def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: int) -> bool:
     """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
     start is leased, given their states in waiting then started order, and either a moved check run waits out its
@@ -880,7 +885,7 @@ class Scheduler:
         revisions, *present = pipe.execute()
         quiets: dict[str, _Quiet] = {}
         for run in (run for run, exists in zip(runs, present) if exists):
-            revision = int(revisions.get(run, 0))
+            revision = _revision(revisions, run)
             if (quiet := self._quiets.get(run)) is not None and quiet.revision == revision:
                 quiets[run] = quiet
             elif (state := self.grade(run)) is not None:
@@ -910,6 +915,9 @@ class Scheduler:
                     continue
             if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
+            if stale_heads.branchless(request.tier, head.lane, request.head, head.ref):
+                actions.append(f"ignored {request.head}: a push that named no branch asks for no grade")
+                continue
             actions.append(self._hold(request, head.lane, head.ref, now_ms))
         return actions
 
@@ -1155,11 +1163,14 @@ class Scheduler:
         return actions
 
     def _sweep(self) -> list[str]:
-        """Retire the stale pull request grades once, on the first pass of a scheduler that holds a listing of the
-        heads still wanted; the listing port is read on that pass, so a scheduler built with no ports builds."""
+        """Retire, once, on the first pass of a scheduler, the promotion work of pushes that named no branch, then the
+        stale pull request grades when the scheduler holds a listing of the heads still wanted; the listing port is
+        read on that pass, so a scheduler built with no ports builds."""
         swept, self._swept = self._swept, True
-        wanted = None if swept else self.ports.wanted
-        return [] if wanted is None else self._retire_heads(wanted)
+        if swept:
+            return []
+        wanted = self.ports.wanted
+        return [*self._retire_pushes(), *([] if wanted is None else self._retire_heads(wanted))]
 
     def _retire_heads(self, wanted: Callable[[str], frozenset[str]]) -> list[str]:
         """Close every live pull request grade with no grade ref whose head is neither an open pull request head nor
@@ -1186,6 +1197,39 @@ class Scheduler:
             reason = f"{head} is no open pull request head or plant head of {repo}"
             actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
         return [*actions, *(stale_heads.listed(repo, len(heads[repo]), origins, gone, units[repo]) for repo in heads)]
+
+    def _retire_pushes(self) -> list[str]:
+        """Drop every waiting promotion head and close every live promotion grade a push that named no branch asked
+        for, which holds its own head as its lane and no grade ref: the run is forgotten and the pending jobs of its
+        head are dropped unless another live grade grades that head. Nothing is posted. Each promotion grade
+        document is read alone, once: of a grade it retires only the head is kept, and of a grade it keeps the summary
+        at the revision stored before the read. One line counts the waiting heads dropped, the grades retired and the
+        pending units dropped; a pass that finds none adds no line."""
+        held = {name: json.loads(raw) for name, raw in self.client.hgetall(WAITING).items()}
+        waiting = sorted(
+            name
+            for name, entry in held.items()
+            if stale_heads.branchless(
+                entry["request"]["tier"], entry["lane"], entry["request"]["head"], entry.get("ref", "")
+            )
+        )
+        if waiting:
+            self.client.hdel(WAITING, *waiting)
+        origins = self._origins()
+        revisions = self.client.hgetall(REVISIONS)
+        gone: dict[str, str] = {}
+        for run in sorted(origins):
+            grade = self.grade(run) if origins[run]["tier"] == Priority.PROMOTION else None
+            if grade is not None and stale_heads.branchless(grade.tier, grade.lane, grade.head, grade.ref):
+                gone[run] = grade.head
+            elif grade is not None:
+                self._quiets[run] = _quiet(grade, _revision(revisions, run))
+        kept = {origin["head"] for run, origin in origins.items() if run not in gone}
+        dropped = 0
+        for run, head in sorted(gone.items()):
+            dropped += 0 if head in kept else len(self.queue.drop(head))
+            self._forget(run)
+        return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit

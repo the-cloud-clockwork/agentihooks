@@ -49,7 +49,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         trees[head] = support.folder(tmp_path, name, {executors.venvs.LOCKFILE: "lock", path: tree[path].decode()})
     run = lab(plans)
     for head in plans:
-        run.push(head, lane=head)
+        run.push(head, lane=f"branch-{head}")
     if legacy == "held":
         monkeypatch.setattr(run.engine, "_admit", lambda _now: [])
     run.tick(1000)
