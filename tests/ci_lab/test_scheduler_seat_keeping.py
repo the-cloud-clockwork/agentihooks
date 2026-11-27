@@ -84,6 +84,7 @@ def run_main(
     return Served(served[0], spent[0])
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -95,6 +96,7 @@ def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader
     assert leases.images == kube.images
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -104,6 +106,7 @@ def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
     assert leases.images is pods.unread
 
 
+@pytest.mark.feature("lab-lease-shed-class")
 def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2516,7 +2516,7 @@ key; the builders are pure and read no file, clock or network.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
    until the budget resets the next UTC day. Its units already in the queue wait until then: a lease
    poll stops at the first pending job of a shed class, since every job after it, one with no class
-   included, ranks at or past it. Backfill
+   included, ranks at or past it. The units of a shed class already leased finish as usual. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
    already waiting in the queue. A newer head of the lane drops the older head's held units. Each
    unit is enqueued under the class of its grade, and workers lease the most urgent class first, in

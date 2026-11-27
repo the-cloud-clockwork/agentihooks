@@ -943,23 +943,6 @@
       ]
     },
     {
-      "id": "lab-lease-shed-class",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-budget-spend",
-      "behaviour": "A CI lab lease grants no pending job of a class the day's core budget sheds: the lease take reads its shed port once and stops at the first pending job whose rank is at or past the most urgent shed class, so units a class enqueued before it shed wait for the budget to reset while hotfix and pull request work keeps leasing, and scheduler main gives the leases a shed port that reads its budget's status.",
-      "seam": "scripts.ci_lab.leases.Leases.lease with a shed port over fakeredis and an injected clock, and scripts.ci_lab.scheduler.main with build and listen faked, reading the shed port of the leases it builds after budget charges",
-      "tests": [
-        "tests/ci_lab/test_leases.py::test_a_lease_with_promotion_shed_grants_pull_request_and_queue_work_and_no_promotion_or_backfill_job",
-        "tests/ci_lab/test_leases.py::test_a_lease_with_only_backfill_shed_grants_promotion_work_and_no_backfill_or_unranked_job",
-        "tests/ci_lab/test_leases.py::test_a_lease_with_queue_shed_grants_only_hotfix_and_pull_request_work",
-        "tests/ci_lab/test_leases.py::test_a_lease_stops_reading_the_pending_order_at_the_first_job_of_a_shed_class",
-        "tests/ci_lab/test_scheduler_seat_keeping.py::test_main_gives_leases_the_classes_its_daily_core_budget_sheds"
-      ],
-      "rules": [
-        "lab-lease-take-without-shed-check"
-      ]
-    },
-    {
       "id": "lab-type-gate-one-per-worker",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
