@@ -15481,6 +15481,23 @@
       ]
     },
     {
+      "id": "expert-newest-seat-transfer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-newest-seat-transfer",
+      "behaviour": "An expert successor receives the newest transfer of its own lineage seat. Older pending history and foreign seats cannot suppress recovery or replace that transfer. Failed launch retries, room refusal, history and current occupant confirmation keep their existing behavior.",
+      "seam": "swarm.expert_seat.run; handoff.transfers.attach and confirm",
+      "semgrep_rule": "incident-expert-stale-pending-transfer",
+      "tests": [
+        "tests/swarm/test_expert_seat_transfer.py::test_first_expert_needs_no_transfer",
+        "tests/swarm/test_expert_seat_transfer.py::test_newest_pending_transfer_uses_timestamp_then_identifier",
+        "tests/swarm/test_expert_seat_transfer.py::test_foreign_transfer_cannot_replace_the_current_seat_handoff",
+        "tests/swarm/test_expert_seat_transfer.py::test_lost_successor_ignores_obsolete_pending_history",
+        "tests/swarm/test_expert_seat_transfer.py::test_foreign_history_alone_does_not_suppress_recovery",
+        "tests/swarm/test_expert_seat_transfer.py::test_retry_keeps_the_current_transfer_and_obsolete_history",
+        "tests/swarm/test_expert_seat_transfer.py::test_generic_attachment_preserves_existing_pending_selection"
+      ]
+    },
+    {
       "id": "expert-seat-step",
       "origin": "operator",
       "operator_words": "Chain of experts a a linage of  a mission, they dont pick tasks, an exper linage keeps doing handoff until the missions is completedx then they finish and get terminated .",
