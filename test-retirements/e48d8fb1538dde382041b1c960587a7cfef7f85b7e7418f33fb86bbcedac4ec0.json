@@ -1,0 +1,6 @@
+{
+  "tests/swarm/test_merge_queue_priority.py::test_priority_leaves_earlier_priority_targets_in_place_on_either_side": {
+    "reader": "Standards reader",
+    "reason": "The head removes the ahead parameter of merge_queue.prioritize, which no production caller passed since the deferred priority replay was retired; this test covered only that parameter, and the default displacement keeps its tests."
+  }
+}
