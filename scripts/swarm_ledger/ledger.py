@@ -15,10 +15,11 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       must be marked artifact requested, or ENTRY names his message that asked
                                       (task defaults to your swarm task). Proofs go on the task proof and the PR
   artifact-purge                      delete every artifact and trash row of the ledger with their files
-  publish-plan PATH --phase IDS [--title T] [--repo OWNER/NAME]
+  publish-plan PATH --phase IDS|--task ID [--title T] [--repo OWNER/NAME]
                                       publish an accepted plan: a GitHub issue where the repo has issues, else a
                                       ledger artifact; links it on each phase, comments the phase, and every task
-                                      added to those phases carries the link
+                                      added to those phases carries the link; --task links the stored plan and its
+                                      one slice on one task with no phase
   plan phases PATH                    append a plan's phases (JSON, the init-swarm content phases shape) to the
                                       ledger, planned automatically unless a phase names manual, which waits in
                                       review; a taken phase id refuses them all
@@ -107,8 +108,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -527,6 +529,8 @@ def cmd_artifact(args):
 def cmd_publish_plan(args):
     from scripts.swarm_ledger import plan_ranges
 
+    if args.task:
+        return publish_task_plan(args)
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
@@ -542,18 +546,11 @@ def cmd_publish_plan(args):
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
     stored = {}
-
-    def artifact(path, title):
-        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
-        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
-        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
-        stored["plan"] = ledger_plans.plan_id(file["id"])
-        return stored["url"]
-
     try:
         issue_title = ", ".join(phase["title"] for phase in selected)
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=issue_title
+        )
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
@@ -583,14 +580,81 @@ def cmd_publish_plan(args):
     state = call(args.slug, ops)
     linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
     if state.get("rejected") and where == "issue" and url not in linked:
-        try:
-            ledger_publish.close_issue(url)
-        except ledger_publish.PublishError as exc:
-            print(exc, file=sys.stderr)
+        withdraw_issue(url)
     refused(state, ops)
     tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
+
+
+def plan_artifact(args: argparse.Namespace, stored: dict[str, Any]) -> Callable[[str, str], str]:
+    def artifact(path: str, title: str) -> str:
+        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
+        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
+        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
+        return stored["url"]
+
+    return artifact
+
+
+def withdraw_issue(url: str) -> None:
+    try:
+        ledger_publish.close_issue(url)
+    except ledger_publish.PublishError as exc:
+        print(exc, file=sys.stderr)
+
+
+def plan_target(slug: str, task_id: str) -> dict[str, Any]:
+    try:
+        task = cast(dict[str, Any], resource(slug, f"tasks/{task_id}"))
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        sys.exit("publish-plan names an unknown task")
+    if phase := task.get("phase"):
+        sys.exit(
+            f"publish-plan --task takes a task with no phase: task {task_id} is in phase {phase}, use --phase {phase}"
+        )
+    return task
+
+
+def plan_links(slug: str) -> set[str]:
+    return {str(row.get("url")) for row in cast(list[dict[str, Any]], resource(slug, "plans", collection=True))}
+
+
+def publish_task_plan(args: argparse.Namespace) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    target = plan_target(args.slug, args.task)
+    text = Path(args.path).read_text(encoding="utf-8")
+    anchors = plan_ranges.slice_anchors(text, f"1-{max(len(text.splitlines()), 1)}")
+    if len(anchors) != 1:
+        sys.exit(
+            "publish-plan --task needs exactly one slice marker, <!-- slice: name --> on its own line above the "
+            "task's section"
+        )
+    heading = ledger_publish.HEADING_RE.search(text)
+    title = args.title or (heading[1].strip() if heading else str(target["title"]))
+    stored: dict[str, Any] = {}
+    try:
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=str(target["title"])
+        )
+    except ledger_publish.PublishError as exc:
+        sys.exit(str(exc))
+    fields = {"plan_url": stored["url"], "plan_slice": anchors[0]}
+    ops = [
+        stored["add"],
+        op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url),
+        op("task_update", args, item=f"tasks/{args.task}", fields=fields),
+    ]
+    state = call(args.slug, ops)
+    if state.get("rejected") and where == "issue" and url not in plan_links(args.slug):
+        withdraw_issue(url)
+    refused(state, ops)
+    print(json.dumps({"plan_url": url, "published_to": where, "task": args.task, "plan_slice": anchors[0]}))
 
 
 def cmd_plan(args):
@@ -1191,7 +1255,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
-    publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
+    target = publish.add_mutually_exclusive_group(required=True)
+    target.add_argument("--phase", help="comma separated ids of the phases the plan fills")
+    target.add_argument("--task", help="id of one task with no phase the plan fills; the plan carries one slice marker")
     publish.add_argument("--title", default="", help="default the plan's first heading")
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
     plan = sub.add_parser("plan")

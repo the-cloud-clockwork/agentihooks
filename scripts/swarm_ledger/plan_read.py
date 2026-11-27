@@ -99,15 +99,21 @@ def _lead(task: dict) -> str:
 def sharers(doc: dict, task: dict) -> list[str]:
     if not task.get("plan_lines"):
         return []
-    held = (task.get("phase"), task["plan_lines"])
+    held = _region(task)
     return [
         other["id"]
         for other in doc.get("tasks", [])
         if other["id"] != task["id"]
         and other.get("state") != "done"
-        and (other.get("phase"), other.get("plan_lines")) == held
+        and _region(other) == held
         and _lead(other) != _lead(task)
     ]
+
+
+def _region(task: dict[str, Any]) -> tuple[Any, ...]:
+    if task.get("phase"):
+        return task.get("phase"), task.get("plan_lines")
+    return task.get("phase"), task.get("plan_url"), task.get("plan_lines")
 
 
 def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
@@ -190,7 +196,7 @@ def read(
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
     phase_id = phase_id or task.get("phase")
-    phase = _phase(doc, phase_id)
+    phase = _phase(doc, phase_id) if phase_id else {}
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     packaged = _packaged(phase, task)
