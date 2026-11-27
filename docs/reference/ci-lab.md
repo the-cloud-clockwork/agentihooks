@@ -94,8 +94,9 @@ positive. Shed fractions and `auditShare` range from 0 to 1; `moduleSweeps` is a
 the daily budget spent; reaching it sheds that class and every less urgent class. In this
 example, backfill is shed at half the daily budget remaining, promotion at a quarter and queue
 at a tenth; each stays shed as the remaining budget falls further.
-Hotfix and pull request work remain admitted. The budget resets on the next UTC day; work
-already queued still runs. See [Scheduler loop](#scheduler-loop) for admission rules.
+Hotfix and pull request work remain admitted. The budget resets on the next UTC day; until
+then workers lease none of a shed class's queued units, and its running units finish. See
+[Scheduler loop](#scheduler-loop) for admission rules.
 
 Validate the mounted file without connecting to the service dependencies:
 
@@ -2513,7 +2514,8 @@ key; the builders are pure and read no file, clock or network.
    rest is held for the budget.
 5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
-   until the budget resets the next UTC day, though its units already in the queue still run. Backfill
+   until the budget resets the next UTC day, and no lease takes its units already in the queue until then:
+   a lease poll stops at the first pending unit of the most urgent shed class, and running units finish. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
    already waiting in the queue. A newer head of the lane drops the older head's held units. Each
    unit is enqueued under the class of its grade, and workers lease the most urgent class first, in
