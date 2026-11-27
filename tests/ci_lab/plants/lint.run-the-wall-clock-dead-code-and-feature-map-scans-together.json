@@ -1,5 +1,5 @@
 {
-  "gate": "lint/hold-dead-code-in-hooks-and-scripts",
+  "gate": "lint/run-the-wall-clock-dead-code-and-feature-map-scans-together",
   "reason": "unused names: a new function nothing calls",
   "edits": [
     {

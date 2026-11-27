@@ -3,7 +3,7 @@
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
   "behaviour": "The lab plant of the dead code gate adds a function whose name nothing under hooks or scripts reads, so the dead code gate, measuring every tracked Python file under hooks and scripts of this tree with the plant's edit applied, reports the planted function as unused in its file and the lab grades the plant red.",
-  "seam": "scripts.dead_code.hits over a git tree holding the graded scope of the checkout with the edit of tests/ci_lab/plants/lint.hold-dead-code-in-hooks-and-scripts.json applied",
+  "seam": "scripts.dead_code.hits over a git tree holding the graded scope of the checkout with the edit of tests/ci_lab/plants/lint.run-the-wall-clock-dead-code-and-feature-map-scans-together.json applied",
   "tests": [
     "tests/ci_lab/test_static_plants.py::test_the_dead_code_plant_adds_a_function_the_dead_code_gate_reports_on_this_tree"
   ]

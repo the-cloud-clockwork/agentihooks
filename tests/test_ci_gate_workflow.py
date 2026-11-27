@@ -18,8 +18,8 @@ LINT_CONTROLS = [
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
     "Hold swallowed exceptions in hooks and gates",
-    "Hold dead code in hooks and scripts",
     "Hold the locked guard tests",
+    "Run the wall clock, dead code and feature map scans together",
     "Pin thresholds, floors and allowlists against the base",
 ]
 LINT_SETUP = [
