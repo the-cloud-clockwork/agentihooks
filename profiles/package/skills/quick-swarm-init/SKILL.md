@@ -20,7 +20,7 @@ It runs only inside herdr; outside it the command refuses and says why.
 
    `--agents` counts the master and engineers together: two engineers need
    `--agents 3`, three engineers need `--agents 4`. Four agents by default.
-   `--agents 5` for five, `--agents 2` for two. One
+   `--agents 5` for four engineers, `--agents 2` for one. One
    harness for every engineer with `--harness codex`, or one per engineer in
    pane order with `--harness claude,codex,claude`.
 
