@@ -17044,7 +17044,7 @@
     {
       "id": "swarm-review-trigger",
       "origin": "inventory",
-      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; an event older than the six hour replay window still queues when it was published at or after its review consumer was created and inside the one day backlog cap, and with no known creation time the window alone decides; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; an event older than the six hour replay window still queues when it was published at or after its review consumer was created and inside the one day backlog cap, and with no known creation time the window alone decides; the hub webhook publishes merge group and release events to every swarm with an open or unreleased tracked pull request in that repository.",
       "seam": "scripts.tick.steps.review.review_pass over scripts.events.bus.Consumer.created, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
       "rules": [
         "review-replay-window-ignores-consumer-created"
@@ -17089,6 +17089,26 @@
         "tests/events/test_scope.py::test_a_merged_consumer_reports_no_created_time_even_when_every_child_knows_one",
         "tests/events/test_nats.py::test_an_event_log_consumer_reports_its_durable_creation_time",
         "tests/events/test_nats.py::test_a_consumer_reports_no_created_time_until_its_durable_creation_is_set"
+      ]
+    },
+    {
+      "id": "hub-repository-record-drops-closed-swarms",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pull-tracker-drops-closed-swarms",
+      "behaviour": "The hub pull tracker keeps a swarm on a repository record only while it has an open tracked pull request there or a merged one no release has reached: a pull request that closes unmerged drops each of its swarms with nothing else open and nothing awaiting a release, a merge keeps its swarms until one release reaches them, a reopened or newly tracked pull request lists its swarm again, a late task event for a closed pull request lists nobody, a stored legacy list is read as both lists and clears at the next release, and a track that races a drop keeps its swarm listed.",
+      "seam": "scripts.hub.pulls.Pulls.observe and scripts.hub.pulls.Pulls.announce",
+      "tests": [
+        "tests/hub/test_pulls.py::test_a_swarm_whose_last_pull_request_closed_unmerged_hears_nothing_from_its_repository",
+        "tests/hub/test_pulls.py::test_a_swarm_with_another_open_pull_request_stays_on_the_repository_record",
+        "tests/hub/test_pulls.py::test_an_open_pull_request_in_another_repository_keeps_no_swarm_listed",
+        "tests/hub/test_pulls.py::test_a_merged_last_pull_request_keeps_its_swarm_until_one_release_reaches_it",
+        "tests/hub/test_pulls.py::test_a_swarm_awaiting_a_release_stays_listed_when_its_other_pull_request_closes",
+        "tests/hub/test_pulls.py::test_a_legacy_list_record_names_the_recipients_and_clears_at_the_next_release",
+        "tests/hub/test_pulls.py::test_joining_a_legacy_list_record_keeps_its_swarms_awaiting_a_release",
+        "tests/hub/test_pulls.py::test_a_reopened_pull_request_lists_its_dropped_swarm_again",
+        "tests/hub/test_pulls.py::test_tracking_a_new_pull_request_lists_a_dropped_swarm_again",
+        "tests/hub/test_pulls.py::test_a_late_task_event_for_a_closed_pull_request_lists_no_swarm",
+        "tests/hub/test_pulls.py::test_a_track_that_races_a_drop_leaves_its_swarm_listed"
       ]
     },
     {

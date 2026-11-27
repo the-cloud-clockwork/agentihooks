@@ -684,7 +684,7 @@ def test_tracking_a_pull_request_records_its_swarms_for_the_repository():
     hub.track("crew", OTHER)
     entry = bus.state(pulls.BUCKET).get(pulls.repository_key(REPO.upper()))
     assert entry is not None
-    assert json.loads(entry.value) == ["crew", "other"]
+    assert json.loads(entry.value) == {"swarms": ["crew", "other"], "unreleased": []}
 
 
 @pytest.mark.feature("swarm-review-trigger")
@@ -720,7 +720,7 @@ def test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment():
     hub.track("crew", "https://github.com/pull/pull/pull/3")
     entry = bus.state(pulls.BUCKET).get(pulls.repository_key("https://github.com/pull/pull"))
     assert entry is not None
-    assert json.loads(entry.value) == ["crew"]
+    assert json.loads(entry.value) == {"swarms": ["crew"], "unreleased": []}
 
 
 @pytest.mark.feature("swarm-review-trigger")
@@ -755,6 +755,142 @@ def test_a_swarm_with_an_open_pull_request_still_hears_its_repository_after_anot
         ("crew", "merge_group.requested", "a1"),
         ("crew", "release.published", "v1"),
     ]
+
+
+def record(bus: MemoryBus, repository: str = REPO) -> object:
+    entry = bus.state(pulls.BUCKET).get(pulls.repository_key(repository))
+    return None if entry is None else json.loads(entry.value)
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_swarm_whose_last_pull_request_closed_unmerged_hears_nothing_from_its_repository() -> None:
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.track("other", OTHER)
+    hub.observe(Observation(URL, "closed", "a1"))
+    drain(consumer)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    assert [(e.swarm, e.type) for e in drain(consumer)] == [("other", "merge_group.requested")]
+    assert record(bus) == {"swarms": ["other"], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_swarm_with_another_open_pull_request_stays_on_the_repository_record() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.track("crew", OTHER.replace("acme/widgets", "Acme/Widgets"))
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_an_open_pull_request_in_another_repository_keeps_no_swarm_listed() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.track("crew", "https://github.com/acme/widgets2/pull/1")
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert record(bus) == {"swarms": [], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_merged_last_pull_request_keeps_its_swarm_until_one_release_reaches_it() -> None:
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.observe(Observation(URL, "merged", "a1"))
+    assert record(bus) == {"swarms": ["crew"], "unreleased": ["crew"]}
+    drain(consumer)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    hub.announce(REPO, "release.published", "v2", {"tag": "v2"})
+    assert [(e.swarm, e.type, e.key) for e in drain(consumer)] == [
+        ("crew", "merge_group.requested", "a1"),
+        ("crew", "release.published", "v1"),
+    ]
+    assert record(bus) == {"swarms": [], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_swarm_awaiting_a_release_stays_listed_when_its_other_pull_request_closes() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.track("crew", OTHER)
+    hub.observe(Observation(URL, "merged", "a1"))
+    hub.observe(Observation(OTHER, "closed", "b1"))
+    assert record(bus) == {"swarms": ["crew"], "unreleased": ["crew"]}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_legacy_list_record_names_the_recipients_and_clears_at_the_next_release() -> None:
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    state = bus.state(pulls.BUCKET)
+    entry = state.get(pulls.repository_key(REPO))
+    assert entry is not None
+    state.update(pulls.repository_key(REPO), json.dumps(["crew", "gone"]).encode(), entry.revision)
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    hub.announce(REPO, "release.published", "v2", {"tag": "v2"})
+    assert [(e.swarm, e.key) for e in drain(consumer)] == [("crew", "v1"), ("gone", "v1"), ("crew", "v2")]
+    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_joining_a_legacy_list_record_keeps_its_swarms_awaiting_a_release() -> None:
+    bus, hub, _ = setup()
+    bus.state(pulls.BUCKET).create(pulls.repository_key(REPO), json.dumps(["old"]).encode())
+    hub.track("crew", URL)
+    assert record(bus) == {"swarms": ["crew", "old"], "unreleased": ["old"]}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_reopened_pull_request_lists_its_dropped_swarm_again() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert record(bus) == {"swarms": [], "unreleased": []}
+    hub.observe(Observation(URL, "open", "a1"))
+    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_tracking_a_new_pull_request_lists_a_dropped_swarm_again() -> None:
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.observe(Observation(URL, "closed", "a1"))
+    hub.track("crew", OTHER)
+    drain(consumer)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    assert [(e.swarm, e.type) for e in drain(consumer)] == [("crew", "merge_group.requested")]
+    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_late_task_event_for_a_closed_pull_request_lists_no_swarm() -> None:
+    bus, hub, _ = setup()
+    hub.handle(task_changed())
+    hub.observe(Observation(URL, "closed", "a1"))
+    hub.handle(task_changed("late"))
+    hub.handle(task_changed(version=3))
+    assert record(bus) == {"swarms": [], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_track_that_races_a_drop_leaves_its_swarm_listed() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    state = bus.state(pulls.BUCKET)
+    update = state.update
+    raced: list[int] = []
+
+    def racing(key: str, value: bytes, revision: int) -> int:
+        if key == pulls.repository_key(REPO) and not raced:
+            raced.append(revision)
+            hub.track("crew", OTHER)
+        return update(key, value, revision)
+
+    setattr(state, "update", racing)
+    hub.observe(Observation(URL, "closed", "a1"))
+    assert raced
+    assert record(bus) == {"swarms": ["crew"], "unreleased": []}
 
 
 SWEPT = [f"https://github.com/acme/widgets/pull/{number}" for number in range(100, 106)]
