@@ -220,14 +220,17 @@ def test_a_merge_try_under_the_bound_restarts_its_waiting_window(lab: Callable[.
     port = Mock(return_value=None)
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
-    actions = run.tick(1000)
-    assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+    received = run.tick(1000)
+    assert any(action.startswith(f"received {HEAD_A}") for action in received)
+    assert port.call_count == 0
+    actions = run.tick(2000)
+    assert any(action.startswith(f"holding {HEAD_A}: GitHub has resolved no merge") for action in actions)
     assert port.call_count == 1
-    held = run.tick(1500)
+    held = run.tick(2500)
     assert not any(action.startswith(f"holding {HEAD_A}") for action in held)
     assert port.call_count == 1
-    actions = run.tick(2001)
-    assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+    actions = run.tick(3001)
+    assert any(action.startswith(f"holding {HEAD_A}: GitHub has resolved no merge") for action in actions)
     assert port.call_count == 2
 
 
@@ -238,12 +241,13 @@ def test_a_merge_try_at_the_bound_gives_up_without_restarting_the_window(lab: Ca
     port = Mock(return_value=None)
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
-    now = 1000
+    run.tick(1000)
+    now = 2000
     for _ in range(scheduler.UNMERGED_TRIES - 1):
         run.tick(now)
         now += 1000
     actions = run.tick(now)
-    assert actions[-1].startswith(f"the lab gives up on a merge of {HEAD_A}")
+    assert any(action.startswith(f"the lab gives up on a merge of {HEAD_A}") for action in actions)
     assert run.grades() == []
     gave_up_calls = port.call_count
     actions = run.tick(now + 1)
