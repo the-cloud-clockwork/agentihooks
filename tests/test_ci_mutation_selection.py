@@ -1655,7 +1655,7 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
     assert report["not_mutated"] == []
     assert report["files"][0]["counts"] == {"killed": 2}
-    assert not runs.exists()
+    assert not runs.exists(), "\n".join(path.read_text() for path in (tmp_path / "evidence").rglob("run.log"))
 
 
 @pytest.mark.parametrize(

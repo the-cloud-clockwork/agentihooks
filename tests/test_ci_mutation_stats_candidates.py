@@ -13,7 +13,8 @@ pytest_plugins = ["pytester"]
 
 def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[str, list[str]]:
     root = pytester.path
-    pytester.makepyfile(app="def target(value):\n    return value + 1\n")
+    pytester.makepyfile(app="def target(value):\n    return value + 1\ndef other(value):\n    return value\n")
+    pytester.makeini("[pytest]\nenable_assertion_pass_hook = true\n")
     pytester.makepyfile(test_sample="import pytest\nfrom app import target\n" + source)
     pytester.makeconftest(
         "import json\nfrom pathlib import Path\n"
@@ -123,6 +124,42 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
             "def teardown_function():\n    assert target(1) == 2\ndef test_function_teardown():\n    assert True\n",
             ["test_function_teardown"],
         ),
+        (
+            "import app\n"
+            "def test_reassigned():\n"
+            "    name = 'target'\n"
+            "    assert getattr(app, name)(1) == 2\n"
+            "    name = 'other'\n",
+            ["test_reassigned"],
+        ),
+        (
+            "import app\n"
+            "def test_conditional():\n"
+            "    if True:\n"
+            "        name = 'target'\n"
+            "    else:\n"
+            "        name = 'other'\n"
+            "    assert getattr(app, name)(1) == 2\n",
+            ["test_conditional"],
+        ),
+        (
+            "from pathlib import Path\n"
+            "Path('pkg').mkdir()\n"
+            "Path('pkg/__init__.py').write_text('')\n"
+            "Path('pkg/boot.py').write_text('from app import target\\ntarget(1)\\n')\n"
+            "def test_child_import():\n"
+            "    import pkg.boot\n",
+            ["test_child_import"],
+        ),
+        (
+            "from pathlib import Path\n"
+            "def test_file_unrelated():\n"
+            "    with Path('runs.txt').open('a') as stream:\n"
+            "        stream.write('run\\n')\n"
+            "def test_reaches():\n"
+            "    assert target(1) == 2\n",
+            ["test_reaches"],
+        ),
     ],
     ids=[
         "direct",
@@ -138,6 +175,10 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "dynamic-export",
         "module-setup",
         "function-teardown",
+        "later-reassignment",
+        "conditional-reassignment",
+        "child-module-initialization",
+        "unrelated-file-methods",
     ],
 )
 def test_statistics_candidates_preserve_indirect_reach_and_order(
@@ -148,11 +189,19 @@ def test_statistics_candidates_preserve_indirect_reach_and_order(
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")
-def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester) -> None:
+@pytest.mark.parametrize(
+    "hook",
+    [
+        "def pytest_pyfunc_call(pyfuncitem):\n    from app import target\n    target(1)\n",
+        "def pytest_assertion_pass(item, lineno, orig, expl):\n    from app import target\n    target(1)\n",
+    ],
+    ids=["function-call", "assertion-pass"],
+)
+def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester, hook: str) -> None:
     result = select(
         pytester,
         "def test_first():\n    assert True\ndef test_second():\n    assert True\n",
-        plugin="def pytest_pyfunc_call(pyfuncitem):\n    from app import target\n    assert target(1) == 2\n",
+        plugin=hook,
     )
     assert result["selected"] == ["test_first", "test_second"]
 
