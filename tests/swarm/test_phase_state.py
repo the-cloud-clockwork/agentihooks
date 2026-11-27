@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -125,7 +126,7 @@ class CountedRows(list[dict[str, object]]):
         super().__init__(rows)
         self.counts, self.name = counts, name
 
-    def __iter__(self):  # type: ignore[override]
+    def __iter__(self) -> Iterator[dict[str, object]]:
         self.counts[self.name] += 1
         return super().__iter__()
 
