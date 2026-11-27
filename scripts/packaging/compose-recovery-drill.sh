@@ -56,7 +56,7 @@ from scripts.events.factory import open_bus
 from scripts.hive import execution_events, presence, registry, reports
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import exits, runner
-from scripts.swarm import freeze, readiness
+from scripts.swarm import freeze, offer_quota, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
@@ -137,12 +137,16 @@ def take(count):
     bus = open_bus(BusConfig.from_environ())
     spoke = Spoke(SpokeConfig(store.config(slug), "eng", HIVE), bus, StandIn(), Tasks(),
                   measure=lambda: {"cpus": 8, "load5": 0.0}, view=view)
-    outcomes, empty = [], 0
-    while len(launched()) - before < count and empty < 5:
+    outcomes, idle = [], 0
+    while len(launched()) - before < count and idle < 5:
         outcomes.append(spoke.poll(1_000))
-        empty = empty + 1 if outcomes[-1] == "empty" else 0
+        idle = idle + 1 if outcomes[-1] in ("empty", "held") else 0
     bus.close()
-    return {"took": [launch["task"] for launch in launched()[before:]], "outcomes": outcomes}
+    took = [launch["task"] for launch in launched()[before:]]
+    if len(took) < count:
+        print(f"[DEBUG-h7q2] spoke account rows {offer_quota.accounts(dict(os.environ), time.time())}", file=sys.stderr)
+        sys.exit(f"the hive took {took} of {count} offers before its polls went idle: {outcomes}")
+    return {"took": took, "outcomes": outcomes}
 
 
 def exit_report(agents):
@@ -246,7 +250,8 @@ settle() {
 }
 
 printf 'offered before the backup: %s\n' "$(drill seed t1 t2 t3 t4 t5)"
-printf 'hive took before the backup: %s\n' "$(drill take 3)"
+took="$(drill take 3)"
+printf 'hive took before the backup: %s\n' "$took"
 lap 'first offers'
 
 docker compose stop nats >/dev/null
@@ -257,7 +262,8 @@ lap 'backup'
 
 printf 'done after the backup: %s\n' "$(drill done t1)"
 settle '"t1": {"ledger": "done"'
-printf 'hive took after the backup: %s\n' "$(drill take 2)"
+took="$(drill take 2)"
+printf 'hive took after the backup: %s\n' "$took"
 printf 'state before the restore: %s\n' "$(drill state)"
 lap 'work after the backup'
 
@@ -272,7 +278,8 @@ printf 'agents died after the restore: %s\n' "$(drill die t2 t4)"
 printf 'state after the first hub pass: %s\n' "$(drill pass)"
 settle '"t2": {"ledger": "open"' '"t4": {"ledger": "open"'
 lap 'reopen'
-printf 'hive took the open and reopened tasks: %s\n' "$(drill take 3)"
+took="$(drill take 3)"
+printf 'hive took the open and reopened tasks: %s\n' "$took"
 printf 'done after the restore: %s\n' "$(drill done t2 t3 t4 t5 t6)"
 task() {
   printf '"%s": {"ledger": "done", "claim": null, "launches": %s, "jetstream": [%s]}' "$1" "$2" "$3"
