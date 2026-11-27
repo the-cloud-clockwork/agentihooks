@@ -333,6 +333,60 @@ def test_mounted_literal_canary_is_exempt(command: str) -> None:
 
 @pytest.mark.feature("first-read-canary-literal")
 @pytest.mark.parametrize(
+    "pragma",
+    [
+        '// @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}\n',
+        ' \t// @exec: {"yield_time_ms": 1000}\r\n',
+    ],
+    ids=["lf", "indented-crlf"],
+)
+@pytest.mark.parametrize(
+    "program",
+    [
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}});",
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r);",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: 4000, yield_time_ms: 10000}}));",
+    ],
+    ids=["bare", "bound", "text"],
+)
+def test_exec_pragma_canary_is_exempt(pragma: str, program: str) -> None:
+    assert _bootstrap(pragma + program)
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
+    "program",
+    [
+        f"// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); fetch(1);",
+        f"// @exec: {{}}\nfetch(1); text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f'// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); await tools.exec_command({{cmd: "pwd"}});',
+        f"// @exec: {{}}\r\nconst r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
+        f"// @exec: {{}}\n// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2028fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2029fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// other comment\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+    ],
+    ids=[
+        "suffix",
+        "prefix",
+        "second-call",
+        "crlf-suffix",
+        "two-pragmas",
+        "no-newline",
+        "line-separator",
+        "paragraph-separator",
+        "foreign-comment",
+    ],
+)
+def test_exec_pragma_cannot_hide_other_work(program: str) -> None:
+    decision = first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": program}, session="s"), ME, None)
+    assert decision.allowed is False
+    assert "agentihooks seat brief" in decision.reason
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
     "command",
     [
         CANARY_HEAD + '"\'"$(id)"\'"' + CANARY_TAIL,
