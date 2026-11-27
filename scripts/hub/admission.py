@@ -130,16 +130,15 @@ class Admission:
         ):
             return self._withdrawn(slug, request, offer, withdrawn)
         timer.mark("withdrawal")
-        if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
+        if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]) or self._seatless(
+            slug, request, view.rows[task_id]
+        ):
             print(
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
                 file=sys.stderr,
             )
             return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
-        if seatless := self._seatless(slug, request, view.rows[task_id]):
-            refused(slug, request, seatless)
-            return {hive_admission.HELD: seatless}
         if self._unclaimable(slug, request, view.rows):
             return None
         timer.mark("cap")
@@ -269,7 +268,7 @@ class Admission:
     def _seatless(self, slug: str, request: dict[str, Any], task: dict[str, Any]) -> str:
         from scripts.hive import registry
 
-        record: Any = registry.show(self.store.redis, request["hive"])
+        record: Any = registry.show(self.store.redis, request["hive"])  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
         if record is None:
             return ""
         harnesses = offer_quota.permitted(self.store.config(slug), request["lane"], task)
