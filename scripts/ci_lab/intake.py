@@ -104,5 +104,9 @@ def reconcile(open_pull_requests: Iterable[Mapping[str, Any]], graded: Callable[
         if not graded(repo, head):
             author, lane = pull["user"]["login"], pull_lane(pull)
             number = pull.get("number", 0)
-            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, lane, number))
+            heads.append(
+                HeadEvent(
+                    PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, lane=lane, pull_number=number
+                )
+            )
     return heads

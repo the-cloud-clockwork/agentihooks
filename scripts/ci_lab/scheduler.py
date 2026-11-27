@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import jsonschema
 import yaml
@@ -491,8 +492,9 @@ class State:
     posts as lab/<gate> rather than lab-shadow/<gate>, the clock before which it posts nothing after GitHub refused
     one of its posts, the merge base of its head and base that a worker checks out as its base, empty when the
     base is that merge base, the test merge GitHub built for a pull request grade, empty when it named none or none
-    was resolved, and whether such a grade gave up waiting for one and graded the bare head against its event base
-    instead."""
+    was resolved, whether such a grade gave up waiting for one and graded the bare head against its event base
+    instead, its pull request number, 0 for every other grade, and how many tries of its own merge resolution a
+    required-frame regrade of it has spent across passes, kept at 0 once a merge resolves."""
 
     run: str
     repo: str
@@ -521,6 +523,7 @@ class State:
     merge_fallback: bool = False
     required: list[str] = field(default_factory=list[str])
     pull_number: int = 0
+    unmerged: int = 0
 
 
 def _parse(raw: str | bytes) -> State:
@@ -594,8 +597,9 @@ def stage_grade(pipe: Any, document: dict[str, Any]) -> int | None:
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
-    """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
-    inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
+    """Return a closed grade's evidence: its inputs, keyed on its graded commit when it has one, and each of its
+    units with the grade run that used its verdict."""
+    inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader, state.graded_commit)
     units = tuple(evidence.GradeUnit(slot.kind, slot.key, state.run) for slot in state.units.values())
     return evidence.GradeEvidence(state.run, inputs, units)
 
@@ -1170,8 +1174,7 @@ class Scheduler:
             else:
                 self.client.hset(WAITING, name, json.dumps({**held, "starts": starts + 1}))
                 try:
-                    give_up = unmerged >= UNMERGED_TRIES
-                    actions.append(self._start(request, held["lane"], ref, now_ms, name, give_up))
+                    actions.append(self._start(request, held["lane"], ref, now_ms, name, unmerged))
                     started += 1
                 except (FetchPending, merges.MergePending) as error:
                     self.client.hset(WAITING, name, raw)
@@ -1369,30 +1372,50 @@ class Scheduler:
             self._forget(run)
         return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str, give_up: bool = False) -> str:
+    def _merge_resolution(self, request: GradeRequest, tries: int) -> tuple[GradeRequest, bool]:
+        """Resolve the test merge GitHub built for a pull request or hotfix request that is not a plant: with the
+        merge, the request graded on it and no fallback; with none yet and `tries` under `UNMERGED_TRIES`, raise
+        Unmerged, MergeUnanswered or MergePending for the caller to hold and spend one more try on; at the bound,
+        the request bare with its fallback remembered. A request naming no pull request, or a plant, resolves
+        nothing and starts bare with no fallback."""
+        if not (request.pull_number and not request.plant):
+            return request, False
+        if tries >= UNMERGED_TRIES:
+            return request, True
+        resolved = self.ports.merges(request.repo, request.pull_number, request.head)
+        if resolved is None:
+            raise Unmerged(
+                f"GitHub has resolved no merge of {request.repo}#{request.pull_number} for "
+                f"{request.head} with that head as its second parent, yet"
+            )
+        return replace(request, graded_commit=resolved[0]), False
+
+    def _regrade(self, state: State, request: GradeRequest, now_ms: int) -> list[str]:
+        """Start a required-frame regrade of state's head, holding it on a manifest fetch or merge resolution still
+        pending; an unmerged resolution also counts as one of its tries, kept on the grade document across passes
+        and restarts."""
+        try:
+            return [self._start(request, state.lane, state.ref, now_ms, name="", tries=state.unmerged)]
+        except (FetchPending, FetchUnanswered, merges.MergePending) as error:
+            return [f"holding the required-frame regrade of {state.head}: {error}"]
+        except (Unmerged, merges.MergeUnanswered) as error:
+            state.unmerged += 1
+            self._keep(state)
+            return [f"holding the required-frame regrade of {state.head}: {error}"]
+
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str, tries: int = 0) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
         to a grade ref, which the lab remote serves. A pull request or hotfix request that is not a plant resolves
-        the test merge GitHub built for its pull request first, raising Unmerged while GitHub has none yet, unless
-        give_up says the bound of such tries is already spent, in which case it grades the bare head and the state
-        remembers the fallback. The waiting field of `name` comes out of the hash only once this start cannot be
-        repeated: before the retirement, and right after the expansion returns, before the first grade write."""
+        the test merge GitHub built for its pull request first, through `_merge_resolution`, raising Unmerged while
+        GitHub has none yet and `tries` is under `UNMERGED_TRIES`; at the bound it grades the bare head and the
+        state remembers the fallback. The waiting field of `name` comes out of the hash only once this start cannot
+        be repeated: before the retirement, and right after the expansion returns, before the first grade write."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
             self.client.hdel(WAITING, name)
             return self._retire(request, now_ms)
-        fallback = False
-        if request.pull_number and not request.plant:
-            if give_up:
-                fallback = True
-            else:
-                resolved = self.ports.merges(request.repo, request.pull_number, request.head)
-                if resolved is None:
-                    raise Unmerged(
-                        f"GitHub has resolved no merge of {request.repo}#{request.pull_number} for "
-                        f"{request.head} with that head as its second parent, yet"
-                    )
-                request = replace(request, graded_commit=resolved[0])
+        request, fallback = self._merge_resolution(request, tries)
         plan = self.ports.expander.expand(request)
         self.client.hdel(WAITING, name)
         inputs = GradeInputs(
@@ -1633,10 +1656,7 @@ class Scheduler:
                 plant=scope == "full",
                 pull_number=state.pull_number,
             )
-            try:
-                return [self._start(request, state.lane, state.ref, now_ms, name="")]
-            except (FetchPending, FetchUnanswered, Unmerged, merges.MergePending, merges.MergeUnanswered) as error:
-                return [f"holding the required-frame regrade of {state.head}: {error}"]
+            return self._regrade(state, request, now_ms)
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
@@ -2215,7 +2235,8 @@ class MirrorExpander:
 
     def bundle(self, sha: str) -> bytes | None:
         """Return the git bundle of a commit prerequisite on its two parents, from whichever served repository's
-        store under root holds it, or None when none does."""
+        store under root holds it, or None when none does. The ref it bundles from is unique to the call, so two
+        requests for the same commit at once never create or delete each other's ref."""
         if not self.root.is_dir():
             return None
         for store in sorted(self.root.iterdir()):
@@ -2228,7 +2249,7 @@ class MirrorExpander:
                 text=True,
                 check=True,
             ).stdout.split()[1:]
-            ref = f"refs/lab-bundle/{sha}"
+            ref = f"refs/lab-bundle/{uuid4().hex}"
             subprocess.run(["git", "-C", str(store), "update-ref", ref, sha], check=True, capture_output=True)
             try:
                 with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:

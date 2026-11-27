@@ -46,6 +46,30 @@ class HoldsUpToTheCap:
             return [f"cannot expand {held['request']}: {fetches} manifest fetches in a row got no answer: {error}"]
 
 
+class MergeUnanswered(ValueError):
+    pass
+
+
+class Unmerged(ValueError):
+    pass
+
+
+class merges:
+    MergeUnanswered = MergeUnanswered
+
+
+class HoldsBoundedByTheResolver:
+    def _release(self, name: str, held: dict[str, Any], now_ms: int) -> list[str]:
+        self: Any
+        unmerged = held.get("unmerged", 0)
+        try:
+            return [self._start(held["request"], unmerged)]
+        except (Unmerged, merges.MergeUnanswered) as error:
+            # ok: lab-unanswered-fetch-holds-forever
+            self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
+            return [f"holding {held['request']}: {error}"]
+
+
 class KeepsTheWindowWhileFetching:
     def _release(self, name: str, raw: str) -> list[str]:
         self: Any

@@ -57,6 +57,7 @@ TIMEOUT_SECONDS = 60.0
 DELIVERY_CALLS = 5
 GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+NOT_FOUND = 404
 RESTART = 426
 SERVER_ERROR = 500
 REDIS = "REDIS"
@@ -166,8 +167,13 @@ class Client:
     def bundle(self, job: str, token: str, sha: str) -> bytes | None:
         """Return the git bundle of the lease's graded commit, or None when the token no longer holds the lease or
         no served repository's store holds the commit."""
-        reply = self._held("/bundle", {"job": job, "token": token, "sha": sha})
-        return None if reply is None or "bundle" not in reply else base64.b64decode(reply["bundle"])
+        try:
+            reply = self._send("/bundle", {"job": job, "token": token, "sha": sha})
+        except urllib.error.HTTPError as error:
+            if error.code in (REFUSED, NOT_FOUND):
+                return None
+            raise
+        return base64.b64decode(reply["bundle"])
 
     def complete(self, job: str, token: str, outcome: str) -> bool:
         """Record the job's outcome; False when the token no longer holds the lease."""

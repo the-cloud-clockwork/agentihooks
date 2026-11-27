@@ -219,25 +219,29 @@ def _masked(text: bytes, secrets: Sequence[str]) -> bytes:
 
 
 def _ensure_graded(pod: Pod, lease: Lease) -> None:
-    """Fetch the lease's graded commit into the pod's store, over the lock the pod's worktrees share, asking the
-    scheduler for a git bundle of it when the node mirror does not carry it and no lab remote serves it."""
+    """Fetch the lease's graded commit into the pod's store, asking the scheduler for a git bundle of it outside
+    the pod's tree lock when the node mirror does not carry it and no lab remote serves it, then writing the
+    fetched bundle into the store under that lock, as every other write to it."""
     mirror = pod.trees.worktrees.mirror
     with pod.trees.lock:
         try:
             mirror.fetch(lease.graded_commit)
-        except subprocess.CalledProcessError:
-            if pod.bundler is None:
-                raise
-            found = pod.bundler(lease.job, lease.token, lease.graded_commit)
-            if found is None:
-                raise
-            with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
-                Path(handle.name).write_bytes(found)
-                ref = f"{lease.graded_commit}:refs/lab/{lease.graded_commit}"
-                subprocess.run(
-                    ["git", "-C", str(mirror.store), "fetch", "--quiet", "--no-write-fetch-head", handle.name, ref],
-                    check=True,
-                )
+            return
+        except subprocess.CalledProcessError as missing:
+            error = missing
+    if pod.bundler is None:
+        raise error
+    found = pod.bundler(lease.job, lease.token, lease.graded_commit)
+    if found is None:
+        raise error
+    with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
+        Path(handle.name).write_bytes(found)
+        ref = f"{lease.graded_commit}:refs/lab/{lease.graded_commit}"
+        with pod.trees.lock:
+            subprocess.run(
+                ["git", "-C", str(mirror.store), "fetch", "--quiet", "--no-write-fetch-head", handle.name, ref],
+                check=True,
+            )
 
 
 def static(pod: Pod, lease: Lease, root: Path) -> Finished:
@@ -276,7 +280,8 @@ def tests(pod: Pod, suite: Suite, lease: Lease, root: Path) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
     ledger, on as many workers as its slots, cutting every attempt and report folder inside root; the report counts
     the git and uv cache lookups it made and carries the flake ledger rows of a batch its retry passed, with the unit
-    key as run and the attempt count as run_attempt."""
+    key as run and the attempt count as run_attempt. A lease that names a graded commit runs its batch on that test
+    merge instead of the bare head."""
     if not lease.unit.manifest_digest:
         raise ManifestRefused(f"{lease.unit.key}: missing manifest digest")
     if not lease.unit.manifest:
@@ -284,7 +289,10 @@ def tests(pod: Pod, suite: Suite, lease: Lease, root: Path) -> Finished:
     if hashlib.sha256(lease.unit.manifest.encode()).hexdigest() != lease.unit.manifest_digest:
         raise ManifestRefused(f"{lease.unit.key}: manifest digest mismatch")
     manifest = json.loads(lease.unit.manifest)
-    with pod.trees.shared(lease.head) as ((tree,), fetched):
+    reading = lease.graded_commit or lease.head
+    if lease.graded_commit:
+        _ensure_graded(pod, lease)
+    with pod.trees.shared(reading) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         lab = run_tests.Lab(root, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()

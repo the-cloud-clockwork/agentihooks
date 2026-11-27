@@ -132,7 +132,7 @@ def _grant(grant: Grant) -> dict[str, Any]:
     }
 
 
-def _lease(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, raw: bytes) -> Reply:
+def _lease(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
     worker = _text(data, "worker")
     free_slots = _number(data, "free_slots")
@@ -144,20 +144,20 @@ def _lease(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, r
     return 200, {"leases": [_grant(grant) for grant in grants]}
 
 
-def _heartbeat(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, raw: bytes) -> Reply:
+def _heartbeat(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
     expires_ms = leases.heartbeat(_text(data, "job"), _text(data, "token"))
     return _refused() if expires_ms is None else (200, {"expires_ms": expires_ms})
 
 
-def _complete(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, raw: bytes) -> Reply:
+def _complete(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
     if not leases.complete(_text(data, "job"), _text(data, "token"), _text(data, "outcome")):
         return _refused()
     return 200, {"completed": True}
 
 
-def _upload_url(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, raw: bytes) -> Reply:
+def _upload_url(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     fields = {name: values[0] for name, values in parse_qs(query).items()}
     job = fields.get("job")
     token = fields.get("token")
@@ -168,7 +168,7 @@ def _upload_url(leases: Leases, signer: UploadSigner, bundler: Bundler, query: s
     return 200, {"url": signer.upload_url(job, fields["name"])}
 
 
-def _bundle(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, raw: bytes) -> Reply:
+def _bundle(bundler: Bundler, leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
     job = _text(data, "job")
     token = _text(data, "token")
@@ -183,13 +183,13 @@ def _bundle(leases: Leases, signer: UploadSigner, bundler: Bundler, query: str, 
     return 200, {"bundle": base64.b64encode(found).decode()}
 
 
-ROUTES: dict[tuple[str, str], Callable[[Leases, UploadSigner, Bundler, str, bytes], Reply]] = {
+ROUTES: dict[tuple[str, str], Callable[[Leases, UploadSigner, str, bytes], Reply]] = {
     ("POST", "/lease"): _lease,
     ("POST", "/heartbeat"): _heartbeat,
     ("POST", "/complete"): _complete,
     ("GET", "/upload-url"): _upload_url,
-    ("POST", "/bundle"): _bundle,
 }
+BUNDLE_ROUTE = ("POST", "/bundle")
 
 
 def respond(
@@ -197,11 +197,12 @@ def respond(
 ) -> Reply:
     """Answer one worker request with its status and JSON body."""
     url = urlsplit(target)
-    route = ROUTES.get((method, url.path))
+    key = (method, url.path)
+    route = partial(_bundle, bundler) if key == BUNDLE_ROUTE else ROUTES.get(key)
     if route is None:
         return 404, {"error": "not found"}
     try:
-        return route(leases, signer, bundler, url.query, raw)
+        return route(leases, signer, url.query, raw)
     except BadRequest:
         return 400, {"error": "bad request"}
 

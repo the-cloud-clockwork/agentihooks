@@ -90,7 +90,9 @@ def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
     pull, repo = payload["pull_request"], payload["repository"]["html_url"]
     head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
     number = pull.get("number", 0)
-    return [HeadEvent("pull_request", repo, head, base, author, payload["action"], pull_lane(pull), number)]
+    return [
+        HeadEvent("pull_request", repo, head, base, author, payload["action"], lane=pull_lane(pull), pull_number=number)
+    ]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:

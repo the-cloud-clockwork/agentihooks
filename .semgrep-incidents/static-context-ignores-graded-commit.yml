@@ -5,11 +5,10 @@ rules:
     message: >-
       A static unit's context must read github.sha as the lease's graded commit when it names one, the test merge
       GitHub built for a resolved pull request, and the lease's head only when it names none. Setting github.sha to
-      the lease's head alone grades the bare head and never the merge Actions built, issue 13890.
+      the lease's head alone grades the bare head and never the merge Actions built.
     paths:
       include:
         - /scripts/ci_lab/executors.py
         - static-context-ignores-graded-commit.py
     patterns:
       - pattern: '{..., "github.sha": $LEASE.head, ...}'
-      - pattern-not: '{..., "github.sha": $LEASE.graded_commit or $LEASE.head, ...}'
