@@ -1,3 +1,4 @@
+import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -89,6 +90,71 @@ def test_block_without_panic_still_refuses_unpushed_commits(env, worktree, monke
     patch_swarm_store_connect(monkeypatch, env[0])
     _task_commit(worktree[3])
     _refused(worktree, capsys)
+    assert not list(ledger_workspace.folder("sw", "t1").glob("*.patch"))
+
+
+HELD_NOTE = "Panic held the push, so block saved the unpushed commits as a patch in the task work folder, 1 in all."
+
+
+def _panic(env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import panic
+    from tests.conftest import patch_swarm_store_connect
+
+    patch_swarm_store_connect(monkeypatch, env[0])
+    panic.engage(env[0], "sw", "60 errors in the last hour", False, [], 0)
+
+
+def _held(worktree, capsys, base: str) -> Path:
+    ledger, _, primary, top = worktree
+    head = _git(top, "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert block() == 0
+    patch = ledger_workspace.folder("sw", "t1") / f"repo-{BRANCH}.patch"
+    assert json.loads(capsys.readouterr().out)["held_patch"] == [
+        {"repository": str(primary), "branch": BRANCH, "head": head, "base": base, "commits": 1, "patch": str(patch)}
+    ]
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert ("t1", HELD_NOTE, AGENT) in ledger.comments
+    assert "the ready fix" in patch.read_text()
+    return patch
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_saves_the_unpushed_commit_as_a_patch_and_blocks(env, worktree, monkeypatch, capsys):
+    _, _, primary, top = worktree
+    _panic(env, monkeypatch)
+    _task_commit(top)
+    patch = _held(worktree, capsys, "origin/dev")
+    _git(primary, "apply", "--check", str(patch))
+    assert _git(primary, "ls-remote", "origin", f"refs/heads/{BRANCH}") == ""
+    assert "branch" not in worktree[0].rows["t1"]
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_saves_only_the_commits_after_the_last_push(env, worktree, monkeypatch, capsys):
+    _, _, primary, top = worktree
+    _panic(env, monkeypatch)
+    (top / "earlier.txt").write_text("pushed work\n")
+    _git(top, "add", "earlier.txt")
+    _git(top, "commit", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    pushed = _git(top, "rev-parse", "HEAD")
+    _task_commit(top)
+    patch = _held(worktree, capsys, pushed)
+    assert _git(primary, "ls-remote", "origin", f"refs/heads/{BRANCH}") == f"{pushed}\trefs/heads/{BRANCH}"
+    assert "earlier.txt" not in patch.read_text()
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_still_refuses_a_registered_fix_branch(env, worktree, monkeypatch, capsys):
+    from hooks.context import blocker_window
+
+    asked = []
+    _panic(env, monkeypatch)
+    monkeypatch.setattr(blocker_window, "_registered", lambda cwd, fixes, branch: asked.append((cwd, branch)) or True)
+    _task_commit(worktree[3])
+    _refused(worktree, capsys)
+    assert asked == [(str(worktree[3]), BRANCH)]
     assert not list(ledger_workspace.folder("sw", "t1").glob("*.patch"))
 
 
