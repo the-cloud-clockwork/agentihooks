@@ -30,7 +30,22 @@ def dotted(node: ast.AST) -> list[str]:
 
 def initialized(node: ast.AST) -> Sequence[ast.AST]:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return [*node.decorator_list, *node.args.defaults, *(value for value in node.args.kw_defaults if value)]
+        annotations = [
+            node.returns,
+            *(argument.annotation for argument in ast.walk(node.args) if isinstance(argument, ast.arg)),
+        ]
+        return [
+            *node.decorator_list,
+            *node.args.defaults,
+            *(value for value in node.args.kw_defaults if value),
+            *(
+                value
+                for value in annotations
+                if value is not None and any(isinstance(child, ast.Call) for child in ast.walk(value))
+            ),
+        ]
+    if isinstance(node, ast.AnnAssign) and isinstance(node.annotation, ast.Name):
+        return [node.target, *([node.value] if node.value is not None else [])]
     if isinstance(node, ast.If) and ast.unparse(node.test) in ("__name__ == '__main__'", "'__main__' == __name__"):
         return node.orelse
     return list(ast.iter_child_nodes(node))

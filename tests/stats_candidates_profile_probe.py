@@ -111,14 +111,17 @@ def test_explain_import_roots() -> None:
             for node in reach.executed(current):
                 if isinstance(node, ast.Call) and UNKNOWN in reach.call_edges(current, node):
                     reasons.append({"line": node.lineno, "expression": ast.unparse(node)})
+                elif isinstance(node, (ast.Import, ast.ImportFrom)) and UNKNOWN in reach.import_edges(current, node):
+                    reasons.append({"line": node.lineno, "expression": ast.unparse(node)})
                 elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
                     if UNKNOWN in reach.value(current, node):
                         reasons.append({"line": node.lineno, "expression": ast.unparse(node)})
             details.append({"key": current, "reasons": reasons})
         report[path] = {"retained": key in reach.wanted, "unknown": details}
     reports = Path(os.environ["PROOF_REPORT_DIR"]) / "import-roots.json"
-    reports.write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2), flush=True)
+    reports.parent.mkdir(parents=True, exist_ok=True)
+    reports.write_text(json.dumps(report, indent=2))
 
 
 def test_profile_one_recorded_stats_part(tmp_path: Path) -> None:
