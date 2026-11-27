@@ -354,8 +354,10 @@ def test_a_shard_summary_without_graded_lines_cannot_publish(measured: Measured)
     assert not target.exists()
 
 
+@pytest.mark.feature("coverage-baseline-blobless-checkout")
+@pytest.mark.parametrize("blobless", [False, True], ids=["full", "blobless"])
 @pytest.mark.parametrize("restored", ["ancestor", "sibling", "unknown", "missing-commit", "absent"])
-def test_publisher_records_only_ancestor_history(tmp_path: Path, restored: str) -> None:
+def test_publisher_records_only_ancestor_history(tmp_path: Path, restored: str, blobless: bool) -> None:
     import os
     import subprocess
 
@@ -387,9 +389,23 @@ def test_publisher_records_only_ancestor_history(tmp_path: Path, restored: str) 
     git("commit", "-m", "Base")
     ancestor = git("rev-parse", "HEAD")
     tree = git("rev-parse", "HEAD^{tree}")
+    old_blob = git("rev-parse", "HEAD:hooks/example.py")
     sibling = git("commit-tree", tree, "-p", ancestor, "-m", "Sibling")
-    git("commit", "--allow-empty", "-m", "Head")
+    git("branch", "sibling", sibling)
+    (repo / "hooks/example.py").write_text("value = 2\n")
+    git("add", "hooks/example.py")
+    git("commit", "-m", "Head")
     head = git("rev-parse", "HEAD")
+    head_tree = git("rev-parse", "HEAD^{tree}")
+    if blobless:
+        git("config", "uploadpack.allowFilter", "true")
+        git("clone", "--no-checkout", "--filter=blob:none", repo.as_uri(), str(tmp_path / "clone"))
+        repo = tmp_path / "clone"
+        git("checkout", "--detach", head)
+        assert git("config", "remote.origin.partialclonefilter") == "blob:none"
+        assert not (repo / ".git/shallow").exists()
+        assert f"?{old_blob}" in git("rev-list", "--objects", "--all", "--missing=print").splitlines()
+        git("remote", "set-url", "origin", str(tmp_path / "offline"))
     target = Path(env["HOME"]) / "coverage-baseline/baseline.json"
     target.parent.mkdir(parents=True)
     previous = {"tree": tree, "executed": {"hooks/example.py": [1]}, "history": [], "shards": 20}
@@ -400,11 +416,34 @@ def test_publisher_records_only_ancestor_history(tmp_path: Path, restored: str) 
     for index in range(1, 21):
         summary = repo / "baseline-coverage" / f"executed-lines-3.12-{index}" / "executed-lines.json"
         _summarize(summary, {"hooks/example.py": {1}})
-    script = next(step["run"] for step in job["steps"] if step.get("name") == "Compute the coverage baseline")
-    result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, text=True, capture_output=True
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    output = tmp_path / "output"
+    packet_log = tmp_path / "packets"
+    env.update(PREVIOUS=ancestor, GITHUB_OUTPUT=str(output), GIT_TRACE_PACKET=str(packet_log))
+    for name in ("Resolve baseline trees", "Compute the coverage baseline"):
+        script = next(step["run"] for step in job["steps"] if step.get("name") == name)
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, text=True, capture_output=True
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text() == f"tree={head_tree}\nprevious={tree}\n"
     value = json.loads(target.read_text())
     assert value["commit"] == head
     assert [entry["commit"] for entry in value["history"]] == ([ancestor] if restored == "ancestor" else [])
+    if blobless:
+        assert f"?{old_blob}" in git("rev-list", "--objects", "--all", "--missing=print").splitlines()
+        assert "want " not in (packet_log.read_text() if packet_log.exists() else "")
+
+
+@pytest.mark.feature("coverage-baseline-blobless-checkout")
+@pytest.mark.parametrize("name", ["coverage-baseline", "coverage-ratchet"])
+def test_publisher_filters_history_without_filtering_the_ratchet(name: str) -> None:
+    project = Path(__file__).parents[1]
+    job = yaml.safe_load((project / ".github/workflows/test.yml").read_text())["jobs"][name]
+    checkouts = [step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@")]
+    assert checkouts
+    for checkout in checkouts:
+        assert checkout["with"]["fetch-depth"] == 0
+        if name == "coverage-baseline":
+            assert checkout["with"]["filter"] == "blob:none"
+        else:
+            assert "filter" not in checkout["with"]

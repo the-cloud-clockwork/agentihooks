@@ -1,0 +1,11 @@
+{
+  "id": "coverage-baseline-blobless-checkout",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-baseline-partial-clone",
+  "behaviour": "The coverage baseline publisher checks out full commit and tree history without historical blobs, resolves baseline trees and retains only ancestor history offline without lazy blob transfers. The coverage ratchet retains its unfiltered checkout for historical file reads.",
+  "seam": "Tests publisher and ratchet checkout inputs, publisher tree resolution and baseline computation in full and blobless repositories",
+  "tests": [
+    "tests/test_coverage_baseline.py::test_publisher_filters_history_without_filtering_the_ratchet",
+    "tests/test_coverage_baseline.py::test_publisher_records_only_ancestor_history"
+  ]
+}
