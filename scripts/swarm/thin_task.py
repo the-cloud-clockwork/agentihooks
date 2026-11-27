@@ -111,8 +111,10 @@ def _legacy_plan(task: dict[str, Any]) -> bool:
     )
 
 
-def backfill(tasks: list[dict[str, Any]], phases: set[str], eligible: set[str]) -> list[list[dict[str, object]]]:
-    from scripts.tick.steps.thin import _move, _own_phase  # pyright: ignore[reportPrivateUsage]
+def backfill(
+    tasks: list[dict[str, Any]], phases: set[str], eligible: set[str], by: str = ""
+) -> list[list[dict[str, object]]]:
+    from scripts.tick.steps.thin import SENDER, _move, _own_phase  # pyright: ignore[reportPrivateUsage]
 
     rows = {task["id"]: task for task in tasks}
     batches: list[list[dict[str, object]]] = []
@@ -127,7 +129,7 @@ def backfill(tasks: list[dict[str, Any]], phases: set[str], eligible: set[str]) 
                 operations.append(_own_phase(target, phase))
             operations.append(_move(target, phase))
         operations.append(_move(plan, phase))
-        batches.append(operations)
+        batches.append([{**operation, "by": by or SENDER} for operation in operations])
     return batches
 
 
@@ -159,6 +161,7 @@ def _backfill_batch(
     plans: tuple[dict[str, Any], ...],
     phases: set[str],
 ) -> tuple[int, float] | None:
+    from scripts.tick.adapters.writer_client import principal
     from scripts.tick.deadline import Deadline
 
     eligible = _claimable_plans(client, slug)
@@ -166,7 +169,7 @@ def _backfill_batch(
         task_id for plan in plans if plan["id"] in eligible for task_id in (plan["id"], plan["enhances"])
     )
     replies = {task_id: resource.request(slug, f"tasks/{task_id}") for task_id in ids}
-    pairs = backfill([reply["data"] for reply in replies.values()], phases, eligible)
+    pairs = backfill([reply["data"] for reply in replies.values()], phases, eligible, principal())
     if not pairs:
         return None
     operations = [operation for pair in pairs for operation in pair]
