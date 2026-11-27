@@ -2,8 +2,8 @@
   "id": "ledger-op-context-typed",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/phases/p139",
-  "behaviour": "Every function of a module registered in ledger_core.EXTENSION_OPS that takes the op context names it by one Protocol, OpContext, which holds what an op reads and writes of one sync: at, rev, events, refused, meta, slug, dirty and stamps, and the calls author, record and stamp. A ctx left untyped, or typed Any, object or the concrete class, is refused, in a function and in a method alike, and so is a registered module in which no function takes the context. The one concrete context, ledger_core.Context, holds every member of the Protocol. A live check prints one line per registered module of the installed build and fails on the first of these that does not hold.",
-  "seam": "scripts.swarm_ledger.op_context.OpContext against every function with a ctx parameter in the modules of scripts.swarm_ledger.ledger_core.EXTENSION_OPS, through scripts.feature_checks.op_context_typed",
+  "behaviour": "Every function of a module the ledger core dispatches an op to by name takes the op context as the one Protocol, OpContext, which holds what an op reads and writes of one sync: at, rev, events, refused, dropped, unstored, meta, slug, dirty and stamps, and the calls author, record and stamp. A ctx left untyped, or typed Any, object or the concrete class, is refused, in a function and in a method alike, and so is a dispatched module in which no function takes the context. The dispatched modules are discovered, never hand kept: the modules registered in ledger_core.EXTENSION_OPS, the agent and artifact op families, the sync kinds and the thread ops, found by walking the core's own source for a call that hands ctx to an attribute of an imported ledger_* module or to a name imported from one, and the core itself. The one concrete context, ledger_core.Context, holds every member of the Protocol. A live check prints one line per discovered module of the installed build and fails on the first of these that does not hold. The Semgrep rule grades every scripts/swarm_ledger/ledger_*.py file by one glob, with no hand kept list of its own.",
+  "seam": "scripts.swarm_ledger.op_context.OpContext against every function with a ctx parameter in the modules scripts.feature_checks.op_context_typed.op_modules discovers from scripts.swarm_ledger.ledger_core: its EXTENSION_OPS registry and every ledger_* module its own source hands the op context to",
   "semgrep_rule": "feature-ledger-op-context-typed",
   "live_check": [
     "python",
@@ -21,7 +21,14 @@
     "tests/test_op_context_typed_check.py::test_the_check_prints_every_line_and_fails_on_one_fault",
     "tests/test_op_context_typed_check.py::test_the_check_passes_when_no_line_fails",
     "tests/test_op_context_typed_check.py::test_every_registered_op_module_takes_the_context_by_the_protocol",
+    "tests/test_op_context_typed_check.py::test_op_modules_discovers_the_registry_and_every_handed_family",
+    "tests/test_op_context_typed_check.py::test_the_member_set_equals_what_the_functions_use",
+    "tests/test_op_context_typed_check.py::test_handed_discovers_a_module_through_an_attribute_a_from_import_and_a_keyword",
+    "tests/test_op_context_typed_check.py::test_handed_ignores_a_call_that_does_not_pass_the_context_on",
+    "tests/test_op_context_typed_check.py::test_registry_modules_finds_only_a_dict_whose_values_are_every_one_a_module",
+    "tests/test_op_context_typed_check.py::test_a_module_the_core_hands_the_context_to_is_discovered_and_graded_untyped",
+    "tests/test_op_context_typed_check.py::test_a_core_function_with_an_untyped_context_fails",
     "tests/test_op_context_typed_check.py::test_the_ledger_package_folder_joins_the_import_path_once",
-    "tests/test_op_context_typed_check.py::test_the_rule_grades_exactly_the_registered_op_modules"
+    "tests/test_op_context_typed_check.py::test_the_rule_grades_every_ledger_module_by_one_glob_with_no_hand_kept_list"
   ]
 }

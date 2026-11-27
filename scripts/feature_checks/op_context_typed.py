@@ -1,15 +1,23 @@
 """Live check that the ledger ops name their context by its Protocol: on the installed build, every function of a
-module registered in ``ledger_core.EXTENSION_OPS`` that takes the op context annotates it ``OpContext``, and the one
-concrete context holds every member of the Protocol. It prints one line per module and never a credential."""
+module the ledger core dispatches an op to by name takes the op context as ``OpContext``, and the one concrete
+context holds every member of the Protocol. The dispatched modules are discovered, never hand kept: every module
+held in a module level registry dict of the core, and every module the core's own source hands the context to,
+plus the core itself. It prints one line per module and never a credential."""
 
+import ast
+import importlib
 import inspect
 import sys
 from collections.abc import Callable, Iterable
 from operator import attrgetter, itemgetter
+from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm_ledger.op_context import OpContext
+
+LEDGER_PREFIX = "ledger_"
+SWARM_LEDGER = "swarm_ledger"
 
 FAIL = "FAIL: "
 NAME = "ctx"
@@ -77,13 +85,94 @@ def importable() -> None:
         sys.path.insert(0, str(package.HERE))
 
 
+def _bound_ledger_modules(tree: ast.AST) -> dict[str, str]:
+    """Every name the tree binds to a ``ledger_*`` module, by `import ledger_x` or
+    `from scripts.swarm_ledger import ledger_x`, module level or nested, keyed by the bound name."""
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                last = alias.name.rpartition(".")[2]
+                if last.startswith(LEDGER_PREFIX):
+                    found[alias.asname or alias.name] = last
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.rpartition(".")[2] == SWARM_LEDGER:
+            for alias in node.names:
+                if alias.name.startswith(LEDGER_PREFIX):
+                    found[alias.asname or alias.name] = alias.name
+    return found
+
+
+def _bound_ledger_functions(tree: ast.AST) -> dict[str, str]:
+    """Every name the tree binds to a function imported from a ``ledger_*`` module, by
+    `from ledger_x import f` or `from scripts.swarm_ledger.ledger_x import f`, keyed by the bound name to the
+    owning module's name."""
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            owner = node.module.rpartition(".")[2]
+            if owner.startswith(LEDGER_PREFIX):
+                for alias in node.names:
+                    found[alias.asname or alias.name] = owner
+    return found
+
+
+def _passes_ctx(call: ast.Call) -> bool:
+    """Whether the call hands the name ``ctx`` on, positionally or by keyword."""
+    named = (*call.args, *(keyword.value for keyword in call.keywords))
+    return any(isinstance(argument, ast.Name) and argument.id == NAME for argument in named)
+
+
+def handed(tree: ast.AST) -> set[str]:
+    """The ``ledger_*`` modules a call in the tree hands the op context to: through an attribute of a module bound
+    by import, or by calling a function imported from one."""
+    modules, functions = _bound_ledger_modules(tree), _bound_ledger_functions(tree)
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and _passes_ctx(node)):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
+            found.add(modules[func.value.id])
+        elif isinstance(func, ast.Name) and func.id in functions:
+            found.add(functions[func.id])
+    return found
+
+
+def _registry_modules(core: ModuleType) -> set[ModuleType]:
+    """Every module held as a value of a module level dict of the core that registers an op by name."""
+    found: set[ModuleType] = set()
+    for container in vars(core).values():
+        if not isinstance(container, dict) or not container:
+            continue
+        values: list[Any] = list(cast("dict[Any, Any]", container).values())
+        if all(isinstance(value, ModuleType) for value in values):
+            found.update(value for value in values if isinstance(value, ModuleType))
+    return found
+
+
+def op_modules(core: ModuleType | None = None) -> list[ModuleType]:
+    """Every module the ledger core dispatches an op to by name, discovered with no hand kept list: the core
+    itself, every module a registry dict of the core holds, and every ``ledger_*`` module the core's own source
+    hands the op context to."""
+    if core is None:
+        importable()
+        from scripts.swarm_ledger import ledger_core
+
+        core = ledger_core
+    tree = ast.parse(Path(str(core.__file__)).read_text())
+    core_name = core.__name__.rpartition(".")[2]
+    handed_names = handed(tree) - {core_name}
+    modules = {*_registry_modules(core), *(importlib.import_module(name) for name in sorted(handed_names))}
+    return [core, *sorted(modules, key=attrgetter("__name__"))]
+
+
 def main(modules: Iterable[ModuleType] | None = None, context: object = None) -> int:
     if modules is None:
         importable()
         from scripts.swarm_ledger import ledger_core
 
         stamps: dict[str, dict[str, Any]] = {}
-        modules = set(ledger_core.EXTENSION_OPS.values())
+        modules = op_modules(ledger_core)
         context = ledger_core.Context({"rev": 0, "stamps": stamps}, 0)
     found = lines(modules, context)
     for line in found:

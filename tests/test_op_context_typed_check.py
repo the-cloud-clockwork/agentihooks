@@ -1,6 +1,8 @@
-"""The live check of the typed op context over stand-in modules, over the registry of the ledger core and over the
-Semgrep rule that holds the same shape."""
+"""The live check of the typed op context over stand-in modules, over the registry and the handed-off families of
+the ledger core, and over the Semgrep rule that holds the same shape."""
 
+import ast
+import importlib
 import inspect
 import sys
 from pathlib import Path
@@ -19,7 +21,23 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 RULE = ROOT / ".semgrep" / "features" / "ledger-op-context-typed.yml"
 FIXTURE = "ledger-op-context-typed.test.py"
-MEMBERS = ("at", "rev", "events", "refused", "meta", "slug", "dirty", "stamps", "author", "record", "stamp")
+GLOB = "/scripts/swarm_ledger/ledger_*.py"
+MEMBERS = (
+    "at",
+    "rev",
+    "events",
+    "refused",
+    "dropped",
+    "unstored",
+    "meta",
+    "slug",
+    "dirty",
+    "stamps",
+    "author",
+    "record",
+    "stamp",
+)
+HANDED_FAMILIES = ("ledger_agent_ops", "ledger_artifacts", "ledger_comments", "ledger_stats")
 HELD = "the concrete context holds every member of the Protocol"
 
 
@@ -147,8 +165,82 @@ def test_every_registered_op_module_takes_the_context_by_the_protocol(capsys: py
     printed = capsys.readouterr().out.splitlines()
     assert [line for line in printed if line.startswith("FAIL: ")] == []
     assert passed == 0
-    assert len(printed) == len(set(core.EXTENSION_OPS.values())) + 1
+    assert len(printed) == len(check.op_modules()) + 1
     assert printed[-1] == HELD
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_op_modules_discovers_the_registry_and_every_handed_family() -> None:
+    discovered = {found.__name__.rpartition(".")[2] for found in check.op_modules()}
+    registered = {found.__name__.rpartition(".")[2] for found in core.EXTENSION_OPS.values()}
+    assert discovered == registered | {"ledger_core", *HANDED_FAMILIES}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_the_member_set_equals_what_the_functions_use() -> None:
+    assert set(MEMBERS) == {*OpContext.__annotations__, "author", "stamp"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_discovers_a_module_through_an_attribute_a_from_import_and_a_keyword() -> None:
+    tree = ast.parse(
+        "import ledger_a\n"
+        "from scripts.swarm_ledger import ledger_b\n"
+        "from ledger_c import run\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    ledger_a.apply(doc, op, ctx)\n"
+        "    ledger_b.apply(doc, op=op, ctx=ctx)\n"
+        "    return run(doc, op, ctx)\n"
+    )
+    assert check.handed(tree) == {"ledger_a", "ledger_b", "ledger_c"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_ignores_a_call_that_does_not_pass_the_context_on() -> None:
+    tree = ast.parse("import ledger_a\n\n\ndef check_op(op):\n    return ledger_a.check(op)\n")
+    assert check.handed(tree) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_registry_modules_finds_only_a_dict_whose_values_are_every_one_a_module() -> None:
+    held = module("ledger_plant_held")
+    owner = module("plant_registry_owner")
+    setattr(owner, "REGISTRY", {"op": held})
+    setattr(owner, "NAMES", {"op": "not a module"})
+    setattr(owner, "EMPTY", {})
+    assert check._registry_modules(owner) == {held}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_a_module_the_core_hands_the_context_to_is_discovered_and_graded_untyped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "ledger_plant_handed.py").write_text("def apply(doc, op, ctx) -> bool:\n    return True\n")
+    (tmp_path / "plant_core_handed.py").write_text(
+        "from scripts.swarm_ledger.op_context import OpContext\n"
+        "import ledger_plant_handed\n\n\n"
+        "def apply_op(doc, op, ctx: OpContext) -> bool:\n"
+        "    return ledger_plant_handed.apply(doc, op, ctx)\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    plant_core = importlib.import_module("plant_core_handed")
+    modules = check.op_modules(plant_core)
+    assert {found.__name__ for found in modules} == {"plant_core_handed", "ledger_plant_handed"}
+    assert check.lines(modules, context()) == [
+        "FAIL: ledger_plant_handed.apply takes the op context untyped",
+        "plant_core_handed: 1 functions take the op context, each by the Protocol",
+        HELD,
+    ]
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_a_core_function_with_an_untyped_context_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "plant_core_untyped.py").write_text("def apply_op(doc, op, ctx) -> bool:\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    plant_core = importlib.import_module("plant_core_untyped")
+    modules = check.op_modules(plant_core)
+    assert [found.__name__ for found in modules] == ["plant_core_untyped"]
+    assert check.lines(modules, context()) == ["FAIL: plant_core_untyped.apply_op takes the op context untyped", HELD]
 
 
 @pytest.mark.feature("ledger-op-context-typed")
@@ -162,7 +254,6 @@ def test_the_ledger_package_folder_joins_the_import_path_once(monkeypatch: pytes
 
 
 @pytest.mark.feature("ledger-op-context-typed")
-def test_the_rule_grades_exactly_the_registered_op_modules() -> None:
+def test_the_rule_grades_every_ledger_module_by_one_glob_with_no_hand_kept_list() -> None:
     rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
-    registered = {f"/scripts/swarm_ledger/{Path(str(found.__file__)).name}" for found in core.EXTENSION_OPS.values()}
-    assert sorted(rule["paths"]["include"]) == sorted({*registered, FIXTURE})
+    assert sorted(rule["paths"]["include"]) == sorted({GLOB, FIXTURE})
