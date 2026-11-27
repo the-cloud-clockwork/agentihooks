@@ -52,8 +52,8 @@ def hook(tmp_path):
         "AGENTIHOOKS_SWARM_TASK": "t1",
     }
 
-    def run(event, extra=None, gate="identity", **fields):
-        (conditions / f"pre-bash-{gate}.py").write_text(SHIM)
+    def run(event, extra=None, gate="identity", shim=SHIM, **fields):
+        (conditions / f"pre-bash-{gate}.py").write_text(shim)
         payload = {
             "hook_event_name": event,
             "session_id": SID,
@@ -132,3 +132,33 @@ def test_a_lift_of_an_unknown_gate_arms_nothing(hook):
     hook("UserPromptSubmit", prompt="lift the bogus gate")
     assert hook("PreToolUse").returncode == 2
     assert [r["kind"] for r in hook.rows()] == ["deny"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_shim_that_cannot_import_the_gates_lets_the_call_through_and_its_hook_reports_it(hook, tmp_path):
+    broken = tmp_path / "broken" / "scripts"
+    broken.mkdir(parents=True)
+    (broken / "__init__.py").write_text("")
+    shim = f'from {PACKAGE}.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
+    proc = hook("PreToolUse", {"PYTHONPATH": str(broken.parent)}, gate="rerun_budget", shim=shim)
+    assert proc.returncode == 0, proc.stderr
+    decided = json.loads(proc.stdout).get("hookSpecificOutput", {}) if proc.stdout.strip() else {}
+    assert decided.get("permissionDecision") != "deny" and "updatedInput" not in decided
+    rows = hook.rows()
+    assert kinds(rows) == [("reruns", "fail-open", ME, "t1", "Bash")]
+    assert f"No module named '{PACKAGE}'" in rows[0]["reason"] and sys.executable in rows[0]["reason"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_gate_module_the_entry_cannot_import_is_reported_once_by_the_child(hook):
+    shim = (
+        "import importlib\n\n"
+        f"entry = importlib.import_module({PACKAGE + '.entry'!r})\n"
+        f"entry.GATES['absent'] = (lambda: importlib.import_module({PACKAGE + '.absent_gate_module'!r}),)\n"
+        "raise SystemExit(entry.main(['absent']))\n"
+    )
+    proc = hook("PreToolUse", gate="absent", shim=shim)
+    assert proc.returncode == 0, proc.stderr
+    rows = hook.rows()
+    assert kinds(rows) == [("absent", "fail-open", ME, "t1", "Bash")]
+    assert f"No module named '{PACKAGE}.absent_gate_module'" in rows[0]["reason"]
