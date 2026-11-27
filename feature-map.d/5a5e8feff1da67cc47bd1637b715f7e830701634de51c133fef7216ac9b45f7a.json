@@ -1,0 +1,12 @@
+{
+  "id": "compose-smoke-spoke-seat",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-smoke-seat-hold-hang",
+  "behaviour": "The compose recovery drill and the compose task smoke give their stand in hive spokes a fixture account reader with one free Claude seat, and a spoke passes its own account reader to the event offer seat check in place of the production reader, so the smoke offers fit the account seat hold while a seatless reader keeps holding them.",
+  "seam": "the SpokeConfig accounts field that Spoke.poll passes to offer_quota.Fit as read, and the free_seat function and SpokeConfig call in the embedded Python of scripts/packaging/compose-recovery-drill.sh and scripts/packaging/compose-task-smoke.sh",
+  "tests": [
+    "tests/test_compose_recovery_drill.py::test_the_recovery_drill_spoke_reads_a_seat_that_fits_its_offers",
+    "tests/test_compose_task_smoke.py::test_the_compose_task_smoke_spoke_reads_a_seat_that_fits_its_offer",
+    "tests/hive/test_offer_quota.py::test_a_spoke_reads_seats_through_its_own_account_reader"
+  ]
+}
