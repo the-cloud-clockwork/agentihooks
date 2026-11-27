@@ -2976,9 +2976,9 @@ blocks together stay within half of GitHub's 65535 character text limit; past it
 fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
 or an empty log, and the required check show only unit keys.
 
-A check run whose grade no newer head superseded, and that held a unit which ended without a
-verdict, adds one line below its unit keys naming how many such units it held, their keys, and
-that a rerequest of the check grades them again.
+A check run that concludes `neutral` adds one line below its unit keys naming how many of its
+units ended without a verdict, their keys, and that a rerequest of the check grades them again.
+A failed or cancelled check adds no such line, whatever its units lost.
 
 #### Limitations
 
