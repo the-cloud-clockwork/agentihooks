@@ -1,9 +1,15 @@
+import json
+import math
 import subprocess
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from scripts import ci_gate_shards
+from scripts.ci_budget import jobs as jobs_reader
 
 pytestmark = pytest.mark.unit
 
@@ -288,3 +294,72 @@ def test_timeout_names_every_shard_still_missing_at_the_last_poll():
         " still waiting on shard 1 unit in_progress; shard 2 unit not listed"
     )
     assert ci_gate_shards.rate_limit.deadline == 300
+
+
+def rerun_attempt_jobs() -> list[dict[str, Any]]:
+    others = [
+        {"name": f"mutation-shard ({index})", "status": "completed", "conclusion": "success"} for index in range(82)
+    ]
+    units = [
+        {"name": f"unit (3.12, {shard})", "status": "completed", "conclusion": "success"} for shard in range(1, 21)
+    ]
+    return others + units
+
+
+def github_attempt_jobs(
+    jobs: list[dict[str, Any]], requests: list[str], largest_page: int
+) -> Callable[[list[str], float, bool], subprocess.CompletedProcess[Any]]:
+    def answer(args: list[str], timeout: float, text: bool) -> subprocess.CompletedProcess[Any]:
+        requests.append(args[0])
+        query = parse_qs(urlsplit(args[0]).query)
+        size = int(query["per_page"][0])
+        if size > largest_page:
+            raise subprocess.CalledProcessError(1, ["gh", "api", *args], stderr="gh: Server Error (HTTP 502)")
+        first = int(query.get("page", ["1"])[0])
+        last = math.ceil(len(jobs) / size) if "--paginate" in args else first
+        pages = [
+            {"total_count": len(jobs), "jobs": jobs[(page - 1) * size : page * size]} for page in range(first, last + 1)
+        ]
+        body = json.dumps(pages if "--slurp" in args else pages[0])
+        return subprocess.CompletedProcess(["gh", "api", *args], 0, stdout=body if text else body.encode())
+
+    return answer
+
+
+@pytest.mark.feature("shard-verifier-small-job-pages")
+def test_watch_passes_every_planned_shard_although_a_full_jobs_page_answers_bad_gateway() -> None:
+    requests: list[str] = []
+    with (
+        patch.object(ci_gate_shards.rate_limit, "_run", github_attempt_jobs(rerun_attempt_jobs(), requests, 25)),
+        patch.object(ci_gate_shards.time, "sleep"),
+    ):
+        assert ci_gate_shards.watch("org/repo", "123", "3", list(range(1, 21))) is None
+
+
+@pytest.mark.feature("shard-verifier-small-job-pages")
+def test_watch_reads_attempt_jobs_ten_per_page_and_never_a_hundred() -> None:
+    requests: list[str] = []
+    with (
+        patch.object(ci_gate_shards.rate_limit, "_run", github_attempt_jobs(rerun_attempt_jobs(), requests, 100)),
+        patch.object(ci_gate_shards.time, "sleep"),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "3", list(range(1, 21)))
+    assert requests == [
+        f"repos/org/repo/actions/runs/123/attempts/3/jobs?per_page=10&page={page}" for page in range(1, 12)
+    ]
+
+
+@pytest.mark.feature("shard-verifier-small-job-pages")
+def test_the_jobs_reader_returns_every_job_of_a_102_job_attempt_when_pages_above_25_fail() -> None:
+    jobs = rerun_attempt_jobs()
+    requests: list[str] = []
+    endpoint = "repos/org/repo/actions/runs/123/attempts/3/jobs"
+    with (
+        patch.object(ci_gate_shards.rate_limit, "_run", github_attempt_jobs(jobs, requests, 25)),
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        assert jobs_reader.read_jobs(endpoint, 100) == jobs
+    assert requests == [f"{endpoint}?per_page=100&page=1", f"{endpoint}?per_page=50&page=1"] + [
+        f"{endpoint}?per_page=25&page={page}" for page in range(1, 6)
+    ]
+    assert [call.args for call in sleep.call_args_list] == [(1,), (2,)]
