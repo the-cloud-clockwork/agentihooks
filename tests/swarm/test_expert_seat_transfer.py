@@ -81,6 +81,50 @@ def test_selected_transfer_supplies_the_runtime_handoff(store: RedisStore, tied:
 
 
 @pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_lost_successor_uses_transfer_history_instead_of_an_older_stored_document(
+    store: RedisStore, confirmed: bool
+) -> None:
+    lineage = started(store)
+    runtime = FakeRuntime()
+    first = launched(store, runtime)
+    current = pending(store, first, "z-current", NOW)
+    stored_text = HANDOFF.replace("Finish slice two", "Inspect the older document")
+    obsolete = handed_off(store, first, stored_text, NOW)
+    second = launched(store, runtime, NOW + MINUTE)
+    assert runtime.tasks[-1]["handoff"] == HANDOFF
+    if confirmed:
+        transfers.confirm(store, "sw", current["id"], second, NEXT, NOW + MINUTE)
+    history = rows(store)
+    generation = store.seats.occupant(lineage.seat).generation
+    store.drop_agent("sw", second.name)
+    successor = launched(store, runtime, NOW + 2 * MINUTE)
+    task = runtime.tasks[-1]
+    selected = task["transfer"]
+    assert selected["id"] not in {current["id"], obsolete["id"]}
+    assert selected["handoff"] == task["handoff"]
+    if confirmed:
+        assert task["handoff"] not in {HANDOFF, stored_text}
+        assert task["handoff_envelope"]["reason"] == expert_seat.REASON
+    else:
+        assert (task["handoff"], selected["next"]) == (HANDOFF, NEXT)
+    assert selected["seat"] == task["seat"] == successor.seat == lineage.seat
+    assert selected["generation"] == store.seats.occupant(lineage.seat).generation == generation + 1
+    assert task["generation"] == 3
+    for previous in history:
+        assert transfers.get(store, "sw", previous["id"]) == previous
+    assert len(rows(store)) == len(history) + 1
+    assert transfers.confirm(store, "sw", selected["id"], successor, selected["next"], NOW + 3 * MINUTE)[
+        "continuity"
+    ] == {
+        "state": "confirmed",
+        "at": NOW + 3 * MINUTE,
+        "by": successor.name,
+        "next": selected["next"],
+    }
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
 @pytest.mark.parametrize(("clock_offset", "retry_offset"), [(-1, 1), (0, 1), (2, 2)])
 def test_failed_retry_stays_newest_when_the_clock_does_not_advance(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock_offset: int, retry_offset: int
