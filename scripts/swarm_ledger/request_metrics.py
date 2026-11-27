@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import json
 import math
 import os
@@ -24,6 +25,8 @@ SLOW_SECONDS = 5.0
 DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
+SPOOL_SUFFIX = ".spool"
+SPOOL_BYTES = 32 << 20
 TIMING_FILE = "AGENTIHOOKS_LEDGER_TIMING_FILE"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
 STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
@@ -268,6 +271,14 @@ def replace_lines(path: Path, lines: list) -> None:
     with os.fdopen(descriptor, "w") as handle:
         handle.write(encode(lines))
     Path(staged).replace(path)
+
+
+@contextmanager
+def exclusive(path: Path) -> Iterator[None]:
+    """Hold the lock every process takes on the spool at ``path`` to add samples to it or take them from it."""
+    with path.with_suffix(".lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
 
 
 def restore(path: Path) -> None:
