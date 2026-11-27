@@ -1,0 +1,8 @@
+rules:
+  - id: expert-launch-ack-later
+    languages: [python]
+    severity: ERROR
+    message: Expert hive launch tasks must defer acknowledgement so placement returns before the hive starts.
+    patterns:
+      - pattern: '{"requires_harness": expert_launch.HARNESS, ...}'
+      - pattern-not: '{tick.ACK_LATER: True, ...}'

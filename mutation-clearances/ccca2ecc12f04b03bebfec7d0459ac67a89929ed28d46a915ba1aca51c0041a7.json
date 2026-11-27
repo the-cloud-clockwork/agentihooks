@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_seat.py:scripts.swarm.expert_seat.x__collect:f377524ae96c979c0f1bbd113e34b289101480053c7f43a7623cdbb24e7d281d": {
+    "reader": "standards-reader",
+    "reason": "HiveLaunch.poll produces successful outcomes only through HiveLaunch.complete, which always supplies Placed.execution. placed_record selects that execution before using its fallback agent. Replacing the fallback argument with None changes no reachable collector result."
+  }
+}

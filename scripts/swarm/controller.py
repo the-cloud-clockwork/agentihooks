@@ -236,10 +236,13 @@ class FencedRuntime:
         task = _master_task(lane, task)
         try:
             return self._changing(self._spawn, config, lane, name, task)
-        except BaseException:
+        except BaseException as exc:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
+            from scripts.swarm.tick import SpawnError
 
+            if isinstance(exc, SpawnError) and exc.status == "pending":
+                raise
             local_slots.release(self.store, hive_id(), self.slug, name)
             admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
             raise

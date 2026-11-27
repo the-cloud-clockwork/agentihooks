@@ -3,6 +3,7 @@
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm.naming import TYPES
@@ -51,7 +52,15 @@ class Seat:
     name: str
 
 
-def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepare: Callable[[AgentRecord], dict]):
+def place_seat(
+    slug: str,
+    config: Any,
+    store: Any,
+    runtime: Any,
+    seat: Seat,
+    now_ms: int,
+    prepare: Callable[[AgentRecord], dict[str, Any]],
+) -> tuple[AgentRecord, Any]:
     """place for a named seat of a lane, such as a master seat after the lead."""
     from scripts.swarm import tick
 
@@ -66,7 +75,8 @@ def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepa
         admitted = codex.admit_legacy(store, slug, tick.placed_record(record, placed), runtime)
         placed = replace(placed, execution=admitted) if admitted.execution_id else placed
     except Exception as exc:
-        tick._release_hive_launch(slug, store, record)
+        if not (isinstance(exc, tick.SpawnError) and exc.status == "pending"):
+            tick._release_hive_launch(slug, store, record)
         raise SeatFailed(record, exc) from exc
     tick._spend_local(store, admitted, now_ms)
     return record, placed
