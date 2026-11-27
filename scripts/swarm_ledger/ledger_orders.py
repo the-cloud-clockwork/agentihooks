@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ledger_relay
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("order_set", "order_clear")
 MARK = "ordered"
@@ -40,12 +41,12 @@ def check(op: dict[str, Any]) -> None:
         raise ValueError(NEEDS[kind])
 
 
-def _refuse(op: dict[str, Any], ctx: Any, reason: str) -> bool:
+def _refuse(op: dict[str, Any], ctx: OpContext, reason: str) -> bool:
     ctx.refused.append(f"order on {op['item']} refused: {reason}")
     return False
 
 
-def _proof(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> dict[str, str] | None:
+def _proof(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> dict[str, str] | None:
     """The proof an order carries."""
     if "by" not in op:
         return {key: op[key] for key in PROOFS if key in op}
@@ -62,7 +63,7 @@ def _proof(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> dict[str, str] 
     return None
 
 
-def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     name, item_id = op["item"].split("/")
     rows: list[dict[str, Any]] = doc[name]
     item = next((row for row in rows if row["id"] == item_id), None)
