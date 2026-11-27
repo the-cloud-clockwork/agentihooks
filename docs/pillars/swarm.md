@@ -723,6 +723,112 @@ still lists it or no report at all), or the launch is refused for another reason
 `canonical agent already belongs to another execution seat`. Read the seat history before acting; never end an
 execution by writing to Redis by hand.
 
+#### Kept master placement refusals
+
+The tick keeps every placement refusal a master seat meets in swarm Redis for a day, per seat, with its reason and
+its time. An empty master seat stays explained after the pass that refused it, after the outage hand back and after
+the controller log rotates. Before pull request 11682 the refusal lived only in the tick's actions on controller
+output: the status prune removed the master's placement wait row on every pass, because a master is not a ledger
+task, the outage record dropped its failure when a master bound, and the master down notice and the empty master
+seat finding said only `no master launched`. On 17 November the front door seat stayed empty for four and a half
+hours, and its refusal could no longer be read once the controller output rotated.
+
+Three refusals are kept, from two places in each pass:
+
+| Refusal | Seats | Kept reason, for example |
+|---|---|---|
+| The controller's placement refusal for the master lane, see [Workstation fallback](hives.md#workstation-fallback) | The front door, from the tick's master launch; `master-2` and up, from the master fill of later seats | `the workstation hive spawns master work: no hive for master advertises a claude slot` |
+| The session slot wait: on a `local` swarm no Claude account has a free session seat, or the controller does not spawn in its deployment mode | The same seats. A forced front door launch skips this wait, see [Several master seats](#several-master-seats) | `no session slot for the master, waiting` |
+| A hive that refuses the front door spawn for room | The front door | `the master waits: no hive for master has room: <hive detail>` |
+
+A master spawn that fails for any other reason is not kept here; it goes to the startup retry as
+`master spawn failed: <error>`. The master fill moves on to the next seat after a placement refusal and ends its pass
+at a session slot wait, so a refused `master-2` never hides why `master-3` stays empty.
+
+Each seat has one field in the hash `agentihooks:swarm:<id>:master-refusals`, named by the seat: `master` for the
+front door, `master-2` and up for the others. The field holds a JSON list of rows, oldest first:
+
+| Field | Meaning |
+|---|---|
+| `reason` | The refusal text, as the tick wrote it in its actions. |
+| `since` | When this reason was first seen in a row, in epoch milliseconds. |
+| `at` | When it was last seen, in epoch milliseconds. |
+| `passes` | How many passes refused the seat with this reason in a row. |
+
+A refusal that repeats the seat's latest reason moves `at` and adds one to `passes`; a different reason opens a new
+row. Each write drops the seat's rows last seen a day ago or earlier, keeps its newest hundred, and sets the whole
+hash to expire a day after that write. A record of the front door seat refused three times from 08:11 UTC reads:
+
+```json
+[{"reason": "the workstation hive spawns master work: no hive for master advertises a claude slot", "since": 1794903060000, "at": 1794903180000, "passes": 3}]
+```
+
+The kept record names the front door seat's newest refusal of the last day, with its age in whole minutes and its
+UTC time, wherever the tick used to say only that no master started:
+
+| Where | Text with a kept refusal | Without one |
+|---|---|---|
+| The master down notice, on the page chat and as the inbox note on each message waiting at the master seat | `The master is down and is being relaunched. Your message waits for the new master, which receives it as soon as it starts. The master placement was last refused 4 minutes ago, at 08:13 UTC: <reason>.` | The first two sentences alone |
+| A forced launch during an [outage](#master-outage-and-promotion) that starts nothing and reports no action of its own; the text becomes the outage failure the promoted engineer's prompt and the `promoted` status line name | `master placement last refused 4 minutes ago, at 08:13 UTC: <reason>` | `no master launched` |
+| The night watch `empty master seat` finding and its seat alert, after ten minutes without a live front door master | `Why it stays empty: master placement last refused 4 minutes ago, at 08:13 UTC: <reason>` | `Why it stays empty: no master launched` |
+
+The launch refusal keeps its order: an unfinished lead, a pending startup and the startup retry backoff are named
+first, and the night watch names a spawn hold before any of them. Only when none of those holds does the kept
+refusal answer. The notice and the finding read the front door seat alone; backend seats show only in `swarm
+status`.
+
+`agentihooks swarm <id> status` prints one line per seat whose newest row is under a day old, sorted by seat, after
+the `admission refusals` line. Each line names the seat address, the last refusal's time and age, the passes since
+the reason began and the reason:
+
+```text
+master placement refused  master@<id>  08:13 UTC  4 minutes ago  3 passes since 08:11 UTC  the workstation hive spawns master work: no hive for master advertises a claude slot
+master placement refused  master-2@<id>  08:12 UTC  5 minutes ago  1 passes since 08:12 UTC  no session slot for the master, waiting
+```
+
+The record outlives the outage: when a master binds, the tick hands the outage back and deletes its outage record,
+while the refusal rows stay until they are a day old. A line in `swarm status` with a live master on the seat is
+therefore history, read against its time.
+
+The status prune also keeps each master seat's [placement wait](hives.md#placement-waits) row, keyed `master` or
+`master-2` and up, while the tick has seen that seat refused within the last five minutes. The first prune five
+minutes or more after the last refusal drops it, and a placement that succeeds removes it at once. A task's row is
+still dropped once the task is done, cancelled or gone.
+
+Read the record on a live swarm:
+
+```bash
+# Each master seat's newest kept refusal
+agentihooks swarm <id> status | grep "master placement refused"
+# Every kept row of the front door seat, oldest first, then of seat two
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:<id>:master-refusals master | jq .
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:<id>:master-refusals master-2 | jq .
+# Milliseconds until the record expires, a day after its last write
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:swarm:<id>:master-refusals
+```
+
+Limitations:
+
+- The record holds one day. A seat refused longer ago shows no line, and the notice and finding fall back to their
+  text without it.
+- One expiry covers the whole hash, so a refusal on any seat keeps older rows of every other seat stored until that
+  seat's next write drops them; `swarm status` and the notices still skip a seat whose newest row is a day old.
+- The front door seat is the only one the master down notice, the forced launch and the night watch read.
+- A swarm whose key prefix is set with `AGENTIHOOKS_SWARM_KEY_PREFIX` keeps the hash under that prefix instead of
+  `agentihooks`.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| The master down notice or the `empty master seat` finding still says `no master launched` | `swarm status` for a `master placement refused  master@<id>` line; the controller's release | No placement refusal of the front door was kept in the last day, or the controller runs a release from before pull request 11682. The cause is then elsewhere, such as a spawn failure in the startup retry; read the tick journal. |
+| `master placement refused  master@<id>` names `no hive for master advertises a claude slot` while the seat is empty | `agentihooks hive show <hive>` for `interactive` and `slots` on each UI hive | See [Workstation fallback](hives.md#workstation-fallback): log the UI hive in with `claude`, or give it a `AH_CC_TOKEN_<slug>` with quota left. |
+| The line names `no session slot for the master, waiting` | `agentihooks balance` for a Claude account with a free seat on a `local` swarm; the controller's `AGENTIHOOKS_DEPLOYMENT` otherwise | Free a seat on an account, or start the front door with `master up --forced`, which skips the slot wait. |
+| A line stays while a live master holds the seat | The line's time and its age | The row is history from before the master bound; it leaves `swarm status` a day after its last refusal. |
+
+The regression tests in `tests/swarm/test_master_refusals.py`, with
+`test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back` first, and
+`test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty` in `tests/swarm/test_night_watch.py`, hold
+this behaviour under the feature map entry `swarm-master-placement-refusals-kept`.
+
 ### Several master seats
 
 `swarm <id> set masters=N` gives a swarm N master seats: `master@<id>` is the lead, the address every single master
@@ -1307,7 +1413,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set claude-model=M codex-model=M` | The swarm's model for each harness, default `opus` and `gpt-6.1-sol`. An eng, ci or plan lane agent with no model of its own (`auto` or empty) launches on it, and so does a lane model of the other harness, such as `opus` on a Codex agent ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). A master launch, from `master up` or from the tick, launches on it at frontier effort through the same master model choice, also when its handoff or saved launch names no model. A model the harness catalog does not list is refused. |
 | `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `expert-stop`, `push-stop`, `one-push`, `brain`, `claims`, `trace-plan`, `talk`, `stall`, `nightwatch`, `reset`. The `brain` gate (`python -m scripts.gates brain`) is registered in the gate entry point but no role condition runs it yet, so it judges no agent session until one is added. Given an Edit, Write, MultiEdit, NotebookEdit or Serena edit call of a session bound to a swarm task, it checks the consultation receipt the last delivered task context pack left: it must name purpose `task`, this task, the task's current spec revision (title, description, plan slice, plan lines and phase) and claim generation, the session's brain, an unexpired time (`AGENTIHOOKS_BRAIN_RECEIPT_TTL`, default 14400 seconds) and a delivered or empty result; a brain outage is not consultation. It never queries the brain: the next brain refresh redelivers the pack once the receipt no longer passes. The receipt is an unsigned record in the session's hook state, so the gate guides an agent and is no security boundary against one that controls its own files; server side authority still protects shared mutations. It defaults to `log only`; `deny` is the required mode. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
 | `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. Cases, limits, the release wait and troubleshooting: [Stall watchdog](#stall-watchdog). |
-| `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `deny`, so a swarm whose gates name no night watch mode acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `log only` records each would-be action in the swarm gate log instead, and `skip` runs the checks for their findings only, with no gate log row, action or alert. |
+| `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding, which names the seat's latest [kept placement refusal](#kept-master-placement-refusals) when no spawn hold or launch state explains it; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `deny`, so a swarm whose gates name no night watch mode acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `log only` records each would-be action in the swarm gate log instead, and `skip` runs the checks for their findings only, with no gate log row, action or alert. |
 | `agentihooks swarm <id> set reset-gate=deny\|log only\|skip` | Operator or master only. Each tick reads the live front door master pane. A pane on a question panel or a permission prompt, or a Claude pane whose last turn ended on an interrupt or a rejected tool, while an operator item is open on the master or its seat, counts as held from the later of the first held tick and the oldest open operator item. At ten minutes held `deny` asks the master through its inbox for a handoff; at fifteen it recycles the master in its seat through a recovery handoff, the stalled master path, which ends the session and dismisses an open question panel; the respawned master takes the operator items from the seat. Leaving the prompt withdraws the ask. It defaults to `log only`, writing one would-be `wake` and one `recycle` row per held episode to the swarm gate log and acting on nothing; `skip` runs nothing. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger API route code counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set one-push-gate=deny\|log only\|skip` | Operator or master only. The `one-push` gate keeps an eng or ci agent's pull request to one push: it refuses `gh pr create` and `gh pr ready` until the `standards-reader` and `spec-reader` sub-agents ran for the task (Claude sessions only) and the checkout is committed and on origin, while `gh pr create --draft` stays open for the block path; it refuses a `git push` to the task branch while the task's open pull request has checks running or waits in the merge queue, unless a check is red, or no check has started and none, required or not, is pending, or no check has started on a pull request that conflicts with its base and no required check is pending. `deny` (the default) refuses the call and logs it, `log only` lets it through and logs the would-be refusal, `skip` does not run the check. To let an agent past it the operator or the master runs `agentihooks swarm <id> lift <agent> one-push`, which holds until the recorded pull request's head moves, or one hour when the task has no pull request; the operator can also type `lift the one-push gate` in the agent's pane for a one hour lift. See [One push per pull request](#one-push-per-pull-request). |

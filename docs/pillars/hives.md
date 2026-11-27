@@ -1150,6 +1150,13 @@ task example waits: no hive for eng lists the repo /home/me/dev/agentihooks
 The tick reports the tasks it evaluates while filling free launch slots. A task not reached because those slots
 are already filled has no new placement decision in that pass.
 
+Each wait is a row of `swarm:<slug>:hive-placement-waits`, keyed by the task id, with its lane, reason and the
+times it began and was last seen. A placement that succeeds removes the row. The status prune that `swarm status`
+and the tick's status findings step run drops the row of a task that is done, cancelled or no longer on the ledger. A master
+seat is not a ledger task: its row, keyed `master` for the front door and `master-2` and up for the other seats,
+stays while the tick has seen the seat refused within the last five minutes. The tick also keeps every master seat
+refusal for a day with its time; see [Kept master placement refusals](swarm.md#kept-master-placement-refusals).
+
 | Wait or symptom | Check | Resolution |
 |---|---|---|
 | `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
@@ -3432,7 +3439,9 @@ login for the master's harness (a slot alone for a [backend seat](#backend-maste
 leaves the master to the workstation herdr server. It does the same when the hive runtime is disabled on the
 controller. When the controller's own herdr server answers, the controller spawns the master there. Otherwise it
 refuses the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick
-reports that line in its actions.
+reports that line in its actions. The tick keeps the line for a day as the seat's latest placement refusal, which
+`swarm status`, the master down notice and the empty master seat finding name; see
+[Kept master placement refusals](swarm.md#kept-master-placement-refusals).
 
 The refusal carries the master placement wait reason after the colon:
 
