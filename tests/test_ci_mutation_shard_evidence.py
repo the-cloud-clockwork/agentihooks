@@ -98,17 +98,22 @@ def test_a_link_in_a_group_folder_is_removed_and_never_followed(tmp_path: Path) 
     checkout = tmp_path / "checkout"
     (checkout / "hooks").mkdir(parents=True)
     (checkout / "hooks/sample.py").write_text("source\n")
-    (group / "tests").symlink_to("../../checkout", target_is_directory=True)
-    (group / "killers/7a1f").symlink_to("../../../checkout/hooks/sample.py")
-    (group / "run.log").symlink_to("../../checkout/hooks/sample.py")
-    (group / "results.json").symlink_to("../../missing.json")
+    links = {
+        "tests": "../../checkout",
+        "killers/7a1f": "../../../checkout/hooks/sample.py",
+        "run.log": "../../checkout/hooks/sample.py",
+        "results.json": "../../missing.json",
+    }
+    for name, target in links.items():
+        (group / name).symlink_to(target, target_is_directory=name == "tests")
     done = _run(str(gate))
     assert done.returncode == 0
     assert _files(gate) == []
     assert _files(checkout) == ["hooks/sample.py"]
     assert (checkout / "hooks/sample.py").read_text() == "source\n"
     assert done.stdout == (
-        "Mutation evidence: kept 0 files (0 bytes) and removed 4 workspace files (95 bytes) in 1 group folders\n"
+        f"Mutation evidence: kept 0 files (0 bytes) and removed {len(links)} workspace files"
+        f" ({sum(len(target) for target in links.values())} bytes) in 1 group folders\n"
     )
 
 

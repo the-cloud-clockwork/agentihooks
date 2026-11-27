@@ -13,7 +13,6 @@ before anything is removed, so a folder the walk cannot read fails the run with
 nothing removed.
 """
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -37,16 +36,12 @@ def raise_unread(error: OSError) -> NoReturn:
     raise error
 
 
-def entries(group: Path) -> list[Path]:
+def group_entries(group: Path) -> list[Path]:
     """Return every file and symbolic link in group, raising on a folder the walk cannot read."""
-    found: list[Path] = []
-    for folder, folders, files in os.walk(group, onerror=raise_unread):
-        here = Path(folder)
-        found += [here / name for name in files] + [here / name for name in folders if (here / name).is_symlink()]
-    return found
+    return [here / name for here, _, files in group.walk(on_error=raise_unread) for name in files]
 
 
-def keep_own(group: Path, paths: list[Path]) -> tuple[list[int], list[int]]:
+def remove_workspace(group: Path, paths: list[Path]) -> tuple[list[int], list[int]]:
     """Remove the workspace entries among paths and the folders they leave empty, returning kept and removed sizes."""
     kept: list[int] = []
     removed: list[int] = []
@@ -57,10 +52,10 @@ def keep_own(group: Path, paths: list[Path]) -> tuple[list[int], list[int]]:
             removed.append(size)
         else:
             kept.append(size)
-    for folder, folders, _ in os.walk(group, topdown=False, onerror=raise_unread):
-        for path in (Path(folder) / name for name in folders):
-            if not path.is_symlink() and path.is_dir() and not any(path.iterdir()):
-                path.rmdir()
+    for here, folders, _ in group.walk(top_down=False, on_error=raise_unread):
+        for name in folders:
+            if not any((here / name).iterdir()):
+                (here / name).rmdir()
     return kept, removed
 
 
@@ -70,13 +65,13 @@ def main(argv: list[str]) -> int:
         print("usage: mutation_evidence.py FOLDER", file=sys.stderr)
         return 2
     folder = Path(argv[1])
-    found = sorted(folder.iterdir()) if folder.is_dir() else []
-    groups = [path for path in found if path.is_dir() and not path.is_symlink() and GROUP.fullmatch(path.name)]
-    walked = [(group, entries(group)) for group in groups]
+    children = sorted(folder.iterdir()) if folder.is_dir() else []
+    groups = [path for path in children if path.is_dir() and not path.is_symlink() and GROUP.fullmatch(path.name)]
+    listed = [(group, group_entries(group)) for group in groups]
     kept: list[int] = []
     removed: list[int] = []
-    for group, paths in walked:
-        kept_here, removed_here = keep_own(group, paths)
+    for group, paths in listed:
+        kept_here, removed_here = remove_workspace(group, paths)
         kept += kept_here
         removed += removed_here
     print(
