@@ -100,7 +100,7 @@ class Admission:
     def _key(self, slug: str, request: dict) -> str:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
-    def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
+    def admit(self, slug: str, request: dict[str, Any]) -> dict[str, Any] | None:
         begun = self.clock()
         queued_ms = SERVE_WAITED_MS.get()
         started = begun - queued_ms
