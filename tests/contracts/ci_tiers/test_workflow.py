@@ -82,6 +82,7 @@ PROMOTION = (
     "hierarchy-cpu",
     "tick-scale",
     "tick-pattern-tree",
+    "type-gate-tree",
     "launch-hotfix",
     "kind-due",
     "helm-kind",
@@ -89,7 +90,13 @@ PROMOTION = (
 }
 
 
-def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace], base_ref: str = "dev") -> bool:
+def enabled(
+    condition: str | bool,
+    event: str,
+    needs: dict[str, SimpleNamespace],
+    base_ref: str = "dev",
+    ref: str = "refs/heads/dev",
+) -> bool:
     if isinstance(condition, bool):
         return condition
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
@@ -102,7 +109,7 @@ def enabled(condition: str | bool, event: str, needs: dict[str, SimpleNamespace]
             expression,
             {"__builtins__": {}},
             {
-                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref="refs/heads/dev"),
+                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref=ref),
                 "contains": lambda values, value: value in values,
                 "results": [need.result for need in needs.values()],
                 "needs": needs,
