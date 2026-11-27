@@ -8,10 +8,13 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from threading import Timer
+from typing import Any, TextIO
 
 import pytest
 
@@ -124,6 +127,21 @@ def test_a_gate_whose_module_is_missing_lets_the_call_through_with_a_row_and_an_
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
+def test_the_gate_row_and_alert_claim_share_the_captured_failure_time(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def advancing_clock() -> float:
+        at = world.now
+        world.now += 1
+        return at
+
+    monkeypatch.setattr(import_failure.time, "time", advancing_clock)
+    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
+    assert world.main("absent") == 0
+    assert world.rows()[0]["at"] == stamps(world.home)["absent"] == int(START * 1000)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
 def test_a_gate_missing_a_transitive_dependency_is_reported_under_its_registered_name(
     world: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -218,7 +236,7 @@ def test_an_unreachable_ledger_keeps_the_call_allowed_and_the_next_failure_retri
 
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_an_unwritable_gate_log_still_lets_the_call_through_and_alerts(
-    world: World, monkeypatch: pytest.MonkeyPatch
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
     world.home.mkdir(parents=True)
@@ -227,16 +245,19 @@ def test_an_unwritable_gate_log_still_lets_the_call_through_and_alerts(
     log.gate_log_path(SLUG, world.home).mkdir()
     assert world.main("absent") == 0
     assert world.alerts() == [(SLUG, "alert_raise", ME, "setup", "gate-import-absent")]
+    error = capsys.readouterr().err
+    assert "agentihooks gate absent: gate log row not written: IsADirectoryError: " in error
+    assert str(log.gate_log_path(SLUG, world.home)) in error
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_the_native_gate_lookup_fails_open_on_an_import_failure(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(entry.HOST_GATES, "absent-host", missing("scripts.gates.absent_host_module"))
     monkeypatch.setattr("scripts.inbox.seen.receiving_session", lambda environ=None: "sid-import")
-    for name, value in ENV.items():
-        monkeypatch.setenv(name, value)
+    for name in ENV:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOME", str(world.home.parent))
-    assert entry.native("absent-host", "inbox_send") == 0
+    assert entry.native("absent-host", "inbox_send", dict(ENV)) == 0
     rows = [json.loads(line) for line in log.gate_log_path(SLUG).read_text().splitlines()]
     assert [(row["gate"], row["kind"]) for row in rows] == [("absent-host", "fail-open")]
     assert world.alerts() == [(SLUG, "alert_raise", ME, "setup", "gate-import-absent-host")]
@@ -428,14 +449,26 @@ def test_no_gate_name_exits_one(world: World) -> None:
     assert entry.main([], io.StringIO(PAYLOAD), dict(ENV), world.home) == 1
 
 
+@contextmanager
+def held_lock(path: Path) -> Iterator[TextIO]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        release = Timer(1.0, held.close)
+        release.start()
+        try:
+            yield held
+        finally:
+            release.cancel()
+            release.join()
+
+
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_a_held_lock_is_tried_a_bounded_number_of_times(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pauses: list[float] = []
     monkeypatch.setattr(import_failure.time, "sleep", pauses.append)
     lock = log.gates_dir(SLUG, tmp_path) / "import-alerts.lock"
-    lock.parent.mkdir(parents=True)
-    with lock.open("w") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)
+    with held_lock(lock):
         with pytest.raises(TimeoutError, match="stayed locked"):
             import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
     assert pauses == [0.05] * 20
@@ -443,12 +476,17 @@ def test_a_held_lock_is_tried_a_bounded_number_of_times(tmp_path: Path, monkeypa
 
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_a_lock_freed_between_tries_is_taken(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pauses: list[float] = []
     lock = log.gates_dir(SLUG, tmp_path) / "import-alerts.lock"
-    lock.parent.mkdir(parents=True)
-    held = lock.open("w")
-    fcntl.flock(held, fcntl.LOCK_EX)
-    monkeypatch.setattr(import_failure.time, "sleep", lambda pause: held.close())
-    assert import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
+    with held_lock(lock) as held:
+
+        def release(pause: float) -> None:
+            pauses.append(pause)
+            held.close()
+
+        monkeypatch.setattr(import_failure.time, "sleep", release)
+        assert import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
+    assert pauses == [0.05]
     assert stamps(tmp_path) == {"absent": int(START * 1000)}
 
 
@@ -459,9 +497,7 @@ def test_a_held_lock_skips_the_alert_and_keeps_the_call(
     monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
     monkeypatch.setattr(import_failure.time, "sleep", lambda pause: None)
     lock = log.gates_dir(SLUG, world.home) / "import-alerts.lock"
-    lock.parent.mkdir(parents=True)
-    with lock.open("w") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)
+    with held_lock(lock):
         assert world.main("absent") == 0
     assert "agentihooks gate absent: alert hour not claimed: TimeoutError: " in capsys.readouterr().err
     assert len(world.rows()) == 1 and world.sent == []

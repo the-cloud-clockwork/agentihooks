@@ -19,7 +19,8 @@ LAUNCH = re.compile(r"""(?:^|[\s;&|])["']?([\w./+][\w./+-]*)["']?(?:\s+-\w+)*\s+
 SHEBANG = "command -v agentihooks"
 RAISED = re.compile(r"(?:ModuleNotFoundError|ImportError): .+")
 IMPORTING = re.compile(
-    r"^\s+(?:from\s+scripts\.gates[\w.]*\s+import\s|import\s+scripts\.gates\b)|, in _get_module_details$", re.MULTILINE
+    r"(?:^\s+(?:from\s+scripts\.gates[\w.]*\s+import\s|import\s+scripts\.gates\b))|(?:, in _get_module_details$)",
+    re.MULTILINE,
 )
 LAUNCHER = re.compile(r"(\S+): ((?:No module named|Error while finding module specification for) '?scripts\b.*)")
 UNKNOWN = "an unknown interpreter"

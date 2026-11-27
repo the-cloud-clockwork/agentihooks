@@ -1,0 +1,6 @@
+{
+  "scripts/gates/import_failure.py:scripts.gates.import_failure.x__read:5cd5d389c64cd88b5c86c0e381cdbb433e8411ca45f5b410f933f4a959a25856": {
+    "reader": "standards-reader",
+    "reason": "Changing capitalization inside typing.cast's unevaluated type string cannot change runtime values. The same held dictionary supplies the same filtered timestamps."
+  }
+}

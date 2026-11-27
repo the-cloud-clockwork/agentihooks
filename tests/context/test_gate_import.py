@@ -269,11 +269,11 @@ def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_cal
 
     monkeypatch.delattr(scripts.gates, "import_failure", raising=False)
     monkeypatch.setitem(sys.modules, "scripts.gates.import_failure", None)
-    world.write("pre-bash-rerun_budget.py", IMPORTED)
+    world.write("pre-bash-pair.py", IMPORTED.replace('["reruns"]', '["reruns", "identity"]'))
     assert world.run("ls").decision is None
     assert world.rows() == [] and world.sent == []
-    condition = world.directory / "pre-bash-rerun_budget.py"
-    assert f"agentihooks gate reruns: import failure of {condition} not reported: " in capsys.readouterr().err
+    condition = world.directory / "pre-bash-pair.py"
+    assert f"agentihooks gate reruns, identity: import failure of {condition} not reported: " in capsys.readouterr().err
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
@@ -295,6 +295,41 @@ def test_a_condition_names_every_gate_it_runs_once(body: str, gates: list[str]) 
 @pytest.mark.feature("gate-import-failure-alerts")
 def test_an_unreadable_condition_reads_as_empty(tmp_path: Path) -> None:
     assert gate_import.read_condition(tmp_path / "missing.py") == ""
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_condition_keeps_gate_names_across_invalid_text_bytes(tmp_path: Path) -> None:
+    condition = tmp_path / "condition.py"
+    condition.write_bytes(b"main(['reruns'])\n#\xff")
+    text = gate_import.read_condition(condition)
+    assert text == "main(['reruns'])\n#\ufffd"
+    assert "reruns" in gate_import.gate_names(text)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_gate_import_without_a_tool_name_logs_an_empty_tool(world: World) -> None:
+    world.write("pre-any-gate.py", IMPORTED)
+    condition = {"path": str(world.directory / "pre-any-gate.py"), "ext": ".py"}
+    failure = {"stderr": f"Traceback\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\n"}
+    gate_import.report(condition, failure, {})
+    assert [(row["gate"], row["tool"]) for row in world.rows()] == [("reruns", "")]
+    assert world.items() == ["gate-import-reruns"]
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_an_unnamed_import_failure_never_loads_the_unavailable_reporter(
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import scripts.gates
+
+    monkeypatch.delattr(scripts.gates, "import_failure", raising=False)
+    monkeypatch.setitem(sys.modules, "scripts.gates.import_failure", None)
+    world.write("pre-any-unrelated.py", "import unrelated\n")
+    condition = {"path": str(world.directory / "pre-any-unrelated.py"), "ext": ".py"}
+    failure = {"stderr": f"Traceback\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\n"}
+    gate_import.report(condition, failure, {})
+    assert world.rows() == [] and world.sent == []
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
@@ -337,7 +372,7 @@ def test_a_shell_condition_reading_the_agentihooks_shebang_names_that_interprete
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     command = tmp_path / "agentihooks"
-    command.write_text("#!/opt/agentihooks/bin/python\nimport sys\n")
+    command.write_bytes(b"#!/opt/agentihooks/bin/python\n#\xff\n")
     monkeypatch.setattr(gate_import.shutil, "which", lambda name: str(command) if name == "agentihooks" else None)
     assert gate_import.launcher(QUIET.read_text()) == "/opt/agentihooks/bin/python"
     assert gate_import.launcher("exec python -m scripts.gates quiet\n") == ""

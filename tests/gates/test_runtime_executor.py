@@ -145,8 +145,11 @@ def test_a_shim_that_cannot_import_the_gates_lets_the_call_through_and_its_hook_
     (broken / "gates").mkdir(parents=True)
     (broken / "__init__.py").write_text("")
     (broken / "gates" / "__init__.py").write_text("import a_dependency_lost_with_the_worktree\n")
-    shim = f'from {PACKAGE}.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
-    proc = hook("PreToolUse", {"PYTHONPATH": str(broken.parent)}, gate="rerun_budget", shim=shim)
+    shim = (
+        f"import sys\nsys.path.insert(0, {str(broken.parent)!r})\n"
+        f'from {PACKAGE}.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
+    )
+    proc = hook("PreToolUse", gate="rerun_budget", shim=shim)
     assert proc.returncode == 0, proc.stderr
     decided = json.loads(proc.stdout).get("hookSpecificOutput", {}) if proc.stdout.strip() else {}
     assert decided.get("permissionDecision") != "deny" and "updatedInput" not in decided
