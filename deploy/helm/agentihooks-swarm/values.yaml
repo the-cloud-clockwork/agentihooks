@@ -65,7 +65,8 @@ ledger:
   cache:
     sizeLimit: 512Mi
   env: {}
-  # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
+  # Secret env the ledger and API containers read. swarm.databaseEnv copies its shared database URL, and no other
+  # entry, into the controller, hub, worker and worker hive containers.
   secretEnv: []
   resources:
     requests:
