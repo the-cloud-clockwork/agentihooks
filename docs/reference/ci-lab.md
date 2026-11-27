@@ -2164,6 +2164,26 @@ the PushSecret `Synced`, a 48 byte key in the receiver Secret, two push deliveri
 and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 `github-merge-queue[bot]`.
 
+#### Relay proof
+
+A head pushed only to the lab remote reaches its open pull request through the relay. Push it on top
+of the pull request's GitHub head with that branch as the `branch=` option, then read the relay's
+lines in the scheduler log and three GitHub answers for the pushed sha:
+
+```bash
+git push -o branch=<branch> lab HEAD:refs/grade/<task>
+kubectl -n ci-lab logs deploy/ci-lab-scheduler --since=30m | grep -E '<sha>|<branch>'
+gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha
+gh api "repos/<owner>/<repo>/activity?ref=refs/heads/<branch>" --jq '.[0]|{actor:.actor.login,activity_type,after}'
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs" --jq '.check_runs[]|{name,conclusion,external_id}'
+```
+
+A relayed head logs `pending <sha> for <branch>`, `pushed <sha> to <branch>`, one
+`posted lab/<gate> <conclusion> on <sha>` per check run with `lab/required` among them, then
+`updated <pull request url>`. The pull request's head is the sha, the newest activity is a `push`
+whose `after` is the sha, and the check runs list each `lab/<gate>` and `lab/required` with the
+external id `lab:<sha>`.
+
 ### Troubleshooting
 
 | Symptom | Cause | Check |
