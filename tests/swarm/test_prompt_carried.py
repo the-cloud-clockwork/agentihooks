@@ -45,3 +45,10 @@ def test_a_seat_with_only_the_shown_recaps_counts_none_kept() -> None:
 
     assert "Older recaps, newest first:" in "\n".join(lines)
     assert not [line for line in lines if "older recaps are kept on the seat" in line]
+
+
+@pytest.mark.feature("hub-admission-reply-fits-bus")
+def test_a_seat_with_one_recap_past_the_shown_ones_counts_it_kept() -> None:
+    lines = prompt.priming_lines(prompt.carried(whole(2 + prompt.OLDER_RECAPS)))
+
+    assert "1 older recaps are kept on the seat and not shown." in lines

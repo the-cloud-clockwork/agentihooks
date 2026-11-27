@@ -139,6 +139,18 @@ def test_an_unsent_admission_of_another_hive_releases_nothing(
 
 
 @pytest.mark.feature("hub-admission-reply-fits-bus")
+def test_an_unsent_admission_whose_agent_is_gone_forgets_the_offer(rig: SimpleNamespace) -> None:
+    admitted = rig.admitter.admit(SLUG, ask())
+    rig.admitter.free(SLUG, next(agent for agent in rig.store.agents(SLUG) if agent.name == admitted["name"]))
+
+    held = rig.admitter.unsent(SLUG, ask(), "payload 9 exceeds server limit 8")
+
+    assert held == {hive_admission.HELD: "the admission answer cannot cross the bus, payload 9 exceeds server limit 8"}
+    assert rig.store.agents(SLUG) == []
+    assert offer(rig) is None
+
+
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_another_slot_operation_that_cannot_cross_the_bus_answers_its_error(rig: SimpleNamespace) -> None:
     error = PayloadTooLarge("reply.subject: payload 9 exceeds server limit 8")
     request = json.dumps({"op": "launched", **ask()}).encode()

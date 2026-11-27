@@ -530,7 +530,7 @@ class Admission:
             agents = self.store.execution_registry.agents(slug)
             if agent := next((each for each in agents if each.name == admitted["name"]), None):
                 self.free(slug, agent)
-            cast(Any, self.store).redis.delete(key)
+            self.store.redis.delete(key)
         refusal = f"the admission answer cannot cross the bus, {reason}"
         refused(slug, request, refusal)
         return {hive_admission.HELD: refusal}
