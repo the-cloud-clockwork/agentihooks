@@ -2,6 +2,16 @@
   "fragments": true,
   "features": [
     {
+      "id": "manifest-build-storage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45904106858-0",
+      "behaviour": "The dependency manifest promotion job releases obsolete coverage databases while preserving dependency input reports, unrelated files and both complete manifest artifacts, including records from duplicate and reused shards.",
+      "seam": "The dependency manifest workflow build step with real coverage shard databases and dependency input reports",
+      "tests": [
+        "tests/test_dep_manifest.py::test_the_manifest_job_preserves_records_and_releases_coverage"
+      ]
+    },
+    {
       "id": "lab-scheduler-access-log-query-redaction",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2855",
