@@ -758,6 +758,7 @@ def test_publish_plan_for_a_task_needs_exactly_one_slice_marker(plan_ledger, tmp
     )
 
 
+@pytest.mark.parametrize(("plans", "closed"), [((), [f"closed {PLAN}"]), (({"url": PLAN},), [])])
 def test_a_refused_task_publish_closes_its_issue_unless_a_plan_links_it(tmp_path, monkeypatch, plans, closed):
     titles = []
     seen = []
