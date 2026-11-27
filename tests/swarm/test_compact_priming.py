@@ -11,7 +11,7 @@ from scripts.swarm import priming_trace, prompt
 
 SENTINELS = ("handoff-body-sentinel", "culture-sentinel", "latest-sentinel", "older-sentinel", "learned-sentinel")
 ACTION = "Read agentihooks msg inbox and check the operator's order."
-LANES = ("eng", "ci", "plan", "review", "master", "dispatcher", "expert")
+LANES = ("eng", "ci", "plan", "review", "master", "dispatch", "expert")
 
 
 def _task(lane: str, harness: str, history: str = "full", size: int = 1) -> dict[str, Any]:

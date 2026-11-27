@@ -225,8 +225,8 @@ def test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff(
     saved(store, tmp_path, harness=harness)
 
     def read_handoff(slug: str, task: str) -> str:
-        assert (slug, task) == ("sw", "t1")
-        return handoff
+        assert slug == "sw" and task in ("t1", "master")
+        return handoff if task == "t1" else ""
 
     monkeypatch.setattr(store, "handoff", read_handoff)
     runtime = ResumingRuntime()
