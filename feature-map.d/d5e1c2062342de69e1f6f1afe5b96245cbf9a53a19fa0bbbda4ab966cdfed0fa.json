@@ -1,0 +1,15 @@
+{
+  "id": "first-read-canary-literal",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-canary-substitution",
+  "behaviour": "The first read gate exempts the profile binding canary command only when its raw text holds no shell special character or backslash outside single quotes, so a command substitution, backtick, process substitution or escape anywhere in the canary arguments is denied with the seat brief reason, while the canary that scripts.profiles.binding.persona prints, the mounted literal form with its quote splicing and the same command in a Codex code mode wrapper stay exempt.",
+  "seam": "scripts.gates.first_read.FirstRead.decide",
+  "rules": [
+    "first-read-canary-raw-expansion"
+  ],
+  "tests": [
+    "tests/gates/test_first_read.py::test_profile_binding_canary_is_exempt",
+    "tests/gates/test_first_read.py::test_mounted_literal_canary_is_exempt",
+    "tests/gates/test_first_read.py::test_canary_with_shell_expansion_requires_brief"
+  ]
+}
