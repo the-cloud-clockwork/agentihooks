@@ -1147,7 +1147,7 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
 
     if args.auth and native("sign-ins", "init-agent-auth", environ):
         raise ValueError("explicit authentication refused by the sign ins gate")
-    if args.auth and args.routed_only:
+    if args.auth and args.auth != "interactive" and args.routed_only:
         raise ValueError("explicit authentication cannot combine with --routed-only")
     if args.auth and args.auth != "interactive":
         from scripts.quick.authentication import selections
