@@ -4,7 +4,6 @@ import json
 from typing import Any
 
 from scripts.doctor import priming
-from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm import expert_launch, naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
@@ -440,37 +439,19 @@ def artifact_line(led):
 
 def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
-    handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
-    culture = task.get("culture", "")
-    if not (handoff or culture or recaps or learned):
-        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes.", SEAT_BRIEF]
-    lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
-    if task.get("transfer"):
+    transfer = task.get("transfer") if (task.get("transfer") or {}).get("handoff") else None
+    history = transfer or any(task.get(key) for key in ("handoff", "culture", "recaps", "learned"))
+    lines = [
+        f"{seat} carries what earlier occupants left."
+        if history
+        else f"{seat} has no history yet: no handoff document, no recap and no learned notes."
+    ]
+    if transfer and task.get("seat"):
         from scripts.handoff import transfers
 
         lines.append(transfers.priming(task["seat"].rsplit("@", 1)[1], task["transfer"]))
-    if handoff:
+    if task.get("handoff") or task.get("handoff_envelope") or transfer:
         lines += handoff_lines(task)
-    else:
-        lines.append("1. Handoff document: none was left for this task.")
-    if culture:
-        lines += ["2. Swarm culture, shared by every seat of this swarm:", culture]
-    else:
-        lines.append("2. Swarm culture: none written for this swarm yet.")
-    if recaps:
-        lines += [f"3. Latest recap, {_by(recaps[0])}:", recaps[0]["text"]]
-    else:
-        lines.append("3. Latest recap: missing, no occupant of this seat left one.")
-    lines += learned_lines(learned)
-    older = recaps[1:]
-    if not older:
-        return [*lines, "5. Older recaps: none.", SEAT_BRIEF]
-    lines.append("5. Older recaps, newest first:")
-    for recap in older[:OLDER_RECAPS]:
-        lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
-    hidden = task.get(RECAPS_TOTAL, len(recaps)) - 1 - OLDER_RECAPS
-    if hidden > 0:
-        lines.append(f"{hidden} older recaps are kept on the seat and not shown.")
     return [*lines, SEAT_BRIEF]
 
 
@@ -488,21 +469,12 @@ def carried(task: dict[str, Any]) -> dict[str, Any]:
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:
     envelope: dict[str, Any] | None = task.get("handoff_envelope")
-    lines = [
-        "1. Handoff runtime envelope:",
-        json.dumps(envelope, indent=2) if envelope else "Missing runtime envelope.",
+    metadata = {key: value for key, value in (envelope or {}).items() if key != "orders"}
+    return [
+        "Handoff runtime envelope:",
+        json.dumps(metadata, indent=2) if envelope else "Missing runtime envelope.",
         *order_lines(envelope or {}),
     ]
-    lines += ["Handoff document: continue from it:", task["handoff"]]
-    reading = section(task["handoff"], "Read first")
-    if reading:
-        lines += [
-            "Read first: Open each address in rank order and answer its question before reading older recaps.",
-            reading,
-        ]
-    else:
-        lines.append("Read first: missing from the handoff document.")
-    return lines
 
 
 def order_lines(envelope: dict[str, Any]) -> list[str]:
@@ -564,10 +536,6 @@ def learned_lines(learned):
     if data:
         return ["4. Learned notes: only data so far.", *counted]
     return ["4. Learned notes: none recorded on this seat yet."]
-
-
-def _by(recap):
-    return f"by {recap['occupant']} on task {recap['task']}"
 
 
 def contract_lines(contract):

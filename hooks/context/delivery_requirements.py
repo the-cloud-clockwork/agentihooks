@@ -4,8 +4,6 @@ The summary names the code review file limit (AGENTIHOOKS_CODEREVIEW_FILELIMIT) 
 two pull requests, and the rule that agents deliver or offer the source root fix, never an unasked workaround.
 """
 
-from hooks.common import inject_context
-
 
 def render(limit: int) -> str:
     """The summary, at most fifty words, for a code review file limit of limit files."""
@@ -25,4 +23,6 @@ def summary() -> str:
 
 def inject_on_session_start() -> None:
     """Hand the summary to the session start context of every agent, ranked with the enforcements."""
+    from hooks.common import inject_context
+
     inject_context(summary(), kind="enforcement")

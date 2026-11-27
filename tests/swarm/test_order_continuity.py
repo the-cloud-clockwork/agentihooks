@@ -143,17 +143,15 @@ def test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document
     orders: list[str] | str, said: list[str]
 ) -> None:
     lines = primed({"ledger": SLUG, "orders": orders})
-    document = lines.index("Handoff document: continue from it:")
-    assert lines[2:document] == said
+    assert lines[2:] == said
+    assert HANDOFF not in "\n".join(lines)
 
 
 @pytest.mark.feature("master-handoff-carries-orders")
 def test_an_envelope_without_orders_primes_as_before() -> None:
     lines = primed({"ledger": SLUG, "reason": "quota"})
-    assert lines[2] == "Handoff document: continue from it:"
-    assert lines[:2] == ["1. Handoff runtime envelope:", '{\n  "ledger": "sw",\n  "reason": "quota"\n}']
-    assert prompt.handoff_lines({"handoff": HANDOFF})[:3] == [
-        "1. Handoff runtime envelope:",
+    assert lines == ["Handoff runtime envelope:", '{\n  "ledger": "sw",\n  "reason": "quota"\n}']
+    assert prompt.handoff_lines({"handoff": HANDOFF}) == [
+        "Handoff runtime envelope:",
         "Missing runtime envelope.",
-        "Handoff document: continue from it:",
     ]

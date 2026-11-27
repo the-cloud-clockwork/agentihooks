@@ -298,7 +298,9 @@ def test_a_dead_master_record_is_dropped_without_replace(taker):
     assert [m[0] for m in _masters(store)] == ["master@a1b2c3-0002"]
 
 
-def test_take_master_traces_the_priming_it_printed_into_this_session(taker, monkeypatch):
+def test_take_master_traces_the_priming_it_printed_into_this_session(
+    taker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks.context import injection_trace
 
     store, _, _, _ = taker
@@ -307,10 +309,7 @@ def test_take_master_traces_the_priming_it_printed_into_this_session(taker, monk
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-master")
     assert run("sw", "take-master") == 0
     rows = [(r["layer"], r["source"], r["text"]) for r in injection_trace.trace("sess-master")]
-    assert rows == [
-        ("culture", "culture:sw#1", "- merge fast"),
-        ("learned", "learned:master@sw#1", "keep the ledger current"),
-    ]
+    assert rows == []
 
 
 def test_take_master_prints_the_swarm_repo_peer_and_autonomy(taker, capsys):
@@ -360,7 +359,9 @@ def test_an_open_ledger_and_a_paused_swarm_stay_as_they_are(taker):
     assert store.config("sw").state == "paused"
 
 
-def test_take_master_prints_the_full_master_priming(taker, capsys):
+def test_take_master_prints_the_full_master_priming(taker: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm import prompt
+
     store, _, _, _ = taker
     store.culture.set("sw", "Keep the record straight")
     store.memory.learn("master@sw", "master@a1b2c3-0000", "Answer the operator first", 1)
@@ -375,9 +376,9 @@ def test_take_master_prints_the_full_master_priming(taker, capsys):
         "Answer the operator first",
         "Left the docs task waiting on review",
         "Continue from the master handoff notes",
-        "Your standing duties:",
-        "Never write to the operator first",
     ):
+        assert part not in out, part
+    for part in ("Your standing duties:", "Never write to the operator first", prompt.SEAT_BRIEF):
         assert part in out, part
     assert store.handoff("sw", "master") == ""
 

@@ -42,10 +42,11 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 |---|---|---|
 | `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
 | `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
-| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | `python -m scripts.ci_lab_smoke` in the built swarm image cannot import a module the `scripts.ci_lab` package walk finds, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
-`docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
-built CI lab image. It then starts the worker as the lab chart runs it, as user and group 1001 with
+`docker/ci-lab/smoke.sh` also runs `python -m scripts.ci_lab_smoke` inside the built CI lab image,
+which imports every module the `scripts.ci_lab` package walk finds, then pytest, xdist, redis,
+nats, yaml and boto3. It then starts the worker as the lab chart runs it, as user and group 1001 with
 a read only root filesystem, every capability dropped and no network, on a work root owned by root
 that holds a sealed tree, a locked folder and a file. The smoke fails when the worker does not reach
 its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, each within
