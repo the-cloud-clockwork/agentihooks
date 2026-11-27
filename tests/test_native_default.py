@@ -536,20 +536,28 @@ def test_codex_native_default_coalesces_colliding_hook_aliases(
     source_hooks.symlink_to(hooks)
     canonical = {"trusted_hash": "canonical-hash", "enabled": False}
     fallback = {"trusted_hash": "stale-hash", "enabled": True} if conflicting else canonical
-    entries = [(source_hooks, canonical), (hooks, fallback)]
+    resolved_only = {"trusted_hash": "resolved-only", "enabled": True}
+    entries = [
+        (source_hooks, canonical, "Stop:0:0"),
+        (hooks, fallback, "Stop:0:0"),
+        (hooks, resolved_only, "SessionStart:1:0"),
+    ]
     if resolved_first:
         entries.reverse()
     prefix = "# retain unrelated bytes\r\nmodel = 'native'\r\n"
     original = prefix + "".join(
-        f"[hooks.state.{json.dumps(f'{path}:Stop:0:0')}]\r\n"
+        f"[hooks.state.{json.dumps(f'{path}:{suffix}')}]\r\n"
         + "".join(f"{name} = {json.dumps(value)}\r\n" for name, value in fields.items())
-        for path, fields in entries
+        for path, fields, suffix in entries
     )
     (source / "config.toml").write_bytes(original.encode())
     child = native_default.prepare("codex", {"HOME": str(tmp_path)})
     home = Path(child["CODEX_HOME"])
     copied = (home / "config.toml").read_bytes()
     state = tomllib.loads(copied.decode())["hooks"]["state"]
-    assert state == {f"{home / 'hooks.json'}:Stop:0:0": canonical}
+    assert state == {
+        f"{home / 'hooks.json'}:Stop:0:0": canonical,
+        f"{home / 'hooks.json'}:SessionStart:1:0": resolved_only,
+    }
     assert copied.startswith(prefix.encode())
     assert (source / "config.toml").read_bytes() == original.encode()
