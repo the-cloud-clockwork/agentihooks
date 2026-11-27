@@ -7,6 +7,7 @@ from typing import Any, cast
 import orjson
 
 from .rows import encode
+from .tracked import held
 
 RECORD_MAPS = frozenset({"members", "api_operations"})
 
@@ -47,6 +48,9 @@ def members(parts: dict) -> bytes:
 def leaf(value: object, previous: Fragment | None = None) -> Fragment:
     if previous is not None and value is previous.value:
         return previous
+    kept = held(value)
+    if kept is not None:
+        return kept
     try:
         signature = hash(orjson.dumps(value))
     except orjson.JSONEncodeError:

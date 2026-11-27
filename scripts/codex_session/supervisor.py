@@ -424,6 +424,7 @@ def _connect_bound(
         agent = replace(agent, conversation_id=thread["id"])
         store.put_agent(launch.slug, agent)
         name_thread(connection, thread["id"], shown_name(launch, agent))
+        binding.bind_sandbox(dict(launch.environ), process.pid, record.server_start_identity, record.thread_id)
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
             record = replace(record, active_turn_id=open_turn(connection, thread["id"], launch, deps))
             bindings.put(launch.slug, record)

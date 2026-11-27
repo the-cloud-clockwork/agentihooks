@@ -1,7 +1,8 @@
-import fcntl
 import hashlib
 from contextlib import contextmanager
 from pathlib import Path
+
+from hooks.compat import fcntl
 
 
 def lock_file(home: Path, path: str) -> Path:

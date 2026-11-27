@@ -75,7 +75,7 @@ def _deselect_in_test_count(
         "PYTHON_PATH": sys.executable,
         "DEV_PLAN": str(workspace / "reused-tests.json"),
     }
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
@@ -630,16 +630,16 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("test-count", "Plan the tests whose inputs did not change")
+    plan = _step("collect", "Plan the tests whose inputs did not change")
     assert plan["env"]["GRADER"] == (
         "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("test-count", "Wait for the test plan")["id"] == "plan"
+    assert _step("collect", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
-    deselected = _step("test-count", "Deselect the reused tests")
+    deselected = _step("collect", "Deselect the reused tests")
     assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m scripts.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
@@ -706,8 +706,8 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
                         step["name"],
                     )
     assert calls == {
-        ("test-count", "Plan the tests whose inputs did not change"),
-        ("test-count", "Deselect the reused tests"),
+        ("collect", "Plan the tests whose inputs did not change"),
+        ("collect", "Deselect the reused tests"),
         ("dep-manifest", "Build the test dependency manifest"),
     }
 
@@ -754,7 +754,7 @@ def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests
         (legacy / package / "__init__.py").write_text("")
     (legacy / "tests" / "dep_manifest.py").write_text("raise SystemExit('the tests package manifest ran')\n")
     env = {**os.environ, "RUNNER_TEMP": str(legacy.parent), "PYTHON_PATH": sys.executable}
-    run = _step("test-count", "Deselect the reused tests")["run"]
+    run = _step("collect", "Deselect the reused tests")["run"]
     result = subprocess.run(
         ["bash", "-eo", "pipefail", "-c", run], env=env, capture_output=True, text=True, check=False
     )

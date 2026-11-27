@@ -18,7 +18,6 @@ local store is mutable through CLI commands carrying --local. Counters are per s
 a cap so sessions that never reached SessionEnd cannot grow them forever.
 """
 
-import fcntl
 import functools
 import json
 import os
@@ -28,6 +27,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.config import (
     ENFORCEMENT_COUNTER_FILE,
     ENFORCEMENT_DELIVERY_STATE_FILE,

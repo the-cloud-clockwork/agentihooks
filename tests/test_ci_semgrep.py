@@ -136,6 +136,7 @@ def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grade
         ".semgrep-incidents/ledger-client-swapped-for-a-function.yml",
         ".semgrep-incidents/parametrize-id-carries-interpreter-path.yml",
         ".semgrep-incidents/fake-server-close-read-ignores-reset.yml",
+        ".semgrep-incidents/chart-grader-copy-keeps-source-modes.yml",
     ]
     configs = " ".join(f"--config {rule} --config {tmp_path}/grader/{rule}" for rule in rules)
     assert _run_test_rules(tmp_path, graded=True) == (
@@ -680,6 +681,22 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
+@pytest.mark.feature("semgrep-engine-posix-backend")
+def test_every_semgrep_job_inherits_the_posix_backend_without_override() -> None:
+    workflow = _semgrep()
+    assert workflow.get("env", {}).get("EIO_BACKEND") == "posix"
+    blocks = [(f"job {job_name}", job) for job_name, job in workflow["jobs"].items()] + [
+        (f"job {job_name} step {step.get('name')}", step)
+        for job_name, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+    ]
+    assert [
+        where
+        for where, block in blocks
+        if "EIO_BACKEND" in (block.get("env") or {}) or "EIO_BACKEND" in str(block.get("run", ""))
+    ] == []
+
+
 def test_feature_tests_and_charts_have_runner_classes():
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
     assert {key for key in classes if key.startswith("semgrep.yml/")} == {
@@ -733,7 +750,10 @@ def test_scan_holds_the_status_the_dev_rulesets_require():
     assert gate["name"] == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     assert "semgrep" in gate["needs"]
     grader = next(step for step in gate["steps"] if step.get("name") == "Require every gate to succeed")
-    assert '["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]' in grader["run"]
+    assert (
+        '["select", "collect", "test-count", "lint", "lint-actions", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]'
+        in grader["run"]
+    )
     for ruleset in ("dev-history.json", "dev-no-delete.json"):
         rules = json.loads((_ROOT / ".github/rulesets" / ruleset).read_text())["rules"]
         checks = next(rule for rule in rules if rule["type"] == "required_status_checks")

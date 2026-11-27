@@ -16,6 +16,8 @@
 
 ## Master pool
 
+- When every master login slot is spent, ask through the inbox for a slot added with `agentihooks claude login --master`.
+
 Claude and Codex masters follow this pool identically, except that only a Claude front door takes the claude ai login and Remote Control; code runs every step and you judge only the work an item asks for.
 
 - The swarm runs one master plus one more per `masters-step` unfinished engineer, CI and planner agents (default 12, masters not counted): 0 to 11 agents one master, 12 two, 24 three. Every master has the same authority; the operator and Priorities stay with the front door.

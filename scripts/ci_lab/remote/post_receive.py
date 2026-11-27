@@ -14,11 +14,11 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import asdict, replace
+from dataclasses import replace
 from typing import TextIO
 
 from scripts.ci_lab.contract import LAB_URL
-from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent, Publisher, envelope
+from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent, Publisher, envelope, head_data
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
@@ -47,7 +47,7 @@ def first_parent(sha: str) -> str:
 def grade(event: HeadEvent, ref: str, branch: str) -> Envelope:
     """Return the envelope of a pushed grade head carrying its ref and branch; its id covers both, so the same head
     pushed to another grade ref or with another branch is a new head event, not a resend the bus drops."""
-    data = {**asdict(event), "ref": ref, BRANCH: branch}
+    data = {**head_data(event), "ref": ref, BRANCH: branch}
     return replace(envelope(event), id=hashlib.sha256(json.dumps(data).encode()).hexdigest(), data=data)
 
 

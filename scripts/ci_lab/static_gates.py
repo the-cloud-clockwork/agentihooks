@@ -72,6 +72,7 @@ VARIABLE = re.compile(r"\$\{?(\w+)\}?")
 CHECKOUT = re.compile(r"^\$RUNNER_TEMP/(?:grader|base)/")
 SCRIPT = re.compile(r"\w[\w/]*\.py")
 WORD = re.compile(r"[a-z0-9]+")
+BASELINE_SCAN = re.compile(r"--baseline-commit(?=[\s=])")
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,12 @@ class StaticGate:
             and _step(name) not in produced
         )
 
+    @property
+    def rewrites_tree(self) -> bool:
+        """Whether the step rewrites its working tree, so it needs a tree of its own: a Semgrep scan against a
+        baseline commit resets the tree to that commit and back."""
+        return BASELINE_SCAN.search(self.run) is not None
+
 
 @dataclass(frozen=True)
 class CiOnly:
@@ -144,12 +151,19 @@ def _scripts(text: str, target: str) -> set[str]:
 
 
 def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the gate tools and the Python modules a step's run text names, each sorted.
+
+    A Python command makes its step a gate through its target: a module after -m, a script file, or a script on
+    standard input. A command whose flags hold c, alone or combined as in -Ic, passes inline code and makes no gate,
+    whatever that code imports; a step the lab must grade runs a module, a script file or standard input. Setup
+    commands and the ungated modules make no gate either.
+    """
     parts = [part for part in COMMAND.split(run.replace("\\\n", " ")) if not SETUP_COMMAND.search(part)]
     tools = {tool for tool, pattern in TOOLS.items() if any(pattern.search(part) for part in parts)}
     modules: set[str] = set()
     for match in filter(None, map(PYTHON.match, parts)):
         flags, target = match.group(1).split(), match.group(2)
-        if target not in UNGATED_MODULES:
+        if target not in UNGATED_MODULES and not any("c" in flag for flag in flags):
             modules |= {target} if "-m" in flags else _scripts(run, target)
             tools.add("python")
     return tuple(sorted(tools)), tuple(sorted(modules))

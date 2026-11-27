@@ -1,0 +1,25 @@
+rules:
+  - id: quota-push-operator-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Quota push authorization must require the existing typed operator provenance.
+      Automated deliveries can quote the push phrase without operator approval.
+    paths:
+      include:
+        - /hooks/hook_manager.py
+        - quota-push-operator-only.py
+    patterns:
+      - pattern-inside: |
+          def $QUOTA(...):
+              ...
+      - metavariable-regex:
+          metavariable: $QUOTA
+          regex: ^_prompt_quota_policy
+      - pattern: record_push_signal(...)
+      - pattern-not-inside: |
+          if typed and ...:
+              ...
+      - pattern-not-inside: |
+          if typed:
+              ...

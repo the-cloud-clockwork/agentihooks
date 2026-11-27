@@ -1,0 +1,12 @@
+{
+  "id": "swarm-reopens-in-restored-pane",
+  "origin": "inventory",
+  "behaviour": "A swarm agent reopened after a restart or death comes back in its recorded herdr pane when herdr shows that pane holding the agent's own conversation at a bare shell, and in a new pane otherwise.",
+  "seam": "scripts.swarm.runtime HerdrRuntime resume through init-agent --pane",
+  "tests": [
+    "tests/swarm/test_runtime.py::test_resume_reopens_the_agent_in_the_pane_herdr_restored_for_it",
+    "tests/swarm/test_runtime.py::test_resume_opens_a_new_pane_unless_its_own_waits_as_a_bare_shell",
+    "tests/swarm/test_runtime.py::test_an_agent_without_a_recorded_pane_never_asks_herdr_about_one",
+    "tests/swarm/test_runtime.py::test_an_agent_without_a_conversation_never_takes_a_pane_without_one"
+  ]
+}

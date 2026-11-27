@@ -49,7 +49,8 @@ def daemon_live(now_s: float) -> bool:
 
 def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
     """Marks one agent session seen now with its agent, swarm, lane, task, hive, account and harness in its seen
-    record, and sends the seen gauge itself only while no hive daemon exports this home, at most once per interval."""
+    record, and sends the seen gauge and its fresh token gauges itself only while no hive daemon exports this home, at
+    most once per interval."""
     if not session_id:
         return
     from hooks.observability.agent_trace import identity_from_env
@@ -71,7 +72,10 @@ def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
     sent_s = record.get("sent_s")
     due = not isinstance(sent_s, int | float) or now_s - sent_s >= INTERVAL_S
     if due and not daemon_live(now_s):
+        from hooks.observability import token_monitor
+
         otel.record_gauge(AGENT, now_s, attributes)
+        token_monitor.send_tokens(record, now_s)
         sent_s = now_s
     write_record(path, {**record, "attributes": attributes, "seen_s": now_s, "sent_s": sent_s})
 

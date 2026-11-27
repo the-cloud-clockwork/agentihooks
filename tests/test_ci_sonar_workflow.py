@@ -23,7 +23,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -38,6 +38,15 @@ def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     assert not gate.get("continue-on-error")
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"], ["reuse", "admission", "lab-verdict"])
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
+
+
+@pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
+def test_sonar_runs_when_test_count_is_skipped_or_failed() -> None:
+    """A status function in a job condition drops GitHub's implicit success check on its needs."""
+    condition = _workflow()["jobs"]["sonar"]["if"]
+    assert condition.startswith("${{ !cancelled() && ")
+    assert "test-count" not in condition
+    assert "collect" not in condition
 
 
 def test_sonar_gives_dev_push_runs_ninety_minutes_and_keeps_sixty_elsewhere() -> None:

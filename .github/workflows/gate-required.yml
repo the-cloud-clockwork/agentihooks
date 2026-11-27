@@ -7,7 +7,7 @@ on:
     types: [completed]
 
 concurrency:
-  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  group: ${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}
   queue: max
   cancel-in-progress: false
 

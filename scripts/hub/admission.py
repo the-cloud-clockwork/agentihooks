@@ -322,7 +322,7 @@ class Admission:
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
-        from scripts.swarm import launch_check, profile_choice, tick
+        from scripts.swarm import launch_check, preempt, profile_choice, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -383,6 +383,7 @@ class Admission:
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         launch_check.begin(self.store, slug, agent, now, owner=launch_check.HUB)
+        preempt.attempted(self.store, slug, task_id, now)
         return admitted
 
     def _stack_base(self, slug: str, task: dict, rows: dict) -> list[dict]:
@@ -526,7 +527,11 @@ class Admission:
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
             return False
+        from scripts.hive.launch import ACCOUNT_FULL
+
         task_id, harness, reason = request["task"], request["harness"], request["reason"]
+        if "No account slot available" in reason or reason.startswith(ACCOUNT_FULL):
+            harness = ""
         self.store.note_launch_failure(slug, task_id, reason, harness)
         if harness:
             admitted["task"]["avoid_harness"] = harness

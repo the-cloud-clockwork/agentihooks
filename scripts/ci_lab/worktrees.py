@@ -13,9 +13,10 @@ from pathlib import Path
 
 from scripts.ci_lab.remote import checkout
 
-__all__ = ["Lab", "Mirror", "Worktrees", "lab"]
+__all__ = ["Lab", "Mirror", "Worktrees", "empty", "lab"]
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+OWNED = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
 
 
 def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None) -> None:
@@ -48,6 +49,25 @@ def lab(environ: Mapping[str, str]) -> Lab | None:
     return Lab(url, environ.get(checkout.TOKEN_ENV, "")) if url else None
 
 
+def empty(folder: Path) -> None:
+    """Remove every entry of the folder, sealed trees and folders without owner access included, leaving the folder
+    itself in place; a symlink's target stays untouched, and a missing folder is not an error. A folder's mode is
+    changed only when it lacks an owner bit, so an open folder of another user is emptied as it is."""
+    if not folder.is_dir():
+        return
+    mode = folder.stat().st_mode
+    if mode & OWNED != OWNED:
+        folder.chmod(mode | OWNED)
+    for entry in folder.iterdir():
+        if entry.is_symlink():
+            entry.unlink()
+        elif entry.is_dir():
+            empty(entry)
+            entry.rmdir()
+        else:
+            entry.unlink()
+
+
 def _owned(tree: Path) -> list[Path]:
     return [path for path in (tree, *tree.rglob("*")) if not path.is_symlink()]
 
@@ -72,6 +92,7 @@ class Mirror:
     remote: str
     lab: Lab | None = None
     repository: str | None = None  # pragma: no mutate
+    environ: Mapping[str, str] | None = field(default=None, repr=False)
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
@@ -86,7 +107,7 @@ class Mirror:
             return False
         ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref, env=self.environ)
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
@@ -126,9 +147,11 @@ class Worktrees:
         self.live[head] -= 1
         self._evict()
 
-    def own(self, head: str) -> tuple[Path, bool]:
-        """Cut a private writable worktree of head for a mutation unit and say whether the store fetched head for it."""
+    def own(self, head: str, base: str) -> tuple[Path, bool]:
+        """Cut a private writable worktree of head for a mutation unit, with base present in the store for the
+        comparison the unit makes, and say whether the store fetched head for it."""
         fetched = self.mirror.fetch(head)
+        self.mirror.fetch(base)
         self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
         _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)

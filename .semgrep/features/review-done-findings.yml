@@ -1,0 +1,22 @@
+rules:
+  - id: feature-review-done-findings
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Swarm done refuses a review task that posted no finding: cmd_done calls review.require_done before the proof
+      check ledger_kinds.unmet.
+    patterns:
+      - pattern: |
+          def cmd_done(...):
+            ...
+      - pattern-not: |
+          def cmd_done(...):
+            ...
+            review.require_done(...)
+            ...
+            $MISSING = ledger_kinds.unmet(...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - '*.test.py'

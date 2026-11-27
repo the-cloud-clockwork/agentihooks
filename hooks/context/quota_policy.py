@@ -11,7 +11,6 @@ session count per account. Outcomes:
 - push: the operator said "keep pushing"; continue to 100%.
 """
 
-import fcntl
 import math
 import os
 import time
@@ -21,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hooks.compat import fcntl
 from hooks.config import (
     AGENTIHOOKS_HOME,
     QUOTA_HANDOFF_5H_PCT,
@@ -458,20 +458,29 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
         )
     if d.action == "wait":
         reset = (d.five_reset or time.time()) + 120
+        advice = (
+            "Ask through the inbox for a master login slot added with agentihooks claude login --master; "
+            f"this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
+            if _master(os.environ)
+            else f"Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
+        )
         return (
             f"QUOTA WAIT — {head} The 7-day window still has {_pct(100 - d.week_used)} left and no other "
             f"account qualifies ({_others_text(d)}).\n"
             f"1. Run: {_wait_command(reset, session_id, swarm)}\n"
-            f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
+            f"2. {advice}"
             f"Tools are not blocked."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
     prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
-    return (
-        f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
-        f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
-        f'"keep pushing" to continue on this account until 100%. Tools are not blocked.'
+    advice = (
+        "Stop working and ask through the inbox for a master login slot added with "
+        "agentihooks claude login --master. Tools are not blocked."
+        if _master(os.environ)
+        else f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
+        '"keep pushing" to continue on this account until 100%. Tools are not blocked.'
     )
+    return f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n{advice}"
 
 
 def handed_off_block(session_id: str) -> str | None:

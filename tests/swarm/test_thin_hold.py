@@ -10,6 +10,8 @@ from scripts.swarm_ledger.repository import hierarchy
 pytestmark = pytest.mark.unit
 
 HELD = "it waits for its enhancement plan task enhance-a"
+SETTLED = "its enhancement target a is done"
+PULL = "https://github.com/o/r/pull/7"
 
 
 def task(task_id: str, **fields: Any) -> dict[str, Any]:
@@ -79,6 +81,24 @@ def test_an_eng_or_ci_task_needing_enhancement_is_held_from_its_lane_claim(lane:
     assert readiness.claimable(found["tasks"][1], lane, view(found)) is True
 
 
+@pytest.mark.feature("thin-skip-open-pr")
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_a_task_needing_enhancement_with_a_pull_request_is_released_to_its_lane_claim(lane: str) -> None:
+    found = doc(task("a", lane=lane, enhancement="needed", pr_url="https://github.com/o/r/pull/7"))
+    assert claim_hold.thin(found["tasks"][0]) == ""
+    assert reasons(found, "a") == ("", False, "")
+    assert readiness.claimable(found["tasks"][0], lane, view(found)) is True
+
+
+@pytest.mark.feature("thin-skip-open-pr")
+@pytest.mark.parametrize("branch", ["", "engineer-1"], ids=["no branch", "branch only"])
+def test_a_task_needing_enhancement_without_a_pull_request_stays_held(branch: str) -> None:
+    found = doc(task("a", enhancement="needed", pr_url="", branch=branch))
+    assert claim_hold.thin(found["tasks"][0]) == HELD
+    assert reasons(found, "a") == (HELD, True, HELD)
+    assert readiness.claimable(found["tasks"][0], "eng", view(found)) is False
+
+
 @pytest.mark.feature("swarm-thin-hold")
 def test_a_task_without_a_lane_reads_as_eng_for_the_thin_hold() -> None:
     bare = {k: v for k, v in task("a", enhancement="needed").items() if k != "lane"}
@@ -95,3 +115,27 @@ def test_the_thin_hold_names_the_enhancement_task_of_its_own_target() -> None:
 def test_an_earlier_hold_still_names_itself_before_the_thin_hold() -> None:
     found = doc(task("dep"), task("a", enhancement="needed", depends_on=["dep"]))
     assert reasons(found, "a") == ("it waits on task dep", True, "it waits on task dep")
+
+
+def enhancement(target: str) -> dict[str, Any]:
+    return task(f"enhance-{target}", phase="", lane="plan", kind="plan", enhances=target)
+
+
+@pytest.mark.feature("swarm-enhancement-done-target")
+def test_a_plan_task_enhancing_a_done_target_is_held_from_every_planner_claim() -> None:
+    target = task("a", lane="ci", state="done", enhancement="needed", pr_url=PULL, branch="ci-1")
+    found = doc(target, enhancement("a"))
+    assert reasons(found, "enhance-a") == (SETTLED, True, SETTLED)
+    assert readiness.claimable(found["tasks"][1], "plan", view(found)) is False
+
+
+@pytest.mark.feature("swarm-enhancement-done-target")
+@pytest.mark.parametrize(
+    "target",
+    [task("a"), task("a", state="claimed", enhancement="needed", pr_url=PULL), task("b", state="done")],
+    ids=["open target", "claimed target", "missing target"],
+)
+def test_a_plan_task_enhancing_unfinished_or_missing_work_stays_claimable_by_planners(target: dict[str, Any]) -> None:
+    found = doc(target, enhancement("a"))
+    assert reasons(found, "enhance-a") == ("", False, "")
+    assert readiness.claimable(found["tasks"][1], "plan", view(found)) is True

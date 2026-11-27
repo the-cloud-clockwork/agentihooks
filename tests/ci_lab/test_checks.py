@@ -1,15 +1,19 @@
-"""Tests for the lab check runs: the checks write token, names, transitions, output, batching and backoff."""
+"""Tests for the lab check runs: the checks write and workflow tokens, names, transitions, output, batching, backoff,
+upserts by name and external id, repository dispatches and the Lab check workflow entry."""
 
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 import requests
 
 from scripts import github_app
-from scripts.ci_lab import checks
-from scripts.ci_lab.checks import Checks, Output, PostRefused, Transition
+from scripts.ci_lab import checks, contract, metrics
+from scripts.ci_lab.checks import Checks, Dispatches, MoveRefused, Output, PostRefused, Transition
 from scripts.ci_lab.units import Unit
 
 HEAD = "a" * 40
@@ -52,6 +56,7 @@ def lab(monkeypatch: pytest.MonkeyPatch, *answers: Mock) -> tuple[Checks, Mock, 
 
 
 def test_the_lab_token_request_carries_only_checks_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.setenv("GITHUB_APP_ID", "123")
     monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
@@ -159,6 +164,27 @@ def test_a_check_run_never_moves_back_and_a_conclusion_comes_only_with_completed
     assert request.call_count == len(steps)
 
 
+@pytest.mark.feature("lab-scheduler-fail-skips-a-second-completed-post")
+def test_a_move_that_is_not_forward_raises_its_own_type_and_the_other_refusals_do_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, _ = lab(monkeypatch, answer(201, {"id": 1}))
+    poster.post(HEAD, "lint", "completed", "failure", OUTPUT, False)
+    with pytest.raises(MoveRefused, match=FORWARD) as forward:
+        poster.post(HEAD, "lint", "completed", "failure", OUTPUT, False)
+    assert isinstance(forward.value, ValueError)
+    with pytest.raises(ValueError, match="Unknown check run status") as unknown:
+        poster.post(HEAD, "x", "waiting", None, OUTPUT, False)
+    assert not isinstance(unknown.value, MoveRefused)
+    with pytest.raises(ValueError, match=CONCLUDED) as concluded:
+        poster.post(HEAD, "shadow/lint", "completed", None, OUTPUT, False)
+    assert not isinstance(concluded.value, MoveRefused)
+    with pytest.raises(ValueError, match="Unknown check run conclusion") as conclusion:
+        poster.post(HEAD, "-shadow/lint", "completed", "stale", OUTPUT, False)
+    assert not isinstance(conclusion.value, MoveRefused)
+    assert request.call_count == 1
+
+
 def test_a_new_grade_run_or_head_opens_a_fresh_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
     poster, request, _ = lab(monkeypatch, answer(201, {"id": 7}), answer(201, {"id": 8}), answer(201, {"id": 9}))
     poster.post(HEAD, "lint", "completed", "failure", OUTPUT, False)
@@ -177,6 +203,24 @@ def test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status(monkeypa
         poster.post(HEAD, "lint", "in_progress", None, OUTPUT, True)
     assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, True) == 41
     assert [call.args for call in request.call_args_list] == [("PATCH", f"{URL}/41")]
+
+
+@pytest.mark.feature("lab-scheduler-regrade-opens-new-check-runs")
+def test_a_forgotten_check_run_is_created_again_and_every_other_keeps_its_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, _ = lab(monkeypatch, answer(201, {"id": 7}), answer(201, {"id": 8}), answer(201, {"id": 9}))
+    other = replace(OUTPUT, run="run-8")
+    poster.post(HEAD, "lint", "completed", "success", OUTPUT, True)
+    poster.post(HEAD, "lint", "completed", "success", other, True)
+    poster.forget(HEAD, "lint", OUTPUT.run, True)
+    poster.forget(HEAD, "docs", OUTPUT.run, True)
+    poster.forget(HEAD, "lint", other.run, False)
+    assert poster.status((HEAD, "lab-shadow/lint", OUTPUT.run)) is None
+    assert poster.post(HEAD, "lint", "queued", None, OUTPUT, True) == 9
+    with pytest.raises(ValueError, match=FORWARD):
+        poster.post(HEAD, "lint", "completed", "success", other, True)
+    assert [call.args for call in request.call_args_list] == [("POST", URL)] * 3
 
 
 def test_the_output_lists_every_unit_key_the_run_id_the_grader_revision_and_the_details_link() -> None:
@@ -408,3 +452,381 @@ def test_the_backoff_never_waits_past_fifteen_minutes_for_one_request(monkeypatc
     assert [call.args for call in sleep.call_args_list] == [(701.0,), (199.0,)]
     assert request.call_count == 3
     assert poster.post(HEAD, "lint", "queued", None, OUTPUT, False) == 7
+
+
+LISTING = (
+    f"https://api.github.com/repos/example/repo/commits/{HEAD}/check-runs?check_name=lab%2Flint&filter=all&per_page=100"
+)
+DISPATCHES = "https://api.github.com/repos/example/repo/dispatches"
+DISPATCH_BODY = 64 * 1024
+STAMP = "2026-11-20T08:00:00Z"
+EXTERNAL = f"lab:{HEAD}"
+BODY = {
+    "status": "completed",
+    "external_id": EXTERNAL,
+    "details_url": OUTPUT.details,
+    "output": checks.render(OUTPUT),
+    "conclusion": "success",
+    "completed_at": STAMP,
+}
+PAYLOAD = {
+    "sha": HEAD,
+    "name": "lab/lint",
+    "status": "completed",
+    "details_url": OUTPUT.details,
+    "output": checks.render(OUTPUT),
+    "conclusion": "success",
+}
+APP = {"GITHUB_APP_ID": "123", "GITHUB_APP_INSTALLATION_ID": "456", "GITHUB_APP_PRIVATE_KEY": "fixture"}
+
+
+def app_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the process the App identity GitHubAppAuth reads."""
+    for key, value in APP.items():
+        monkeypatch.setenv(key, value)
+
+
+def recorded(runs: list[dict[str, Any]]) -> Callable[..., Mock]:
+    """Answer check runs requests as GitHub does over the runs of one head: a listing shows them, a create adds one
+    with the next id and an update merges its body into the run its url names."""
+
+    def request(method: str, url: str, **kwargs: Any) -> Mock:
+        if method == "GET":
+            return answer(200, {"total_count": len(runs), "check_runs": [dict(run) for run in runs]})
+        if method == "POST":
+            runs.append({"id": len(runs) + 1, **kwargs["json"]})
+            return answer(201, runs[-1])
+        run = next(run for run in runs if url.endswith(f"/check-runs/{run['id']}"))
+        run.update(kwargs["json"])
+        return answer(200, run)
+
+    return request
+
+
+def dispatcher(monkeypatch: pytest.MonkeyPatch, *answers: Mock) -> tuple[Dispatches, Mock, Mock]:
+    """Return a dispatch poster for example/repo whose requests answer in order, with its request and sleep mocks."""
+    request = Mock(side_effect=list(answers))
+    monkeypatch.setattr(requests, "request", request)
+    sleep = Mock()
+    return Dispatches("example/repo", Token(), sleep=sleep, clock=lambda: 1000.0), request, sleep
+
+
+def event(tmp_path: Path, payload: Mapping[str, Any]) -> dict[str, str]:
+    """Write a lab-check repository dispatch event file and return the Actions environment that names it."""
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps({"action": checks.EVENT, "client_payload": dict(payload)}))
+    return {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_TOKEN": "workflow-token",
+        "GITHUB_EVENT_PATH": str(path),
+        "GITHUB_REPOSITORY": "example/repo",
+    }
+
+
+@pytest.mark.feature("lab-check-actions-token")
+def test_inside_actions_the_poster_sends_the_workflow_token_and_mints_no_app_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-token")
+    mint = Mock()
+    monkeypatch.setattr(requests, "post", mint)
+    request = Mock(return_value=answer(201, {"id": 7}))
+    monkeypatch.setattr(requests, "request", request)
+    assert Checks("example/repo").post(HEAD, "lint", "queued", None, OUTPUT, False) == 7
+    assert request.call_args.kwargs["headers"]["Authorization"] == "Bearer workflow-token"
+    mint.assert_not_called()
+    assert checks.token("example/repo", {"GITHUB_ACTIONS": "true", "GITHUB_TOKEN": "w"}) == checks.Bearer("w")
+
+
+@pytest.mark.feature("lab-check-actions-token")
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {},
+        {"GITHUB_TOKEN": "workflow-token"},
+        {"GITHUB_ACTIONS": "true"},
+        {"GITHUB_ACTIONS": "true", "GITHUB_TOKEN": ""},
+        {"GITHUB_ACTIONS": "false", "GITHUB_TOKEN": "workflow-token"},
+        {"GITHUB_ACTIONS": "TRUE", "GITHUB_TOKEN": "workflow-token"},
+    ],
+)
+def test_outside_actions_or_without_a_workflow_token_the_poster_keeps_the_app_token_with_checks_write(
+    monkeypatch: pytest.MonkeyPatch, environ: Mapping[str, str]
+) -> None:
+    app_env(monkeypatch)
+    source = checks.token("example/repo", environ)
+    assert isinstance(source, github_app.GitHubAppAuth)
+    assert source.scope() == {"repositories": ["repo"], "permissions": {"checks": "write"}}
+
+
+@pytest.mark.feature("lab-check-upsert")
+def test_an_upsert_advances_the_head_s_check_run_of_that_name_and_external_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    listed = {"check_runs": [{"id": 3, "external_id": "run-7"}, {"id": 9, "external_id": EXTERNAL}, {"id": 12}]}
+    poster, request, sleep = lab(monkeypatch, answer(200, listed), answer(200, {"id": 9}))
+    assert poster.upsert(HEAD, "lab/lint", BODY) == ("advanced", 9)
+    looked, advanced = request.call_args_list
+    assert looked.args == ("GET", LISTING)
+    assert looked.kwargs == {"headers": HEADERS, "json": None, "timeout": 30}
+    assert advanced.args == ("PATCH", f"{URL}/9")
+    assert advanced.kwargs == {"headers": HEADERS, "json": BODY, "timeout": 30}
+    sleep.assert_not_called()
+
+
+@pytest.mark.feature("lab-check-upsert")
+def test_an_upsert_creates_the_check_run_when_the_head_has_none_with_that_external_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listed = {"check_runs": [{"id": 3, "external_id": "run-7"}, {"id": 4}]}
+    poster, request, _ = lab(monkeypatch, answer(200, listed), answer(201, {"id": 11}))
+    assert poster.upsert(HEAD, "lab/lint", BODY) == ("created", 11)
+    assert request.call_args.args == ("POST", URL)
+    assert request.call_args.kwargs["json"] == {"name": "lab/lint", "head_sha": HEAD, **BODY}
+
+
+@pytest.mark.feature("lab-check-upsert")
+def test_a_rerun_upsert_of_one_head_and_name_keeps_one_check_run_and_moves_its_completed_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs: list[dict[str, Any]] = []
+    monkeypatch.setattr(requests, "request", recorded(runs))
+    poster = Checks("example/repo", Token())
+    assert poster.upsert(HEAD, "lab/lint", BODY) == ("created", 1)
+    assert poster.upsert(HEAD, "lab/lint", {**BODY, "completed_at": "2026-11-20T08:05:00Z"}) == ("advanced", 1)
+    assert len(runs) == 1
+    assert runs[0]["name"] == "lab/lint"
+    assert runs[0]["completed_at"] == "2026-11-20T08:05:00Z"
+
+
+def test_a_refused_upsert_listing_raises_and_creates_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    poster, request, _ = lab(monkeypatch, answer(404))
+    with pytest.raises(PostRefused) as error:
+        poster.upsert(HEAD, "lab/lint", BODY)
+    assert (
+        str(error.value) == f"GET commits/{HEAD}/check-runs?check_name=lab%2Flint&filter=all&per_page=100 answered 404"
+    )
+    assert request.call_count == 1
+
+
+@pytest.mark.feature("lab-check-dispatch")
+def test_a_dispatch_carries_the_check_run_move_once_with_the_contents_write_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, sleep = dispatcher(monkeypatch, answer(204))
+    assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, False) == checks.DISPATCHED == 0
+    assert request.call_args.args == ("POST", DISPATCHES)
+    assert request.call_args.kwargs == {
+        "headers": HEADERS,
+        "json": {"event_type": "lab-check", "client_payload": PAYLOAD},
+        "timeout": 30,
+    }
+    assert poster.status((HEAD, "lab/lint", "run-7")) == "completed"
+    with pytest.raises(ValueError, match=FORWARD):
+        poster.post(HEAD, "lint", "completed", "success", OUTPUT, False)
+    assert request.call_count == 1
+    sleep.assert_not_called()
+
+
+@pytest.mark.feature("lab-check-dispatch")
+def test_a_shadow_move_without_a_conclusion_dispatches_its_own_name_and_no_conclusion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "queued", None, OUTPUT, True)
+    payload = request.call_args.kwargs["json"]["client_payload"]
+    assert payload["name"] == "lab-shadow/lint"
+    assert payload["status"] == "queued"
+    assert "conclusion" not in payload
+    assert poster.status((HEAD, "lab-shadow/lint", "run-7")) == "queued"
+    assert poster.status((HEAD, "lab/lint", "run-7")) is None
+
+
+@pytest.mark.feature("lab-check-dispatch")
+def test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_run_text_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    large = replace(OUTPUT, units=tuple(Unit("tests", f"batch-{index:05d}", ()) for index in range(3000)))
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "completed", "success", large, False)
+    body = request.call_args.kwargs["json"]
+    sent = body["client_payload"]["output"]
+    assert checks.DISPATCH_TEXT == 32767
+    assert sent == checks.render(large, checks.DISPATCH_BUDGET)
+    assert len(json.dumps(sent["text"])) - 2 <= checks.DISPATCH_TEXT
+    assert "Unit keys: 1421 of 3000 listed" in sent["summary"]
+    assert len(json.dumps(body)) < DISPATCH_BODY
+    whole = {**body, "client_payload": {**body["client_payload"], "output": checks.render(large)}}
+    assert len(json.dumps(whole)) >= DISPATCH_BODY
+
+
+@pytest.mark.feature("lab-check-dispatch")
+@pytest.mark.parametrize("character", ["x", "\x1b", "✓", "\U0001f600", '"'])
+def test_escaped_log_tails_leave_half_the_dispatch_text_to_the_unit_keys_and_keep_the_body_under_64_kb(
+    monkeypatch: pytest.MonkeyPatch, character: str
+) -> None:
+    units = tuple(Unit("tests", f"batch-{index:05d}", ()) for index in range(3000))
+    failing = replace(OUTPUT, units=units, logs=tuple((unit, character * 5000) for unit in units[:20]))
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "completed", "failure", failing, False)
+    body = request.call_args.kwargs["json"]
+    text = body["client_payload"]["output"]["text"]
+    listing = text.index("- tests `batch-00000`\n")
+    assert len(json.dumps(text[:listing])) - 2 <= checks.DISPATCH_TEXT // 2
+    assert len(json.dumps(text)) - 2 <= checks.DISPATCH_TEXT
+    assert len(json.dumps(body)) < DISPATCH_BODY
+
+
+@pytest.mark.feature("lab-check-dispatch")
+@pytest.mark.parametrize(
+    ("shadow", "seeded", "other"), [(False, "lab/lint", "lab-shadow/lint"), (True, "lab-shadow/lint", "lab/lint")]
+)
+def test_a_seeded_dispatch_is_not_sent_again(
+    monkeypatch: pytest.MonkeyPatch, shadow: bool, seeded: str, other: str
+) -> None:
+    poster, request, _ = dispatcher(monkeypatch)
+    poster.seed(HEAD, "lint", "run-7", checks.DISPATCHED, "completed", shadow)
+    assert poster.status((HEAD, seeded, "run-7")) == "completed"
+    assert poster.status((HEAD, other, "run-7")) is None
+    with pytest.raises(ValueError, match=FORWARD):
+        poster.post(HEAD, "lint", "completed", "success", OUTPUT, shadow)
+    request.assert_not_called()
+
+
+@pytest.mark.feature("lab-check-dispatch")
+@pytest.mark.parametrize("refused", [answer(200), answer(201), answer(422, text="Invalid request"), answer(404)])
+def test_a_dispatch_github_does_not_accept_raises_and_records_no_status(
+    monkeypatch: pytest.MonkeyPatch, refused: Mock
+) -> None:
+    poster, _, _ = dispatcher(monkeypatch, refused)
+    with pytest.raises(PostRefused) as error:
+        poster.post(HEAD, "lint", "completed", "success", OUTPUT, False)
+    assert str(error.value) == f"POST dispatches answered {refused.status_code}"
+    assert poster.status((HEAD, "lab/lint", "run-7")) is None
+
+
+@pytest.mark.feature("lab-check-dispatch")
+def test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends(monkeypatch: pytest.MonkeyPatch) -> None:
+    limited = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1120"})
+    poster, request, sleep = dispatcher(monkeypatch, limited, answer(204))
+    assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, False) == checks.DISPATCHED
+    sleep.assert_called_once_with(121.0)
+    assert request.call_count == 2
+
+
+@pytest.mark.feature("lab-scheduler-mirror-age-and-github-rate")
+def test_a_dispatch_poster_with_a_registry_sets_the_github_calls_left_from_each_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = metrics.Registry()
+    left = registry.values[contract.GITHUB_RATE_REMAINING]
+    limited = answer(403, text=LIMITED, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1120"})
+    accepted = answer(204, headers={"x-ratelimit-remaining": "4998"})
+    refused = answer(422, headers={"x-ratelimit-remaining": "4997"})
+    monkeypatch.setattr(requests, "request", Mock(side_effect=[limited, accepted, refused]))
+    waited: list[float] = []
+    poster = Dispatches(
+        "example/repo", Token(), sleep=lambda _: waited.extend(left.values()), clock=lambda: 1000.0, registry=registry
+    )
+    assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, False) == checks.DISPATCHED
+    assert waited == [0.0]
+    assert list(left.values()) == [4998.0]
+    with pytest.raises(PostRefused):
+        poster.post(HEAD, "unit", "completed", "success", OUTPUT, False)
+    assert list(left.values()) == [4997.0]
+
+
+@pytest.mark.feature("lab-check-dispatch")
+def test_the_dispatch_token_request_carries_only_contents_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    app_env(monkeypatch)
+    source = Dispatches("example/repo").auth
+    assert isinstance(source, github_app.GitHubAppAuth)
+    assert source.scope() == {"repositories": ["repo"], "permissions": {"contents": "write"}}
+
+
+@pytest.mark.feature("lab-check-actions-entry")
+def test_a_dispatched_payload_becomes_the_check_run_body_of_its_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "completed", "success", OUTPUT, False)
+    sent = request.call_args.kwargs["json"]["client_payload"]
+    assert checks.dispatched(sent, STAMP) == (HEAD, "lab/lint", BODY)
+    queued = {**PAYLOAD, "name": "lab-shadow/lint", "status": "queued"}
+    del queued["conclusion"]
+    head, check, body = checks.dispatched(queued, STAMP)
+    assert (head, check) == (HEAD, "lab-shadow/lint")
+    assert body == {
+        "status": "queued",
+        "external_id": EXTERNAL,
+        "details_url": OUTPUT.details,
+        "output": PAYLOAD["output"],
+    }
+
+
+@pytest.mark.feature("lab-check-actions-entry")
+@pytest.mark.parametrize(
+    ("change", "refusal"),
+    [
+        ({"sha": "a" * 39}, "names a full head sha"),
+        ({"sha": "a" * 41}, "names a full head sha"),
+        ({"sha": "A" * 40}, "names a full head sha"),
+        ({"sha": "g" * 40}, "names a full head sha"),
+        ({"name": "ci/lint"}, "names a lab check run"),
+        ({"name": "lab-lint"}, "names a lab check run"),
+        ({"name": "lab"}, "names a lab check run"),
+        ({"name": "x/lab/lint"}, "names a lab check run"),
+        ({"status": "waiting"}, "Unknown check run status"),
+        ({"conclusion": "great"}, "Unknown check run conclusion"),
+        ({"status": "queued"}, "carries a conclusion exactly when it is completed"),
+    ],
+)
+def test_a_dispatch_payload_with_a_bad_head_name_status_or_conclusion_is_refused(
+    change: Mapping[str, str], refusal: str
+) -> None:
+    with pytest.raises(ValueError, match=refusal):
+        checks.dispatched({**PAYLOAD, **change}, STAMP)
+
+
+@pytest.mark.feature("lab-check-actions-entry")
+def test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs: list[dict[str, Any]] = []
+    seen: list[tuple[str, str, str]] = []
+    answering = recorded(runs)
+
+    def request(method: str, url: str, **kwargs: Any) -> Mock:
+        seen.append((method, url, kwargs["headers"]["Authorization"]))
+        return answering(method, url, **kwargs)
+
+    monkeypatch.setattr(requests, "request", request)
+    environ = event(tmp_path, PAYLOAD)
+    assert checks.main(environ, lambda: 1795161600.0) == 0
+    assert capsys.readouterr().out == f"created lab/lint on {HEAD} as check run 1\n"
+    assert checks.main(environ, lambda: 1795161900.0) == 0
+    assert capsys.readouterr().out == f"advanced lab/lint on {HEAD} as check run 1\n"
+    assert runs == [{"id": 1, "name": "lab/lint", "head_sha": HEAD, **BODY, "completed_at": "2026-11-20T08:05:00Z"}]
+    assert [(method, url) for method, url, _ in seen] == [
+        ("GET", LISTING),
+        ("POST", URL),
+        ("GET", LISTING),
+        ("PATCH", f"{URL}/1"),
+    ]
+    assert {bearer for *_, bearer in seen} == {"Bearer workflow-token"}
+
+
+@pytest.mark.feature("lab-check-actions-entry")
+def test_the_entry_outside_actions_posts_with_the_app_token_of_its_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs: list[dict[str, Any]] = []
+    monkeypatch.setattr(requests, "request", recorded(runs))
+    minted: list[tuple[str, Mapping[str, str]]] = []
+
+    def app(project: str, *, permissions: Mapping[str, str]) -> Token:
+        minted.append((project, permissions))
+        return Token()
+
+    monkeypatch.setattr(checks, "GitHubAppAuth", app)
+    assert checks.main({**event(tmp_path, PAYLOAD), "GITHUB_ACTIONS": "false"}, lambda: 1795161600.0) == 0
+    assert capsys.readouterr().out == f"created lab/lint on {HEAD} as check run 1\n"
+    assert minted == [("github.com/example/repo", {"checks": "write"})]
+    assert runs == [{"id": 1, "name": "lab/lint", "head_sha": HEAD, **BODY}]

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -43,7 +44,8 @@ def page(browser):
     context.close()
 
 
-def test_approved_columns_overview_tabs_and_stats(page):
+@pytest.mark.feature("ledger-orders-panel")
+def test_approved_columns_overview_tabs_and_stats(page: Any) -> None:
     assert page.locator(".workspace").evaluate("el => getComputedStyle(el).display") == "flex"
     assert page.locator(".workspace > *").evaluate_all("els => els.map(el => el.id)") == [
         "icon-strip",
@@ -60,6 +62,7 @@ def test_approved_columns_overview_tabs_and_stats(page):
     assert page.locator("#stats-column #stats-box").count() == 1
     assert page.locator("#stats-column #stats-sync").count() == 1
     assert page.locator("#ledger .col > section").evaluate_all("els => els.map(el => el.id)") == [
+        "sec-orders",
         "sec-priorities",
         "sec-notes",
         "sec-questions",

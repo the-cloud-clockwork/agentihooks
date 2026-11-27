@@ -1,0 +1,10 @@
+{
+  "id": "mutation-planner-batch-runner-pool",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-batch-ceiling-drift",
+  "behaviour": "The mutation planner sizes its shard ceiling as two waves of the batch runner pool, prices a stage one job setup per wave of that pool and lets a plan grow to the ceiling, all from the batch runner constant the lint step holds equal to the antoncore batch chart.",
+  "seam": "scripts.ci_mutation.plan BATCH_RUNNERS, RUNNER_WAVES and SHARD_CEILING through plan.shard_count and measured.stage_wall",
+  "tests": [
+    "tests/test_ci_mutation_plan.py::test_the_planner_sizes_shards_and_waves_by_the_batch_runner_pool"
+  ]
+}

@@ -232,7 +232,6 @@ def test_reap_requeues_while_attempts_remain_then_marks_lost(jobs: queue.Queue) 
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.token("h1:test:a") == ""
     assert jobs.members("h1", "done") == {"h1:test:a"}
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
     assert jobs.members("h1", "leased") == set()
     assert jobs.pending() == ["h1:test:b"]
 
@@ -264,7 +263,6 @@ def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: 
     assert jobs.pending() == ["h1:test:b", "h1:test:a"]
     assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
     assert jobs.members("h1", "done") == set()
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
     assert jobs.retry(record) is False
 
     assert take(jobs, "h1:test:a", "w2", "t2")
@@ -411,13 +409,11 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     assert keys == {
         "agentihooks-ci:queue:seq",
         "agentihooks-ci:queue:pending",
-        "agentihooks-ci:queue:done",
         "agentihooks-ci:queue:head:h1:pending",
         "agentihooks-ci:queue:head:h1:done",
         "agentihooks-ci:queue:job:h1:test:a",
         "agentihooks-ci:queue:job:h1:test:b",
     }
-    assert client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
 
 
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
@@ -448,3 +444,24 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w3", 5, 1300)
     assert jobs.prune(1201) == 1
     assert jobs.offers(0) == {"w3": (5, 1300)}
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_states_reads_each_job_state_in_order_through_plain_pipelines_and_a_missing_job_reads_none(
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.claim(found(jobs, ids[1]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t2", 900, 0)
+    assert jobs.finish(found(jobs, ids[2]), "t2", "passed")
+    opened: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    pipeline = jobs.client.pipeline
+
+    def piped(*args: object, **options: object) -> object:
+        opened.append((args, options))
+        return pipeline(*args, **options)
+
+    monkeypatch.setattr(jobs.client, "pipeline", piped)
+    assert jobs.states([ids[2], "h1:test:none", ids[0], ids[1]]) == ["done", None, "pending", "leased"]
+    assert jobs.states([]) == []
+    assert opened == [((), {"transaction": False})] * 2

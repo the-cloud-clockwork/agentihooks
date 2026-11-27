@@ -19,6 +19,7 @@ VECTORS = "tests/fixtures/marker-idempotency-vectors.json"
 LINT_SELECT = 'select = ["E", "F", "I", "W"]'
 QUOTE_STYLE = 'quote-style = "double"'
 GRADER_CHECKOUT = "Check out the protected grader"
+FOR_LOOP = "Refuse a command substitution as a for loop word list"
 CHART_STEPS = {
     "chart_pod_templates.py": "A chart version bump leaves every pod template unchanged",
     "chart_timers.py": "Charts render no CronJob outside the scheduler",
@@ -40,12 +41,19 @@ def _lint(name: str) -> str:
     return _steps("test.yml", "lint")[name]["run"]
 
 
-def _run(command: str, head: Path, runner: Path, grader: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def _lint_actions(name: str) -> str:
+    return _steps("test.yml", "lint-actions")[name]["run"]
+
+
+def _run(
+    command: str, head: Path, runner: Path, grader: Path = ROOT, *, no_site: bool = False
+) -> subprocess.CompletedProcess[str]:
     tools = runner / "bin"
     if not tools.exists():
         tools.mkdir(parents=True)
         (runner / "grader").symlink_to(grader)
-        (tools / "python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+        flags = "-S " if no_site else ""
+        (tools / "python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" {flags}"$@"\n')
         (tools / "python").chmod(0o755)
     env = {
         **os.environ,
@@ -156,7 +164,7 @@ def test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy(
     (head / VECTORS).write_text('{"head": 1}\n')
     (head / ".marker-kernel" / VECTORS).write_text('{"kernel": 1}\n')
     _planted_module(head, "ci_marker_vectors")
-    step = _lint("Refuse marker key vector drift from kernel dev")
+    step = _lint_actions("Refuse marker key vector drift from kernel dev")
     own = _run(f"python -m scripts.ci_marker_vectors .marker-kernel/{VECTORS}", head, tmp_path / "runner")
     graded = _run(step, head, tmp_path / "runner")
     assert own.returncode == 0, own.stdout + own.stderr
@@ -180,7 +188,7 @@ def test_the_marker_check_reads_the_vectors_under_the_root_it_names(tmp_path: Pa
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_marker_check_runs_after_the_grader_checkout() -> None:
-    names = list(_steps("test.yml", "lint"))
+    names = list(_steps("test.yml", "lint-actions"))
     assert names.index(GRADER_CHECKOUT) < names.index("Refuse marker key vector drift from kernel dev")
 
 
@@ -219,7 +227,7 @@ def test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_neve
     (head / "scripts/__init__.py").write_text("")
     (head / "scripts/ci_marker_vectors.py").write_text(PLANTED)
     grader = _stale_grader(tmp_path, "scripts/ci_marker_vectors.py")
-    graded = _run(_lint("Refuse marker key vector drift from kernel dev"), head, tmp_path / "runner", grader)
+    graded = _run(_lint_actions("Refuse marker key vector drift from kernel dev"), head, tmp_path / "runner", grader)
     assert graded.returncode == 2, graded.stdout + graded.stderr
     assert "unrecognized arguments: --root" in graded.stderr
     assert "planted head copy ran" not in graded.stdout
@@ -237,6 +245,35 @@ def test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_r
     graded = _run(_steps("semgrep.yml", "charts")[CHART_STEPS[script]]["run"], head, tmp_path / "runner", grader)
     assert graded.returncode == 1, graded.stdout + graded.stderr
     assert REFUSED.format(script) in graded.stdout
+    assert "planted head copy ran" not in graded.stdout
+
+
+@pytest.mark.feature("lint-gates-grade-from-grader")
+def test_a_head_for_loop_check_that_passes_itself_stays_red_under_the_grader_copy(tmp_path: Path) -> None:
+    head = _python_head(tmp_path)
+    (head / "scripts/__init__.py").write_text("")
+    (head / "scripts/ci_for_substitution.py").write_text(PLANTED)
+    (head / "loop.sh").write_text('#!/usr/bin/env bash\nfor name in $(ls); do echo "$name"; done\n')
+    subprocess.run(["git", "init", "-q", str(head)], check=True)
+    subprocess.run(["git", "-C", str(head), "add", "loop.sh"], check=True)
+    own = _run("python -m scripts.ci_for_substitution --root .", head, tmp_path / "runner")
+    graded = _run(_lint(FOR_LOOP), head, tmp_path / "runner")
+    assert own.returncode == 0, own.stdout + own.stderr
+    assert "planted head copy ran" in own.stdout
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert "::error::loop.sh:2: " in graded.stdout
+    assert "planted head copy ran" not in graded.stdout
+
+
+@pytest.mark.feature("grader-gates-fail-closed-on-stale-base")
+def test_a_stale_base_fails_the_for_loop_check_closed_and_a_planted_head_copy_never_runs(tmp_path: Path) -> None:
+    head = _python_head(tmp_path)
+    (head / "scripts/__init__.py").write_text("")
+    (head / "scripts/ci_for_substitution.py").write_text(PLANTED)
+    grader = _stale_grader(tmp_path, "scripts/__init__.py", "")
+    graded = _run(_lint(FOR_LOOP), head, tmp_path / "runner", grader, no_site=True)
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert "No module named scripts.ci_for_substitution" in graded.stderr
     assert "planted head copy ran" not in graded.stdout
 
 

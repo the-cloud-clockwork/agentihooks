@@ -21,7 +21,7 @@ policy has the handoff due.
 account routing, and the start check. Never build a `herdr`, `wt.exe`,
 `osascript`, or terminal command by hand.
 
-The session opens in herdr when herdr is installed and enabled, otherwise in a
+The session opens in herdr when herdr is installed, otherwise in a
 native terminal tab (Windows Terminal, macOS Terminal, a Linux emulator).
 `AGENTIHOOKS_TERMINAL_HOST=herdr|native` or `--host` overrides that. When herdr
 was chosen automatically and fails, the launch falls back to a native tab and
@@ -44,6 +44,7 @@ reports `herdr_error`.
 | "in Windows Terminal", "not in herdr" | `--host native` |
 | "open codex", "a codex agent" | `--agent codex` — agent flags after `--` go to `codex` |
 | "open claude", "a claude agent" | `--agent claude` |
+| "claude-ai", "live session", "live login", "live agent", "interactive agent" (synonyms), "launch it in claude-ai" | `--agent claude -- --route claude-ai` |
 
 Rules:
 

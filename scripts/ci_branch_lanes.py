@@ -37,6 +37,12 @@ TESTS_GROUPS = tuple(
     + promotion
     + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+) + (
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE.replace("hosted-lane", "tests-dispatch-lane")
+    + " || github.event_name == 'push' && "
+    + LANE.replace("hosted-lane", "promotion-dev")
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
 )
 PATH_FILTERS = ("paths", "paths-ignore")
 DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
@@ -153,6 +159,20 @@ def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: d
     )
 
 
+def gate_required_status_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return (
+        trusted.get("name") == "Gate Required status"
+        and name == "report"
+        and only_concurrency_changed(name, job, trusted)
+        and block
+        == {
+            "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+            "queue": "max",
+            "cancel-in-progress": False,
+        }
+    )
+
+
 def dispatched_proofs(workflow: object) -> bool:
     found = events(mapping(workflow))
     return (
@@ -239,6 +259,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         if (
             flake_history_group(name, block, job, trusted)
             or hive_release_group(name, block, job, trusted)
+            or gate_required_status_group(name, block, job, trusted)
             or focused_proof_group(name, block, job, proofs)
         ):
             continue

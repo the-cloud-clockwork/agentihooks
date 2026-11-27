@@ -1,7 +1,8 @@
-import fcntl
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
+
+from hooks.compat import fcntl
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
