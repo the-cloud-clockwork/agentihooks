@@ -377,6 +377,41 @@ def test_up_saves_each_engineers_command_and_status_shows_only_its_safe_identity
     assert rows[1]["identity"] == {"kind": "native", "program": "claude", "arguments": 0}
 
 
+@pytest.mark.feature("quick-local-command")
+def test_up_resolves_the_command_from_its_selected_directory(quick_env: dict[str, str], tmp_path: Path) -> None:
+    selected = tmp_path / "selected directory"
+    selected.mkdir()
+    tool = selected / "wrapper"
+    tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
+    tool.chmod(0o700)
+    environ = {**quick_env, "PWD": str(tmp_path / "other")}
+    assert (
+        cli.main(
+            ["up", "--agents", "2", "--harness", "program", "--command", '["./wrapper"]', "--dir", str(selected)],
+            environ,
+        )
+        == 0
+    )
+    folder = cli.paths.folder_for(environ, cli.paths.quick_id(environ), selected)
+    swarm = registry.load(folder)
+    assert swarm is not None
+    assert swarm.seats[1].command == (str(tool),)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_up_refuses_a_missing_directory_before_layout(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        pytest.fail("missing directory changed layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse)
+    assert cli.main(["up", "--dir", str(tmp_path / "missing")], quick_env) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        "agentihooks quick: the requested engineer directory is unavailable"
+    ]
+
+
 @pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize(
     ("selection", "mode", "account", "automatic"),

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from hooks import proc, secrets
 from scripts.quick.guard import QuickError
@@ -24,13 +24,17 @@ SEEN = "command.seen"
 OVERRIDE = "--engineer-command needs N=<JSON list> with N from 1 to {engineers}"
 
 
+def _argument_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def parse(text: str) -> tuple[str, ...]:
     """The literal argument list a JSON array of non empty strings names."""
     try:
         value: object = json.loads(text)
     except ValueError as error:
         raise QuickError("a command must be a JSON list of arguments") from error
-    items = cast(list[object], value) if isinstance(value, list) else []
+    items = value if _argument_list(value) else []
     argv = tuple(item for item in items if isinstance(item, str) and item)
     if not argv or len(argv) != len(items):
         raise QuickError("a command must be a non empty JSON list of non empty strings")
@@ -72,8 +76,8 @@ def recipes(
     for text in overrides:
         number, argv = _override(text, len(harnesses))
         commands[number - 1] = argv
-    for index, (harness, argv) in enumerate(zip(harnesses, commands, strict=True)):
-        if harness == PROGRAM and not argv:
+    for index, argv in enumerate(commands):
+        if harnesses[index] == PROGRAM and not argv:
             raise QuickError("a program engineer needs a command")
         if argv:
             commands[index] = _check(argv, environ)
@@ -146,17 +150,21 @@ def run_program(pid_file: Path, argv: list[str]) -> int:
         return process.wait()
 
 
-def stop(seat_dir: Path) -> None:
+def stop(seat_dir: Path) -> bool:
     try:
         pid = int((seat_dir / PID).read_text())
         descriptor = os.pidfd_open(pid)
-    except (OSError, ValueError):
-        return
-    try:
-        if alive(seat_dir):
-            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        return True
+    except (OSError, ValueError):
+        return False
+    try:
+        if not alive(seat_dir):
+            return False
+        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+        return True
+    except ProcessLookupError:
+        return True
     finally:
         os.close(descriptor)
 

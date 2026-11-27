@@ -60,13 +60,7 @@ def _write_opening(found: Member) -> Path:
     return target
 
 
-def start_command(
-    folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: Mapping[str, str], prompt_file: Path
-) -> int:
-    """Run the seat's saved command in its pane through a launcher holding its quick variables; 0 once herdr runs it.
-
-    A Claude or Codex wrapper also gets the opening prompt file; a plain program never does.
-    """
+def start_command(folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: Mapping[str, str]) -> int:
     env = environ(base, folder, swarm, seat)
     exports = {name: env[name] for name in (QUICK_ENV, SEAT_ENV, DIR_ENV)}
     if "PATH" in base:
@@ -83,7 +77,7 @@ def start_seat(folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: M
     """Open the seat's agent, or run its saved command, in its pane with its opening prompt."""
     prompt_file = _write_opening(Member(folder, swarm, seat))
     if recipe.kind(seat) == recipe.PROGRAM:
-        return start_command(folder, swarm, seat, base, prompt_file)
+        return start_command(folder, swarm, seat, base)
     return start(argv(swarm, seat, prompt_file), environ(base, folder, swarm, seat))
 
 
@@ -99,7 +93,8 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
                 continue
             taken[seat.seat] = seat
             if recipe.kind(seat) == recipe.PROGRAM:
-                codes[seat.seat] = start_seat(folder, swarm, seat, base, init_agent)
+                _write_opening(Member(folder, swarm, seat))
+                codes[seat.seat] = start_command(folder, swarm, seat, base)
                 continue
             prompt_file = _write_opening(Member(folder, swarm, seat))
             command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
@@ -110,7 +105,7 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
     finally:
         for name, seat in taken.items():
             recorded = codes.get(name) == 0 and (
-                ready(folder, seat, sleep=time.sleep)
+                program_ready(folder, seat, sleep=time.sleep)
                 if recipe.kind(seat) == recipe.PROGRAM
                 else _recorded(folder, seat)
             )
@@ -152,14 +147,19 @@ def bound(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]
     return _recorded(folder, before)
 
 
-def ready(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]) -> bool:
-    if recipe.kind(before) != recipe.PROGRAM:
-        return bound(folder, before, sleep=sleep)
+def program_ready(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]) -> bool:
+    assert recipe.kind(before) == recipe.PROGRAM
     for _ in range(round(SETTLE_S / POLL_S)):
         if recipe.alive(paths.seat_dir(folder, before.seat)):
             return True
         sleep(POLL_S)
     return recipe.alive(paths.seat_dir(folder, before.seat))
+
+
+def ready(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]) -> bool:
+    if recipe.kind(before) == recipe.PROGRAM:
+        return program_ready(folder, before, sleep=sleep)
+    return bound(folder, before, sleep=sleep)
 
 
 def relaunch(
@@ -233,7 +233,8 @@ def force(
         return "launching"
     try:
         if recipe.kind(seat) == recipe.PROGRAM:
-            recipe.stop(paths.seat_dir(folder, seat.seat))
+            if not recipe.stop(paths.seat_dir(folder, seat.seat)):
+                return "unbound"
         else:
             end(seat.name)
     finally:

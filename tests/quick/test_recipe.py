@@ -3,7 +3,7 @@ import os
 import shlex
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
@@ -38,8 +38,10 @@ class Panes:
     def __init__(self, write_pid: bool = True) -> None:
         self.runs: list[tuple[str, Path]] = []
         self.write_pid = write_pid
+        self.environ: dict[str, str] = {}
 
     def __call__(self, environ: dict[str, str]) -> "Panes":
+        self.environ = dict(environ)
         return self
 
     def run(self, pane_id: str, launcher: Path) -> bool:
@@ -132,6 +134,9 @@ def test_an_argument_that_looks_like_a_credential_is_refused() -> None:
     with pytest.raises(QuickError, match="credential") as refused:
         recipe.recipes(f'["{TOOL}", "--token", "{token}"]', [], ["program"], {})
     assert token not in str(refused.value)
+    assert str(refused.value) == (
+        "a command argument looks like a credential; let the program read it from its own environment"
+    )
 
 
 @pytest.mark.feature("quick-local-command")
@@ -160,6 +165,7 @@ def test_the_launcher_keeps_every_argument_literal_and_records_its_process(tmp_p
     text = recipe.script(argv, {"AGENTIHOOKS_QUICK_SEAT": "eng 1"}, tmp_path / "pid file", "/work dir")
     lines = text.splitlines()
     assert lines[0] == "#!/usr/bin/env bash"
+    assert lines[1] == "set -euo pipefail"
     assert "export AGENTIHOOKS_QUICK_SEAT='eng 1'" in lines
     assert f"if cd -- {shlex.quote('/work dir')}; then" in lines
     assert any("run_program" in line and shlex.quote(str(tmp_path / "pid file")) in line for line in lines)
@@ -181,7 +187,11 @@ def test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent(
     assert launch.start_seat(tmp_path, swarm, swarm.seats[1], {"PATH": "/bin"}, refuse) == 0
     [(pane, launcher)] = panes.runs
     text = launcher.read_text()
-    assert pane == "w1:p2" and os.access(launcher, os.X_OK)
+    assert pane == "w1:p2" and stat.S_IMODE(launcher.stat().st_mode) == 0o700
+    assert panes.environ == launch.environ({"PATH": "/bin"}, tmp_path, swarm, swarm.seats[1])
+    assert "export PATH=/bin" in text
+    assert f"if cd -- {shlex.quote(swarm.directory)}; then" in text
+    assert shlex.quote(str(paths.seat_dir(tmp_path, "eng-1") / recipe.PID)) in text
     assert recipe.PROMPT_ENV not in text
     assert "export AGENTIHOOKS_QUICK_SEAT=eng-1" in text and f"export AGENTIHOOKS_QUICK_DIR={tmp_path}" in text
     assert shlex.split(text.splitlines()[-3].removesuffix(" || true"))[-2:] == [TOOL, "two words"]
@@ -296,7 +306,7 @@ def test_a_relaunched_wrapper_still_waits_for_its_native_session(
 @pytest.mark.feature("quick-local-command")
 def test_force_and_relaunch_reuse_the_saved_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _swarm(tmp_path, (TOOL, "keep me"))
-    monkeypatch.setattr(recipe, "stop", lambda folder: None)
+    monkeypatch.setattr(recipe, "stop", lambda folder: True)
     panes = Panes()
     monkeypatch.setattr(tick, "LiveHerdr", panes)
     outcome = launch.force(
@@ -501,17 +511,28 @@ def test_the_real_launcher_delivers_literal_arguments_and_its_directory(tmp_path
 
 
 @pytest.mark.feature("quick-local-command")
-@pytest.mark.parametrize("live", [True, False])
+@pytest.mark.parametrize(("live", "gone"), [(True, False), (False, False), (True, True)])
 def test_a_forced_program_stop_targets_only_its_verified_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live: bool, gone: bool
 ) -> None:
     (tmp_path / recipe.PID).write_text("7")
     calls: list[tuple[str, int]] = []
+
+    def alive(folder: Path) -> bool:
+        assert folder == tmp_path
+        return live
+
+    def send(descriptor: int, number: int) -> None:
+        assert number == recipe.signal.SIGTERM
+        calls.append(("signal", descriptor))
+        if gone:
+            raise ProcessLookupError
+
     monkeypatch.setattr(recipe.os, "pidfd_open", lambda pid: calls.append(("open", pid)) or 9)
-    monkeypatch.setattr(recipe, "alive", lambda folder: live)
-    monkeypatch.setattr(recipe.signal, "pidfd_send_signal", lambda fd, sig: calls.append(("signal", fd)))
+    monkeypatch.setattr(recipe, "alive", alive)
+    monkeypatch.setattr(recipe.signal, "pidfd_send_signal", send)
     monkeypatch.setattr(recipe.os, "close", lambda fd: calls.append(("close", fd)))
-    recipe.stop(tmp_path)
+    assert recipe.stop(tmp_path) is live
     assert calls == [("open", 7), *([("signal", 9)] if live else []), ("close", 9)]
 
 
@@ -595,3 +616,297 @@ def test_the_program_runner_records_and_reaps_its_child(tmp_path: Path) -> None:
     pid = (tmp_path / recipe.PID).read_text()
     assert (tmp_path / recipe.SEEN).read_text().startswith(pid + " ")
     assert not recipe.alive(tmp_path)
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("{", "a command must be a JSON list of arguments"),
+        ("[]", "a command must be a non empty JSON list of non empty strings"),
+        (json.dumps([chr(0)]), "a command argument may not hold a NUL or a newline"),
+        (json.dumps([chr(10)]), "a command argument may not hold a NUL or a newline"),
+    ],
+)
+def test_invalid_command_diagnostics_are_stable(text: str, message: str) -> None:
+    with pytest.raises(QuickError) as refused:
+        recipe.parse(text)
+    assert str(refused.value) == message
+
+
+@pytest.mark.feature("quick-local-command")
+def test_override_boundaries_and_literal_equals_are_preserved() -> None:
+    assert recipe.recipes(
+        "", [f'1=["{TOOL}", "--tag=two words"]', f'3=["{TOOL}"]'], ["claude", "codex", "program"], {}
+    ) == [(TOOL, "--tag=two words"), (), (TOOL,)]
+    with pytest.raises(QuickError) as refused:
+        recipe.recipes("", [f'3=["{TOOL}"]'], ["claude", "codex"], {})
+    assert str(refused.value) == "--engineer-command needs N=<JSON list> with N from 1 to 2"
+    with pytest.raises(QuickError) as refused:
+        recipe.recipes("", [], ["program"], {})
+    assert str(refused.value) == "a program engineer needs a command"
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("default_path", [True, False])
+def test_executable_lookup_uses_each_path_entry_and_the_system_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_path: bool
+) -> None:
+    directory = tmp_path / "tools with spaces"
+    directory.mkdir()
+    tool = directory / "local-tool"
+    tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
+    tool.chmod(0o700)
+    search = f"{tmp_path / 'missing'}{os.pathsep}{directory}"
+    monkeypatch.setattr(recipe.os, "defpath", search)
+    environ = {} if default_path else {"PATH": search}
+    assert recipe.recipes('["local-tool"]', [], ["program"], environ) == [(str(tool),)]
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("directory", [True, False])
+def test_a_directory_or_nonexecutable_file_is_not_a_command(tmp_path: Path, directory: bool) -> None:
+    tool = tmp_path / "cannot-run"
+    if directory:
+        tool.mkdir()
+    else:
+        tool.write_text("data")
+        tool.chmod(0o600)
+    with pytest.raises(QuickError):
+        recipe.recipes(json.dumps([str(tool)]), [], ["program"], {})
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize(("saved_harness", "command"), [("claude", ()), ("codex", (TOOL,)), ("program", (TOOL,))])
+def test_native_execution_never_adopts_another_kind_or_harness(
+    tmp_path: Path, saved_harness: str, command: tuple[str, ...]
+) -> None:
+    swarm = _swarm(tmp_path, command, saved_harness)
+    environ = launch.environ({}, tmp_path, swarm, swarm.seats[1])
+    calls: list[tuple[str, list[str]]] = []
+
+    def execute(binary: str, argv: list[str], child: Mapping[str, str]) -> None:
+        calls.append((binary, argv))
+
+    native = ["native-claude", "--model", "chosen"]
+    recipe.execute_native("claude", native, environ, execvpe=execute)
+    assert calls == [("native-claude", native)]
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("error", [None, "invalid-pid", "unavailable-process", "gone-process"])
+def test_an_unavailable_process_handle_cannot_be_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: str | None
+) -> None:
+    if error is not None:
+        (tmp_path / recipe.PID).write_text("bad" if error == "invalid-pid" else "7")
+
+    def unavailable(pid: int) -> int:
+        if error == "gone-process":
+            raise ProcessLookupError
+        raise PermissionError
+
+    monkeypatch.setattr(recipe.os, "pidfd_open", unavailable)
+    assert recipe.stop(tmp_path) is (error == "gone-process")
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("available_at", [0, 2, 4, None])
+def test_program_readiness_observes_the_process_within_its_poll_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, available_at: int | None
+) -> None:
+    swarm = _swarm(tmp_path, (TOOL,))
+    calls: list[Path] = []
+    waits: list[float] = []
+
+    def alive(folder: Path) -> bool:
+        calls.append(folder)
+        return available_at is not None and len(calls) > available_at
+
+    monkeypatch.setattr(launch, "SETTLE_S", 2.0)
+    monkeypatch.setattr(launch, "POLL_S", 0.5)
+    monkeypatch.setattr(recipe, "alive", alive)
+    assert launch.program_ready(tmp_path, swarm.seats[1], sleep=waits.append) is (available_at is not None)
+    waited = 4 if available_at is None else available_at
+    assert waits == [0.5] * waited
+    assert calls == [paths.seat_dir(tmp_path, "eng-1")] * (waited + 1)
+
+
+@pytest.mark.feature("quick-local-command")
+def test_program_readiness_rejects_a_native_seat(tmp_path: Path) -> None:
+    seat = registry.Seat(2, "eng-1", "w1:p2", "claude", "native")
+    with pytest.raises(AssertionError):
+        launch.program_ready(tmp_path, seat, sleep=lambda seconds: pytest.fail("native process wait"))
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("harness", ["program", "claude"])
+def test_force_selects_only_the_saved_occupant_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    swarm = _swarm(tmp_path, (TOOL,), harness)
+    stopped: list[Path] = []
+    ended: list[str] = []
+    monkeypatch.setattr(recipe, "stop", lambda folder: stopped.append(folder) or True)
+    monkeypatch.setattr(launch, "relaunch", lambda *args, **kwargs: "started")
+    assert launch.force(tmp_path, "eng-1", {}, bare=lambda pane: False, end=ended.append) == "started"
+    assert stopped == ([paths.seat_dir(tmp_path, "eng-1")] if harness == "program" else [])
+    assert ended == ([] if harness == "program" else [swarm.seats[1].name])
+
+
+@pytest.mark.feature("quick-local-command")
+def test_force_refuses_a_busy_program_without_verified_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _swarm(tmp_path, (TOOL,))
+    monkeypatch.setattr(recipe, "stop", lambda folder: False)
+    assert (
+        launch.force(
+            tmp_path, "eng-1", {}, bare=lambda pane: False, end=lambda name: pytest.fail("program used native end")
+        )
+        == "unbound"
+    )
+    assert _seat(tmp_path).state == registry.PENDING
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("failure", [None, "herdr", "timeout"])
+def test_live_herdr_runs_the_program_launcher_with_its_exact_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    import subprocess
+
+    from scripts import herdr_host
+
+    env = {"PATH": "/caller/tools", member.SEAT_ENV: "eng-1"}
+    launcher = tmp_path / "command.sh"
+    calls: list[tuple[str, Path, Mapping[str, str]]] = []
+
+    def run(pane: str, script: Path, environ: Mapping[str, str]) -> None:
+        calls.append((pane, script, environ))
+        if failure == "herdr":
+            raise herdr_host.HerdrError("unavailable")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("herdr", 1)
+
+    monkeypatch.setattr(herdr_host, "run", run)
+    assert tick.LiveHerdr(env).run("w1:p2", launcher) is (failure is None)
+    assert calls == [("w1:p2", launcher, env)]
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize("route", ["claude-routed", "claude-bare", "claude-default", "codex-routed", "codex-default"])
+def test_native_routing_executes_the_saved_wrapper_after_account_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+
+    from scripts import claude_quota_balancer, codex_router, deps_preflight, install, master_claude_login
+    from scripts.hive import account_slots
+    from scripts.routing import native_default
+
+    harness = route.split("-")[0]
+    swarm = _swarm(tmp_path, (TOOL, "two words"), harness)
+    active = launch.environ(
+        {
+            "HOME": str(tmp_path),
+            "AGENTIHOOKS_PROFILE_REPORT": "/private/profile",
+            "AGENTIHOOKS_ROUTE_ACCOUNT": "stale-parent",
+        },
+        tmp_path,
+        swarm,
+        swarm.seats[1],
+    )
+    for name, value in active.items():
+        monkeypatch.setenv(name, value)
+    received: list[tuple[str, list[str], dict[str, str]]] = []
+    admitted: list[tuple[str, str]] = []
+
+    def execute(binary: str, arguments: list[str], environ: Mapping[str, str]) -> None:
+        received.append((binary, arguments, dict(environ)))
+        raise SystemExit(0)
+
+    def admit(kind: str, account: str, environ: Mapping[str, str], run: Callable[[Mapping[str, str]], object]) -> None:
+        admitted.append((kind, account))
+        run(environ)
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise claude_quota_balancer.RoutingError("unavailable")
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    monkeypatch.setattr(install.os, "execvpe", execute)
+    monkeypatch.setattr(install.shutil, "which", lambda name: f"native-{name}")
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(install, "_write_route_report", lambda *args, **kwargs: None)
+    monkeypatch.setattr(install, "_claude_command", lambda binary, args: [binary, *args])
+    monkeypatch.setattr(master_claude_login, "_token_lock", lambda env: ExitStack())
+    monkeypatch.setattr(deps_preflight, "ensure", lambda: None)
+    monkeypatch.setattr(deps_preflight, "refresh_codex_wrapper", lambda name: None)
+    monkeypatch.setattr(claude_quota_balancer, "route_requires_fable", lambda *args: False)
+    monkeypatch.setattr(claude_quota_balancer, "forced", lambda env, account: SimpleNamespace(account="alpha"))
+    monkeypatch.setattr(claude_quota_balancer, "select_launch_credential", unavailable)
+    monkeypatch.setattr(
+        claude_quota_balancer,
+        "launch_environment",
+        lambda decision, env: {**env, "AGENTIHOOKS_ROUTE_ACCOUNT": decision.account},
+    )
+    monkeypatch.setattr(native_default, "prepare", lambda kind, env: {**env, "AGENTIHOOKS_ROUTE_ACCOUNT": "default"})
+    monkeypatch.setattr(native_default.native_login, "check", lambda *args: None)
+    monkeypatch.setattr(codex_router, "_own_command", lambda *args: None)
+    monkeypatch.setattr(codex_router.codex_sessions, "resolve", lambda args, env: args)
+    monkeypatch.setattr(codex_router, "identity_warnings", lambda env: [])
+    monkeypatch.setattr(codex_router, "_route", lambda *args: (codex_router.CodexAccount("alpha"), "forced", 0, "?"))
+    monkeypatch.setattr(codex_router, "credential", lambda account, env: account)
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda *args: True)
+    monkeypatch.setattr(codex_router, "_report", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        codex_router, "child_environment", lambda account, env: {**env, "AGENTIHOOKS_ROUTE_ACCOUNT": account.name}
+    )
+    monkeypatch.setattr(codex_router, "command", lambda account, binary, args: [binary, *args])
+    arguments = ["--model", "chosen", "opening prompt"]
+    with pytest.raises(SystemExit) as stopped:
+        if route == "claude-default":
+            native_default.launch_claude("native-claude", arguments, active, "")
+        elif route.startswith("codex"):
+            selected = "native-default" if route == "codex-default" else "alpha"
+            codex_router.main(["--route", selected, *arguments], active, execvpe=execute)
+        else:
+            flags = ["--agentihooks-fallback-bare"] if route == "claude-bare" else ["--route", "alpha"]
+            install.cmd_claude([*flags, *arguments])
+    assert stopped.value.code == 0
+    [(binary, forwarded, child)] = received
+    assert binary == TOOL and forwarded == [TOOL, "two words", *arguments]
+    assert admitted == [
+        (harness, "default" if route.endswith("default") else "unrouted" if route.endswith("bare") else "alpha")
+    ]
+    assert child[recipe.PROMPT_ENV] == str(paths.opening(tmp_path, "eng-1"))
+    assert child["AGENTIHOOKS_PROFILE_REPORT"] == "/private/profile"
+    assert child[member.SEAT_ENV] == "eng-1"
+    assert child.get("AGENTIHOOKS_ROUTE_ACCOUNT") == (
+        "default" if route.endswith("default") else None if route.endswith("bare") else "alpha"
+    )
+
+
+@pytest.mark.feature("quick-local-command")
+def test_initial_program_readiness_waits_for_its_process_without_native_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    swarm = _swarm(tmp_path, (TOOL,))
+    checks: list[Path] = []
+    waits: list[float] = []
+    monkeypatch.setattr(tick, "LiveHerdr", Panes(write_pid=False))
+    monkeypatch.setattr(launch, "time", SimpleNamespace(sleep=waits.append))
+    monkeypatch.setattr(launch, "_recorded", lambda *args: pytest.fail("program waited for native binding"))
+
+    def alive(folder: Path) -> bool:
+        checks.append(folder)
+        return len(checks) >= 3
+
+    monkeypatch.setattr(recipe, "alive", alive)
+    assert launch.start_all(tmp_path, swarm, {}) == {"eng-1": 0}
+    assert _seat(tmp_path).state == registry.READY
+    assert waits == [launch.POLL_S, launch.POLL_S]
+    assert checks == [paths.seat_dir(tmp_path, "eng-1")] * 3
