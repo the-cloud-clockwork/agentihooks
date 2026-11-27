@@ -11,6 +11,7 @@
     "tests/test_native_default.py::test_codex_native_default_preserves_configuration_without_matching_trust",
     "tests/test_codex_hook_trust.py::test_rebase_state_filters_source_prefix_and_preserves_values",
     "tests/test_native_default.py::test_codex_native_default_preserves_lexical_hook_trust",
-    "tests/test_native_default.py::test_codex_native_default_preserves_trust_key_boundaries"
+    "tests/test_native_default.py::test_codex_native_default_preserves_trust_key_boundaries",
+    "tests/test_native_default.py::test_codex_native_default_coalesces_colliding_hook_aliases"
   ]
 }

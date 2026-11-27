@@ -517,3 +517,39 @@ def test_codex_native_default_preserves_trust_key_boundaries(tmp_path: Path, lay
     assert copied == expected
     assert tomllib.loads(copied.decode())["hooks"]["state"][target_key] == {"trusted_hash": "same"}
     assert (source / "config.toml").read_bytes() == original.encode()
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize("resolved_first", [False, True])
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_codex_native_default_coalesces_colliding_hook_aliases(
+    tmp_path: Path, resolved_first: bool, conflicting: bool
+) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    hooks = tmp_path / "shared-hooks.json"
+    hooks.write_text("{}")
+    source_hooks = source / "hooks.json"
+    source_hooks.symlink_to(hooks)
+    canonical = {"trusted_hash": "canonical-hash", "enabled": False}
+    fallback = {"trusted_hash": "stale-hash", "enabled": True} if conflicting else canonical
+    entries = [(source_hooks, canonical), (hooks, fallback)]
+    if resolved_first:
+        entries.reverse()
+    prefix = "# retain unrelated bytes\r\nmodel = 'native'\r\n"
+    original = prefix + "".join(
+        f"[hooks.state.{json.dumps(f'{path}:Stop:0:0')}]\r\n"
+        + "".join(f"{name} = {json.dumps(value)}\r\n" for name, value in fields.items())
+        for path, fields in entries
+    )
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    copied = (home / "config.toml").read_bytes()
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert state == {f"{home / 'hooks.json'}:Stop:0:0": canonical}
+    assert copied.startswith(prefix.encode())
+    assert (source / "config.toml").read_bytes() == original.encode()
