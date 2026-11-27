@@ -324,6 +324,7 @@ def test_profile_binding_canary_is_exempt() -> None:
         f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
         f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: 4000, yield_time_ms: 10000}}));",
         f'const r = await tools.exec_command({{"cmd": {json.dumps(MOUNTED_CANARY)}, "yield_time_ms": 1000}}); text(r);',
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)},}}));",
     ],
 )
 def test_mounted_literal_canary_is_exempt(command: str) -> None:
@@ -353,7 +354,9 @@ def test_mounted_literal_canary_is_exempt(command: str) -> None:
         f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}, evil);",
         f'text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, workdir: "/home/worker/x"}}));',
         f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: limit}}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: }}));",
         f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); fetch(1);",
+        f'text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, cmd: "pwd"}}));',
         f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); await tools.exec_command({{cmd: "pwd"}});',
     ],
 )
