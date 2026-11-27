@@ -1,0 +1,18 @@
+rules:
+  - id: lab-private-ref-listing
+    languages: [python]
+    severity: ERROR
+    message: Private repository ref listings need the repository App credential in the git environment.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-private-ref-listing.py
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(["git", "ls-remote", ...], ...)
+          - patterns:
+              - pattern-inside: |
+                  $ARGS = ["git", "ls-remote", ...]
+                  ...
+              - pattern: subprocess.run($ARGS, ...)
+      - pattern-not: subprocess.run(..., env=$ENV, ...)
