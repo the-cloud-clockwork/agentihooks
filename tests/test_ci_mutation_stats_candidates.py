@@ -164,6 +164,15 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
             ["test_child_import"],
         ),
         (
+            "from pathlib import Path\n"
+            "Path('boot.py').write_text('from app import target\\ntarget(1)\\n')\n"
+            "def test_match_import():\n"
+            "    match 1:\n"
+            "        case 1:\n"
+            "            import boot\n",
+            ["test_match_import"],
+        ),
+        (
             "class Helper:\n"
             "    def __init__(self):\n"
             "        target(1)\n"
@@ -248,6 +257,7 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "later-reassignment",
         "conditional-reassignment",
         "child-module-initialization",
+        "match-import-initialization",
         "constructor-reach",
         "slotted-class",
         "assigned-dynamic-export",

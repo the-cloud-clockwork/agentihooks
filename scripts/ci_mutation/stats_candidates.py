@@ -134,13 +134,16 @@ class Reach:
                 self.imports(scope, node)
             else:
                 self.assignment(scope, node)
-                for field in ("body", "orelse", "finalbody"):
-                    children = getattr(node, field, None)
-                    if isinstance(children, list):
-                        self.scan(scope, cast(list[ast.stmt], children))
-                if isinstance(node, ast.Try):
-                    for handler in node.handlers:
-                        self.scan(scope, handler.body)
+                self.scan(scope, self.statements(node))
+
+    def statements(self, node: ast.AST) -> list[ast.stmt]:
+        result: list[ast.stmt] = []
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.stmt):
+                result.append(child)
+            elif not isinstance(child, ast.expr):
+                result.extend(self.statements(child))
+        return result
 
     def assignment(self, scope: Key, node: ast.AST) -> None:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
