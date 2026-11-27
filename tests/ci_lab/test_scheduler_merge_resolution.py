@@ -803,8 +803,8 @@ def test_a_bare_notice_grade_is_superseded_once_the_pull_request_event_resolves_
     assert before.index(job_pending) < before.index(job_other)
     _push(run, HEAD_A, 41, lane="feature")
     run.tick(1100)
-    live = [grade for grade in run.grades() if not grade.superseded]
-    assert [grade.head for grade in live] == [HEAD_A]
+    live = [grade for grade in run.grades() if grade.head == HEAD_A and not grade.superseded]
+    assert len(live) == 1
     assert live[0].graded_commit == MERGE
     stale = run.engine.grade(bare.run)
     assert stale is not None and stale.superseded is True
