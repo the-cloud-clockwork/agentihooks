@@ -23,7 +23,7 @@ def test_unread_seat_requires_brief() -> None:
     gate = first_read.FirstRead()
     assert gate.matches(call)
     decision = gate.decide(call, ME, None)
-    assert not decision.allowed
+    assert decision.allowed is False
     assert decision.reason == "Run agentihooks seat brief before using other tools in this seated session."
 
 
@@ -85,6 +85,9 @@ def test_brief_command_is_exempt(command: str) -> None:
         "agentihooks seat brief && pwd",
         "agentihooks seat brief > /repo/output",
         'const r = await tools.exec_command({cmd: "pwd"}); text("agentihooks seat brief");',
+        'const r = await tools.exec_command({cmd: "agentihooks seat brief"}); await tools.apply_patch(r);',
+        "/opt/bin/other seat brief",
+        "agentihooks seat status",
     ],
 )
 def test_brief_words_do_not_exempt_other_commands(command: str) -> None:
@@ -104,6 +107,10 @@ def test_canary_is_exempt() -> None:
     assert (
         first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None).allowed
     )
+    upper = command.replace("abc123", "ABC123")
+    assert (
+        first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": upper}, session="s"), ME, None).allowed
+    )
 
 
 @pytest.mark.feature("first-read-gate")
@@ -118,6 +125,28 @@ def test_only_own_opening_prompt_is_exempt(monkeypatch: pytest.MonkeyPatch, tmp_
     assert gate.decide(
         Call(tool="Read", tool_input={"file_path": str(own), "offset": 1, "limit": 1}, session="s"), ME, None
     ).allowed
+    assert gate.decide(Call(tool="Read", tool_input={"path": str(own)}, session="s"), ME, None).allowed
+    assert not gate.decide(Call(tool="Write", tool_input={"file_path": str(own)}, session="s"), ME, None).allowed
+    assert not gate.decide(Call(tool="Read", session="s"), ME, None).allowed
+
+
+@pytest.mark.feature("first-read-gate")
+def test_quick_seat_opening_prompt_uses_the_launcher_safe_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_QUICK_SEAT", "eng:one")
+    prompt = tmp_path / "agentihooks-claude-terminal" / "eng_one-261126-195500-123.prompt"
+    call = Call(tool="Read", tool_input={"file_path": str(prompt)}, session="s")
+    assert first_read.FirstRead().decide(call, Who(), None).allowed
+
+
+@pytest.mark.feature("first-read-gate")
+def test_decision_uses_the_given_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    gate = first_read.FirstRead()
+    call = Call(tool="Write", session="given")
+    assert gate.decide(call, Who(), None).allowed
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    assert gate.decide(call, ME, None).allowed is False
 
 
 @pytest.mark.feature("first-read-gate")
@@ -129,7 +158,7 @@ def test_marker_is_isolated_to_its_session() -> None:
     assert not gate.matches(Call(tool="Write", session="session-one"))
     assert gate.decide(Call(tool="Write", session="session-one"), ME, None).allowed
     assert not gate.decide(Call(tool="Write", session="session-two"), ME, None).allowed
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^invalid first read session id$"):
         first_read.marker_path("../session-one")
 
 
@@ -197,6 +226,10 @@ def test_mounted_canary_path_setup_is_exempt() -> None:
         "python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --other abc123",
         "python -c '",
         'await tools.exec_command({cmd: "agentihooks seat brief"}); await tools.exec_command({cmd: "pwd"});',
+        "python -c 'import sys; x = sys.path.insert(0, \"/repo\"); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'import sys; print(0, \"/repo\"); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123 extra",
+        "ruby -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
     ],
 )
 def test_bootstrap_cannot_hide_other_work(command: str) -> None:

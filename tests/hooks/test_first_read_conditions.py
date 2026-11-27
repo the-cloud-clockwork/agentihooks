@@ -21,6 +21,7 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         {"stdout": "brief", "stderr": "", "interrupted": False},
         "Process exited with code 0\nFinal output:\nbrief",
         {"content": [{"type": "text", "text": '{"exit_code": 0, "output": "brief"}'}]},
+        "Chunk ID: 7\nWall time: 0.1 seconds\nProcess exited with code 0\nOutput:\nbrief",
     ],
 )
 def test_successful_brief_marks_its_session(response: Any) -> None:
@@ -46,6 +47,13 @@ def test_successful_brief_marks_its_session(response: Any) -> None:
         {"isError": True},
         "Process exited with code 1\n",
         {"output": "brief"},
+        {"isError": True, "exit_code": 0},
+        {"is_error": True, "exit_code": 0},
+        {"interrupted": True, "exit_code": 0},
+        {"stdout": "brief", "stderr": ""},
+        "Chunk ID: 7\nFinal output:\nProcess exited with code 0\nFinal output:\ndone",
+        'Chunk ID: 7\nOutput:\n{"exit_code": 0}',
+        'Script completed\nOutput:\nfailed\nOutput:\n{"exit_code": 0}',
     ],
 )
 def test_unsuccessful_or_running_brief_does_not_mark(response: Any) -> None:
@@ -169,3 +177,16 @@ def test_standalone_start_clears_old_membership(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(first_read.Who, "from_env", standalone)
     first_read.reset({"session_id": "one", "source": "startup"})
     assert not path.exists()
+
+
+@pytest.mark.feature("first-read-gate")
+def test_reset_without_existing_files_leaves_only_membership(monkeypatch: pytest.MonkeyPatch) -> None:
+    first_read.reset({"source": "startup"})
+    first_read.reset({"session_id": "fresh", "source": "compact"})
+    folder = first_read.marker_path("fresh").parent
+    assert sorted(path.name for path in folder.rglob("*")) == [".members", "fresh"]
+    assert first_read.membership_path("fresh").read_text() == "1"
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    first_read.reset({"session_id": "other", "source": "startup"})
+    assert not first_read.membership_path("other").exists()

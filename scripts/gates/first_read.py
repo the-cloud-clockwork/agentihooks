@@ -4,7 +4,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts.gates.base import Call, Decision, Gate, Who
 
@@ -14,6 +14,8 @@ CONDITION = re.compile(
     r"(?:mcp__agentihooks(?:__|\.)|mcp_agentihooks_|)(?:condition_list|condition_show|condition_set|condition_clear)"
 )
 CANARY_EXIT = ast.dump(ast.parse("sys.exit(main(sys.argv[2]))").body[0])
+SHELL_META = "$`<>(){}|;&\n"
+NAME_SAFE = "._-"
 
 
 def marker_path(session: str) -> Path:
@@ -30,25 +32,28 @@ def membership_path(session: str) -> Path:
 def _member(who: Who | None = None) -> bool:
     if os.environ.get("AGENTIHOOKS_QUICK_SEAT"):
         return True
-    identity: Who = who or cast(Any, Who).from_env()
+    identity: Who = who or Who.from_env()  # pyright: ignore[reportUnknownMemberType]
     return identity.pinned
 
 
-def _command(command: str) -> str:
+def _command(command: str) -> str | None:
     from hooks.targets.normalizer import exec_calls
 
     calls = exec_calls(command)
     if not calls:
         return command
     if len(calls) != 1 or len(re.findall(r"\btools\b", command)) != 1:
-        return ""
-    return str(calls[0].get("cmd") or "")
+        return None
+    return calls[0].get("cmd")
 
 
 def _words(command: str) -> list[str]:
+    text = _command(command)
+    if text is None:
+        return []
     try:
-        words = shlex.split(_command(command))
-        return [] if words and any(char in words[0] for char in "$`<>(){}|;&\n") else words
+        words = shlex.split(text)
+        return [] if words and any(char in words[0] for char in SHELL_META) else words
     except ValueError:
         return []
 
@@ -99,12 +104,14 @@ def _canary(command: str) -> bool:
 def _opening(call: Call, who: Who) -> bool:
     from scripts.herdr_panes import run_folder
 
-    args: dict[str, Any] = cast("Any", call).tool_input
-    path = Path(str(args.get("file_path") or args.get("path") or ""))
+    args: dict[str, Any] = call.tool_input  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    path = Path(str(args.get("file_path") or args.get("path")))
     if path.parent.resolve() != run_folder(dict(os.environ)).resolve():
         return False
-    names = {who.name, who.name.replace("@", "-"), os.environ.get("AGENTIHOOKS_QUICK_SEAT", "")}
-    prefixes = {"".join(char if char.isalnum() or char in "._-" else "_" for char in name) for name in names if name}
+    names = {who.name, who.name.replace("@", "-"), os.environ.get("AGENTIHOOKS_QUICK_SEAT")}
+    prefixes = {
+        "".join(char if char.isalnum() or char in NAME_SAFE else "_" for char in name) for name in names if name
+    }
     return any(
         re.fullmatch(re.escape(prefix) + r"-\d{6}-\d{6}-\d+\.(?:prompt|opening)", path.name) for prefix in prefixes
     )
@@ -115,8 +122,8 @@ def _text_succeeded(response: str) -> bool:
         decoded: object = json.loads(response)
     except ValueError:
         if response.startswith("Script completed") and "\nOutput:\n" in response:
-            return _succeeded(response.split("\nOutput:\n", 1)[1].strip())
-        header = response.split("\nFinal output:", 1)[0]
+            return _succeeded(response.partition("\nOutput:\n")[2].strip())
+        header = response.partition("\nFinal output:")[0]
         status = re.search(r"^Process exited with code (-?\d+)$", header, re.MULTILINE)
         return status is not None and status.group(1) == "0"
     return _succeeded(decoded)
@@ -127,7 +134,7 @@ def _succeeded(response: object) -> bool:
         return _text_succeeded(response)
     if not isinstance(response, dict):
         return False
-    result = cast("dict[str, Any]", response)
+    result: dict[str, Any] = response  # pyright: ignore[reportUnknownVariableType]
     if result.get("isError") or result.get("is_error") or result.get("interrupted") or result.get("session_id"):
         return False
     if "exit_code" in result:
@@ -136,7 +143,7 @@ def _succeeded(response: object) -> bool:
         return _succeeded(result.get("text"))
     content = result.get("content")
     if isinstance(content, list):
-        blocks = cast("list[object]", content)
+        blocks: list[object] = content  # pyright: ignore[reportUnknownVariableType]
         return bool(blocks) and all(_succeeded(block) for block in blocks)
     return "stdout" in result and result.get("interrupted") is False
 

@@ -41,6 +41,9 @@
     "tests/gates/test_first_read.py::test_registry_identity_is_a_member",
     "tests/hooks/test_first_read_conditions.py::test_failed_status_cannot_be_overridden_by_stdout",
     "tests/hooks/test_first_read_conditions.py::test_standalone_start_clears_old_membership",
-    "tests/gates/test_first_read_executor.py::test_registry_member_reaches_shell_gate"
+    "tests/gates/test_first_read_executor.py::test_registry_member_reaches_shell_gate",
+    "tests/gates/test_first_read.py::test_quick_seat_opening_prompt_uses_the_launcher_safe_name",
+    "tests/gates/test_first_read.py::test_decision_uses_the_given_identity",
+    "tests/hooks/test_first_read_conditions.py::test_reset_without_existing_files_leaves_only_membership"
   ]
 }
