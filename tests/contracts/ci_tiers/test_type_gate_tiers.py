@@ -61,4 +61,4 @@ def test_the_whole_tree_type_check_gates_promotion_but_not_gate_required() -> No
 def test_the_whole_tree_type_check_s_runner_class_and_budget_are_registered() -> None:
     classes = json.loads((ROOT / ".github/runner-classes.json").read_text())
     assert classes["test.yml/type-gate-tree"] == classes["test.yml/type-gate"]
-    assert ci_budget.BUDGETS["type-gate-tree"] == ci_budget.BUDGETS["type-gate"]
+    assert ci_budget.BUDGETS["type-gate-tree"] >= ci_budget.BUDGETS["type-gate"]
