@@ -278,6 +278,15 @@ def write(head: Path) -> None:
             record.write_text(text)
 
 
+def _growth(base: dict[str, int], head: dict[str, int], touched: set[str] | None) -> list[str]:
+    """Return every file whose errors grew against the base, on every file when touched is None."""
+    return [
+        f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
+        for path, count in head.items()
+        if count > base.get(path, 0) and (touched is None or path in touched)
+    ]
+
+
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
@@ -290,11 +299,7 @@ def grade(
     baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
     count the base recorded until a change to it, or a baseline refresh from the gate's own measurement, rewrites it, so one merge order cannot turn every later head red.
     """
-    errors = [
-        f"{path} has {count} type errors, more than the {base.get(path, 0)} the base allows"
-        for path, count in head.items()
-        if count > base.get(path, 0) and (touched is None or path in touched)
-    ]
+    errors = _growth(base, head, touched)
     recorded = recorded or {}
     errors += [
         f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
@@ -317,14 +322,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--measured", type=Path)
     parser.add_argument("--write", action="store_true")
+    parser.add_argument("--tree", action="store_true")
     return parser
 
 
+def _report(head: dict[str, int], base: dict[str, int], errors: list[str]) -> int:
+    """Print the gate's summary line and every error, then return its exit code."""
+    print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
+    for error in errors:
+        print(f"::error::{error}")
+    return 1 if errors else 0
+
+
+def _grade_tree(head: Path) -> int:
+    """Measure every graded source of the whole tree and grade it against its own committed baseline.
+
+    A tree with no committed baseline allows no error in any file: every path defaults to zero allowed, so any
+    measured error is growth.
+    """
+    base = load(head) or {}
+    counts = measure(head)
+    return _report(counts, base, _growth(base, counts, None))
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Grade the head against the base, or record the head's baseline with --write."""
+    """Grade the head against the base, the whole tree with --tree, or record the head's baseline with --write."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not (args.write or args.base):
+    if not (args.write or args.tree or args.base):
         parser.error("grading needs --base")
     if (version := _basedpyright_version()) != BASEDPYRIGHT_VERSION:
         print(f"::error::The type gate needs basedpyright {BASEDPYRIGHT_VERSION}, found {version or 'none'}.")
@@ -336,6 +361,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.write:
             write(args.head)
             return 0
+        if args.tree:
+            return _grade_tree(args.head)
         recorded = load(args.head)
         base = load(args.base)
         touched = checked = None
@@ -354,10 +381,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::notice::The base carries no {BASELINE}; this head introduces it.")
         base = recorded or {}
     errors = grade(base, head, recorded, touched)
-    print(f"{sum(head.values())} type errors in {len(head)} files, {sum(base.values())} allowed, {len(errors)} errors")
-    for error in errors:
-        print(f"::error::{error}")
-    return 1 if errors else 0
+    return _report(head, base, errors)
 
 
 if __name__ == "__main__":
