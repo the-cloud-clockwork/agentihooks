@@ -496,6 +496,7 @@ EARLIER = "# Earlier\n\n\n<!-- slice: one -->\nStep\n"
 EARLIER_URL = "http://127.0.0.1:8765/artifacts/s/f0"
 OWN = "# Plan for task a\n<!-- slice: own -->\n## Own\n"
 OWN_URL = "http://127.0.0.1:8765/artifacts/s/f2"
+ISSUE_URL = "https://github.com/acme/app/issues/7"
 PLANNED = {"id": "p1", "plan_url": SLICED_URL, "plan_ref": {"artifact": SLICED_URL, "lines": "1-3"}}
 STORED = [{"plan": True, "file": {"id": name}} for name in ("f0", "f1", "f2")]
 
@@ -518,16 +519,16 @@ def test_a_task_linked_to_an_earlier_phase_plan_still_takes_its_lines_from_the_p
 
 
 @pytest.mark.feature("enhance-publish-keeps-phase-plan")
+@pytest.mark.parametrize("link", [ISSUE_URL, OWN_URL])
 def test_a_planned_phase_grades_an_enhanced_task_by_the_plan_published_for_it(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, link: str
 ) -> None:
     from scripts.swarm_ledger import plan_ranges
 
     monkeypatch.setattr(ledger_artifacts, "read", read_plans)
-    issue = "https://github.com/acme/app/issues/7"
-    task = {"id": "a", "phase": "p1", "plan_url": issue, "plan_slice": "own", "plan_lines": "2-3"}
-    plans = [{"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": issue, "task": "a"}]
-    doc = {"phases": [PLANNED], "plans": plans, "artifacts": STORED, "tasks": [task]}
+    task = {"id": "a", "phase": "p1", "plan_url": link, "plan_slice": "own", "plan_lines": "2-3"}
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": ISSUE_URL, "task": "a"}
+    doc = {"phases": [PLANNED], "plans": [plan], "artifacts": STORED, "tasks": [task]}
     assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a"]) == []
 
 

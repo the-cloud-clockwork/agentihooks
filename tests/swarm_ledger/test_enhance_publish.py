@@ -1,6 +1,7 @@
-"""An enhancement planner's publish into a phase that already holds a plan, driven through the live ledger API server."""
+"""An enhancement planner's publish into its target's phase, driven through the live ledger API server."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,24 +14,32 @@ authority_live = test_api_v1.authority_live
 live = test_api_v1.live
 
 PLANNER = "planner@323133-0259"
-BASE = "# Plan\n<!-- slice: one -->\n## One\nFirst step\n<!-- slice: two -->\n## Two\nSecond step\n"
+BASE = (
+    "# Plan\n<!-- slice: one -->\n## One\nFirst step\n<!-- slice: two -->\n## Two\nSecond step\n"
+    "<!-- slice: three -->\n## Three\nThin step\n"
+)
 SECTION = "# Plan for task t3\n<!-- slice: t3-plan -->\n## Enhance task t3\nScope of the thin task\n"
+SIBLINGS = (
+    ("t1", "one", "Build the login form"),
+    ("t2", "two", "Ship the session store"),
+    ("t3", "three", "Thin task"),
+)
 SEED = [
     {"op": "join", "id": "enhance-master-join", "by": "boss", "role": "orchestrator"},
     {"op": "join", "id": "enhance-planner-join", "by": PLANNER},
 ]
-ROWS = [
-    {"op": "task_update", "id": "enhance-done-seed", "by": "swarm", "item": "tasks/t1", "fields": {"state": "done"}},
-    {
-        "op": "task_add",
-        "id": "enhance-target-seed",
-        "by": "swarm",
-        "task": "t3",
-        "title": "Thin task",
-        "lane": "eng",
-        "phase": "p1",
-        "description": "Thin.",
-    },
+TARGET = {
+    "op": "task_add",
+    "id": "enhance-target-seed",
+    "by": "swarm",
+    "task": "t3",
+    "title": "Thin task",
+    "lane": "eng",
+    "phase": "p1",
+    "description": "Thin.",
+}
+DONE = {"op": "task_update", "id": "enhance-done-seed", "by": "swarm", "item": "tasks/t1", "fields": {"state": "done"}}
+PLAN_TASK = [
     {
         "op": "task_add",
         "id": "enhance-plan-seed",
@@ -68,11 +77,8 @@ def held(ledger: Any) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[s
     )
 
 
-@pytest.mark.feature("enhance-publish-keeps-phase-plan")
-def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_sibling_slices(
-    live: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from scripts.swarm_ledger import ledger_artifacts, ledger_core, plan_read
+def prepared(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Any, Callable[[list[str]], Any], Path]:
+    from scripts.swarm_ledger import ledger_artifacts, ledger_core
     from scripts.swarm_ledger.api.client import ResourceClient
     from tests.swarm_ledger.test_ledger_authority import core, ledger
 
@@ -90,23 +96,34 @@ def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_si
     )
     for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
         monkeypatch.delenv(name, raising=False)
-    parse = ledger.build_parser().parse_args
     assert [client.mutate(SLUG, [op]).get("rejected") for op in SEED] == [[], []]
-    base, section = tmp_path / "plan.md", tmp_path / "enhance.md"
-    base.write_text(BASE, encoding="utf-8")
+    section = tmp_path / "enhance.md"
     section.write_text(SECTION, encoding="utf-8")
+    return ledger, client, ledger.build_parser().parse_args, section
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_sibling_slices(
+    live: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm_ledger import plan_read
+
+    ledger, client, parse, section = prepared(monkeypatch, tmp_path)
+    base = tmp_path / "plan.md"
+    base.write_text(BASE, encoding="utf-8")
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", "boss", "publish-plan", str(base), "--phase", "p1"]))
-    for task, anchor in (("t1", "one"), ("t2", "two")):
-        add = ["task", "add", task, f"Step {anchor}", "--lane", "eng", "--phase", "p1", "--plan-slice", anchor]
+    for task, anchor, title in SIBLINGS:
+        add = ["task", "add", task, title, "--lane", "eng", "--phase", "p1", "--plan-slice", anchor]
         ledger.cmd_task(parse(["--slug", SLUG, "--as", "boss", *add]))
-    assert [client.mutate(SLUG, [op]).get("rejected") for op in ROWS] == [[], [], [], []]
+    assert [client.mutate(SLUG, [op]).get("rejected") for op in (DONE, *PLAN_TASK)] == [[], [], []]
     before = held(ledger)
     capsys.readouterr()
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
     printed = json.loads(capsys.readouterr().out)
     assert held(ledger) == before
     target = item(ledger, "tasks/t3")
-    assert {key: target.get(key) for key in ("plan_url", "plan_slice", "plan_lines")} == {
+    assert {key: target.get(key) for key in ("slice", "plan_url", "plan_slice", "plan_lines")} == {
+        "slice": "",
         "plan_url": printed["plan_url"],
         "plan_slice": "t3-plan",
         "plan_lines": "2-4",
@@ -117,3 +134,15 @@ def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_si
     ledger.cmd_task(parse(["--slug", SLUG, "--as", PLANNER, *point]))
     assert item(ledger, "tasks/t3")["plan_lines"] == "2-4"
     assert held(ledger) == before
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_an_enhancement_publish_into_a_phase_without_a_plan_still_links_the_phase(
+    live: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger, client, parse, section = prepared(monkeypatch, tmp_path)
+    assert [client.mutate(SLUG, [op]).get("rejected") for op in (TARGET, *PLAN_TASK)] == [[], [], []]
+    capsys.readouterr()
+    ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["phases"], item(ledger, "phases/p1")["plan_url"]) == (["p1"], printed["plan_url"])
