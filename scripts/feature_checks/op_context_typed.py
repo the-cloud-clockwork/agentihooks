@@ -215,7 +215,7 @@ def main(modules: Iterable[ModuleType] | None = None, context: object = None) ->
         from scripts.swarm_ledger import ledger_core
 
         stamps: dict[str, dict[str, Any]] = {}
-        modules = op_modules(ledger_core)
+        modules = op_modules()
         pinned: OpContext = ledger_core.Context({"rev": 0, "stamps": stamps}, 0)
         context = pinned
         core_path = Path(str(ledger_core.__file__)).resolve()
