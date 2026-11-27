@@ -81,10 +81,10 @@ def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_
     assert found is not None
     assert shadow_report.mismatch(found) is True
     assert shadow_report.tally([found]) == shadow_report.Tally(1, 1, 1, 1)
-    assert shadow_report.holds(shadow_report.tally([found]), shadow_report.rule(1)) is False
+    assert shadow_report.holds(shadow_report.tally([found]), shadow_report.rule(1, "merge_group")) is False
     agreed = graded(HEAD, "pass", "pass")
     assert shadow_report.mismatch(agreed) is False
-    assert shadow_report.holds(shadow_report.tally([agreed]), shadow_report.rule(1)) is True
+    assert shadow_report.holds(shadow_report.tally([agreed]), shadow_report.rule(1, "merge_group")) is True
     lab_failed = shadow_report.head(HEAD, [job("lint"), lab("lint", "failure", 4)], "lint", LINT)
     assert lab_failed == graded(HEAD, "pass", "fail", 10, 4)
     assert lab_failed is not None
@@ -109,16 +109,16 @@ def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     missing = graded(HEAD, "fail", None)
     assert shadow_report.mismatch(missing) is False
     assert shadow_report.first(missing) is False
-    assert shadow_report.rule(50) == shadow_report.Rule(50, 48, 45)
-    assert shadow_report.rule(10) == shadow_report.Rule(10, 10, 9)
-    assert shadow_report.rule(1) == shadow_report.Rule(1, 1, 1)
-    assert shadow_report.rule(5) == shadow_report.Rule(5, 5, 5)
+    assert shadow_report.rule(50, "merge_group") == shadow_report.Rule(50, 48, 45)
+    assert shadow_report.rule(10, "merge_group") == shadow_report.Rule(10, 10, 9)
+    assert shadow_report.rule(1, "merge_group") == shadow_report.Rule(1, 1, 1)
+    assert shadow_report.rule(5, "merge_group") == shadow_report.Rule(5, 5, 5)
     two_missing = [graded(HEAD, "pass", None)] * 2 + [graded(HEAD, "pass", "pass")] * 48
     assert shadow_report.tally(two_missing) == shadow_report.Tally(50, 48, 0, 48)
-    assert shadow_report.holds(shadow_report.tally(two_missing), shadow_report.rule(50)) is True
+    assert shadow_report.holds(shadow_report.tally(two_missing), shadow_report.rule(50, "merge_group")) is True
     three_missing = [graded(HEAD, "pass", None)] * 3 + [graded(HEAD, "pass", "pass")] * 47
-    assert shadow_report.holds(shadow_report.tally(three_missing), shadow_report.rule(50)) is False
-    assert shadow_report.holds(shadow_report.tally(two_missing[1:]), shadow_report.rule(50)) is False
+    assert shadow_report.holds(shadow_report.tally(three_missing), shadow_report.rule(50, "merge_group")) is False
+    assert shadow_report.holds(shadow_report.tally(two_missing[1:]), shadow_report.rule(50, "merge_group")) is False
 
 
 def listed(gate: str, conclusion: str, minute: int, *, run_id: int = 2, slug: str = APP) -> dict[str, Any]:
@@ -205,7 +205,7 @@ def test_a_lab_verdict_completing_after_the_actions_jobs_is_late() -> None:
     assert shadow_report.first(late) is False
     assert shadow_report.first(graded(HEAD, "pass", "pass", 12, 12)) is False
     assert shadow_report.first(graded(HEAD, "pass", "pass", 12, 11)) is True
-    window = shadow_report.rule(50)
+    window = shadow_report.rule(50, "merge_group")
     on_time = [graded(HEAD, "pass", "pass", 12, 11)] * 45 + [graded(HEAD, "pass", "pass", 12, 13)] * 5
     assert shadow_report.tally(on_time) == shadow_report.Tally(50, 50, 0, 45)
     assert shadow_report.holds(shadow_report.tally(on_time), window) is True
@@ -241,6 +241,7 @@ def test_a_lab_verdict_job_whose_check_run_names_no_start_leaves_the_head_readab
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lab_verdict_is_inside_the_wait_up_to_its_last_second() -> None:
     last = at(0) + timedelta(seconds=ci_lab_verdict.WAIT_S)
+    assert last == at(20)
     assert shadow_report.inside(waited(HEAD, last, at(0))) is True
     assert shadow_report.inside(waited(HEAD, last + timedelta(seconds=1), at(0))) is False
     assert shadow_report.inside(waited(HEAD, at(0) - timedelta(seconds=1), at(0))) is True
@@ -254,7 +255,7 @@ def test_the_pull_request_rule_asks_for_lab_verdicts_inside_the_wait_on_48_of_ev
     assert shadow_report.rule(50, "pull_request") == shadow_report.Rule(50, 48, 45, 48)
     assert shadow_report.rule(10, "pull_request") == shadow_report.Rule(10, 10, 9, 10)
     assert shadow_report.rule(25, "pull_request") == shadow_report.Rule(25, 24, 23, 24)
-    assert shadow_report.rule(50, "merge_group") == shadow_report.rule(50) == shadow_report.Rule(50, 48, 45)
+    assert shadow_report.rule(50, "merge_group") == shadow_report.Rule(50, 48, 45)
     window = shadow_report.rule(50, "pull_request")
     on_time, late = waited(HEAD, at(20), at(0)), waited(HEAD, at(21), at(0))
     enough = [on_time] * 48 + [late] * 2
@@ -292,8 +293,8 @@ def test_the_table_prints_a_row_per_head_and_the_rule_counts() -> None:
         graded(OTHER, "fail", "pass", 12, 13),
         graded(THIRD, "pass", None),
     ]
-    assert shadow_report.render("tests", "pull_request", heads, shadow_report.rule(3)) == (
-        "gate tests event pull_request\n"
+    assert shadow_report.render("tests", "merge_group", heads, shadow_report.rule(3, "merge_group")) == (
+        "gate tests event merge_group\n"
         "head          actions  lab      order  agreement\n"
         "aaaaaaaaaaaa  pass     pass     first  match\n"
         "bbbbbbbbbbbb  fail     pass     late   mismatch\n"
@@ -304,10 +305,10 @@ def test_the_table_prints_a_row_per_head_and_the_rule_counts() -> None:
         "lab verdict first 1 of at least 3\n"
         "rule fails\n"
     )
-    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1)).splitlines()[0] == (
-        "gate lint event merge_group"
-    )
-    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1)).endswith(
+    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1, "merge_group")).splitlines()[
+        0
+    ] == ("gate lint event merge_group")
+    assert shadow_report.render("lint", "merge_group", heads[:1], shadow_report.rule(1, "merge_group")).endswith(
         "lab verdict first 1 of at least 1\nrule holds\n"
     )
 
@@ -336,7 +337,7 @@ def test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_second
         "lab verdict inside the wait 2 of at least 5\n"
         "rule fails\n"
     )
-    unwaited = shadow_report.render("lint", "merge_group", heads, shadow_report.rule(5))
+    unwaited = shadow_report.render("lint", "merge_group", heads, shadow_report.rule(5, "merge_group"))
     assert unwaited.splitlines()[1:3] == [
         "head          actions  lab      order  agreement",
         "aaaaaaaaaaaa  pass     pass     first  match",
@@ -347,7 +348,7 @@ def test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_second
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_the_merge_group_report_keeps_three_counts_and_five_columns() -> None:
     heads = [graded(HEAD, "pass", "pass", 12, 11), graded(OTHER, "pass", None)]
-    window = shadow_report.rule(2)
+    window = shadow_report.rule(2, "merge_group")
     assert window == shadow_report.Rule(2, 2, 2)
     assert shadow_report.render("lint", "merge_group", heads, window) == (
         "gate lint event merge_group\n"

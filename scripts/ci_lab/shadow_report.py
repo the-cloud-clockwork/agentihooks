@@ -7,7 +7,7 @@ whose jobs of the gate were cancelled, still run or never graded leaves the wind
 a lost runner counts by its rerun. It prints one row per head and the counts, and exits 0 only when the window holds N
 heads with no mismatch, a lab verdict on 48 and a lab verdict completed first on 45 of every 50, rounded up, and 1
 otherwise. For the pull request event it also asks for a lab verdict on 48 of every 50 inside the wait of the head's
-lab-verdict job, counted from the start of that job, and each row ends with the seconds the lab verdict took.
+lab-verdict job, counted from the start of that job, and a row that holds both ends with the seconds between them.
 """
 
 import argparse
@@ -47,9 +47,7 @@ __all__ = [
     "render",
     "rerun",
     "rule",
-    "started",
     "tally",
-    "waited",
 ]
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
@@ -65,7 +63,7 @@ CANCELLED = "cancelled"
 MISSING = "missing"
 JOB = "lab-verdict"
 COLUMNS = "{:<12}  {:<7}  {:<7}  {:<5}  {}"
-TIMED = "{:<12}  {:<7}  {:<7}  {:<5}  {:<9}  {}"
+SECONDS = "{:<48}  {}"
 PER_PAGE = 100
 PAGES = 10
 TIMEOUT_S = 30.0
@@ -122,7 +120,7 @@ class Tally:
     inside: int = 0
 
 
-def rule(heads: int, event: str = MERGE_GROUP) -> Rule:
+def rule(heads: int, event: str) -> Rule:
     """Return the rule for a window of heads: lab verdicts present on 48 and first on 45 of every 50, rounded up, and
     for the pull request event, whose lab-verdict job waits for the lab, also inside that wait on 48."""
     inside = math.ceil(heads * INSIDE / HEADS) if event == PULL_REQUEST else None
@@ -232,35 +230,37 @@ def holds(counted: Tally, window: Rule) -> bool:
     return full and timely and counted.present >= window.present and counted.first >= window.first
 
 
-def line(found: Head, timed: bool = False) -> str:
-    """Return one head's row of the table; a timed row ends with the seconds from the start of the head's lab-verdict
-    job to its lab verdict, or with nothing when the head lacks either."""
+def line(found: Head) -> str:
+    """Return one head's row of the table."""
     if found.lab is None:
         return COLUMNS.format(found.sha[:12], found.actions.outcome, MISSING, "", "").rstrip()
     order = "first" if first(found) else "late"
     agreement = "mismatch" if mismatch(found) else "match"
-    if not timed:
-        return COLUMNS.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement)
+    return COLUMNS.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement)
+
+
+def timed(found: Head) -> str:
+    """Return one head's row ending with the whole seconds from the start of its lab-verdict job to its lab verdict,
+    or its plain row when the head lacks either."""
     taken = waited(found)
-    seconds = "" if taken is None else str(round(taken.total_seconds()))
-    return TIMED.format(found.sha[:12], found.actions.outcome, found.lab.outcome, order, agreement, seconds).rstrip()
+    return line(found) if taken is None else SECONDS.format(line(found), taken // timedelta(seconds=1))
 
 
 def render(gate: str, event: str, heads: Sequence[Head], window: Rule) -> str:
     """Return the report: the gate and event, one row per head, the counts against the rule and its verdict; a rule
     that asks for lab verdicts inside the wait adds the seconds column and that count."""
     counted = tally(heads)
-    timed = window.inside is not None
-    names = ("head", "actions", "lab", "order", "agreement")
+    names = COLUMNS.format("head", "actions", "lab", "order", "agreement")
+    waits = window.inside is not None
     lines = [
         f"gate {gate} event {event}",
-        TIMED.format(*names, "seconds") if timed else COLUMNS.format(*names),
-        *(line(found, timed) for found in heads),
+        SECONDS.format(names, "seconds") if waits else names,
+        *map(timed if waits else line, heads),
         f"heads {counted.heads} of {window.heads}",
         f"lab verdict present {counted.present} of at least {window.present}",
         f"mismatches {counted.mismatches} of at most 0",
         f"lab verdict first {counted.first} of at least {window.first}",
-        *([f"lab verdict inside the wait {counted.inside} of at least {window.inside}"] if timed else []),
+        *([f"lab verdict inside the wait {counted.inside} of at least {window.inside}"] if waits else []),
         "rule holds" if holds(counted, window) else "rule fails",
     ]
     return "".join(f"{text}\n" for text in lines)

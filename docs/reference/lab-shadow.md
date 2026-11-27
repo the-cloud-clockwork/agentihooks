@@ -214,7 +214,7 @@ with exit code 1. An argument error exits 2.
 
 A pull request report adds a `seconds` column, the seconds from the start of the head's
 `lab-verdict` job to its lab verdict, empty when the head lacks either, and the line
-`lab verdict inside the wait <n> of at least <m>` after the first count. A merge group report
+`lab verdict inside the wait <n> of at least <m>` after the `lab verdict first` line. A merge group report
 keeps the five columns and three counts above.
 
 ### Reading a table with lab verdicts
