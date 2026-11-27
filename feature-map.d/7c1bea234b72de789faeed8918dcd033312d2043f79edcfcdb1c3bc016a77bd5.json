@@ -1,0 +1,11 @@
+{
+  "id": "writer-lock-scenario-offline-install",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-writer-lock-offline-install",
+  "behaviour": "Every unit dependency install, the writer lock scenario job included, first installs offline from the runner wheelhouse and ends the step on a hit, and only on a miss installs from the package index, always through the package index retry wrapper.",
+  "seam": "the Install dependencies step of the test workflow unit, unit selected, test count and split jobs, the events smoke job and the writer lock scenario job",
+  "tests": [
+    "tests/test_ci_pypi_retry.py::test_every_unit_dependency_install_runs_uv_through_the_retry",
+    "tests/test_ci_pypi_retry.py::test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi"
+  ]
+}

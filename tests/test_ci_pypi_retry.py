@@ -291,13 +291,15 @@ def _install_steps() -> dict[str, dict[str, Any]]:
     jobs = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]
     steps = {name: jobs[name]["steps"] for name in ("unit", "unit-selected", "test-count", "split")}
     steps["events-smoke"] = yaml.safe_load((workflows / "events-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    steps["writer-lock"] = yaml.safe_load((workflows / "writer-lock.yml").read_text())["jobs"]["scenario"]["steps"]
     return {
         name: next(step for step in job_steps if step.get("name") == "Install dependencies")
         for name, job_steps in steps.items()
     }
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+@pytest.mark.feature("writer-lock-scenario-offline-install")
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke", "writer-lock"])
 def test_every_unit_dependency_install_runs_uv_through_the_retry(job: str) -> None:
     run = _install_steps()[job]["run"]
     online = [line.strip() for line in run.splitlines() if "uv pip install" in line and "--offline" not in line]
@@ -306,7 +308,8 @@ def test_every_unit_dependency_install_runs_uv_through_the_retry(job: str) -> No
         assert install.startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+@pytest.mark.feature("writer-lock-scenario-offline-install")
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke", "writer-lock"])
 def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job: str) -> None:
     lines = [line.strip() for line in _install_steps()[job]["run"].splitlines()]
     offline = next(i for i, line in enumerate(lines) if "--offline" in line)
