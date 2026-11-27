@@ -122,6 +122,29 @@ def test_a_context_that_lacks_one_member_of_the_protocol_fails(dropped: str) -> 
 
 
 @pytest.mark.feature("ledger-op-context-typed")
+def test_takers_keeps_two_functions_of_one_name_in_the_order_the_module_holds_them() -> None:
+    ops = module("ledger_ops", first=taking("apply", OpContext), second=taking("apply", Any))
+    assert check.takers(ops) == [("apply", OpContext), ("apply", Any)]
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_main_builds_the_concrete_context_of_a_blank_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[Any] = []
+
+    def recording_lines(modules: object, context: object) -> list[str]:
+        captured.append(context)
+        return [HELD]
+
+    monkeypatch.setattr(check, "lines", recording_lines)
+    assert check.main() == 0
+    built = captured[0]
+    assert isinstance(built, core.Context)
+    assert built.rev == 1
+    assert built.at == 0
+    assert built.stamps == {}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
 def test_the_check_prints_every_line_and_fails_on_one_fault(capsys: pytest.CaptureFixture[str]) -> None:
     ops = [module("ledger_a", apply=taking("apply", OpContext)), module("ledger_b", apply=taking("apply", Any))]
     assert check.main(ops, context()) == 1
