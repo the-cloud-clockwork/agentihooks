@@ -1,0 +1,23 @@
+rules:
+  - id: feature-ledger-alert-context-not-a-stand-in
+    languages: [python]
+    severity: ERROR
+    message: >-
+      ledger_alerts.raise_warning and ledger_alerts.new_alert read a context's revision and its time of one sync.
+      A SimpleNamespace stand-in built just to carry those two fields, assigned first or built inline at the call,
+      skips every other member a real context carries. Call ledger_alerts.warning_raised or ledger_alerts.alert_row
+      with the revision and the time directly, or pass the real context of the sync.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $NS = SimpleNamespace(...)
+              ...
+              ledger_alerts.$FUNC($DOC, $NS, ...)
+          - pattern: ledger_alerts.$FUNC($DOC, SimpleNamespace(...), ...)
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^(raise_warning|new_alert)$
+    paths:
+      include:
+        - /scripts/
+        - '*.test.py'
