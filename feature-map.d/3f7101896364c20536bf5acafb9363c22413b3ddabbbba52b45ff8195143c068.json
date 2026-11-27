@@ -1,0 +1,15 @@
+{
+  "id": "merge-queue-priority-failure-keeps-entry",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-priority-report",
+  "behaviour": "When GitHub accepts a new merge queue entry and the automatic priority step then fails, for example on a refused ledger hierarchy read, the merge queue command still prints the queue outcome with the error in a separate priority_error field and exits zero; a refused enqueue still fails and never runs the priority step.",
+  "seam": "scripts.swarm.merge_queue.operate queue action with a priority callable, and scripts.swarm.cli.main on swarm merge queue",
+  "tests": [
+    "tests/swarm/test_queue_entry_priority.py::test_an_accepted_entry_reports_a_refused_hierarchy_read_as_a_priority_error",
+    "tests/swarm/test_queue_entry_priority.py::test_cli_queue_prints_the_accepted_entry_and_exits_zero_when_its_priority_fails",
+    "tests/swarm/test_queue_entry_priority.py::test_a_refused_enqueue_still_fails_and_never_runs_its_priority"
+  ],
+  "rules": [
+    "merge-queue-priority-unguarded"
+  ]
+}

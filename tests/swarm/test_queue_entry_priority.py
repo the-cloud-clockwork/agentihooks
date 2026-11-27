@@ -1,10 +1,15 @@
 import argparse
+import json
+import subprocess
+from email.message import Message
 from types import SimpleNamespace
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
 from scripts.swarm import cli, merge_queue, queue_priority, ready
+from scripts.swarm.store import SwarmError
 from tests.swarm.test_merge_queue_priority import URL
 from tests.swarm.test_queue_priority import priority
 
@@ -205,3 +210,58 @@ def test_watcher_queue_entry_supplies_automatic_priority(
     messages = ready._recover(run, row, found) if recovering else ready._queue(run, row, found)
     assert messages == [f"queued {URL} for task t9"]
     assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P9", "P2", "P3"]
+
+
+def refused_hierarchy(slug: str) -> list[dict[str, Any]]:
+    raise HTTPError(f"https://ledger/{slug}/hierarchy", 409, "Conflict", Message(), None)
+
+
+@pytest.mark.feature("merge-queue-priority-failure-keeps-entry")
+def test_an_accepted_entry_reports_a_refused_hierarchy_read_as_a_priority_error(priority: SimpleNamespace) -> None:
+    ledger = ledger_for("normal", ["phases/p"])
+    ledger.hierarchy = refused_hierarchy
+    result = merge_queue.operate(
+        "queue",
+        URL,
+        run=priority.queue.run,
+        priority=lambda: queue_priority.automatic(priority.store, "sw", URL, ledger),
+    )
+    assert result["queued"] is True
+    assert result["priority_error"] == "HTTP Error 409: Conflict"
+    assert "priority" not in result
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P2", "P3", "P9"]
+
+
+@pytest.mark.feature("merge-queue-priority-failure-keeps-entry")
+def test_cli_queue_prints_the_accepted_entry_and_exits_zero_when_its_priority_fails(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger = ledger_for("normal", ["phases/p"])
+    ledger.hierarchy = refused_hierarchy
+    monkeypatch.setattr(cli, "_hotfix_master", lambda *args: True)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    accepted = merge_queue.operate
+
+    def operate(action: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        return accepted(action, url, run=priority.queue.run, priority=kwargs["priority"])
+
+    monkeypatch.setattr(merge_queue, "operate", operate)
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    printed = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert printed["queued"] is True
+    assert printed["priority_error"] == "HTTP Error 409: Conflict"
+
+
+@pytest.mark.feature("merge-queue-priority-failure-keeps-entry")
+def test_a_refused_enqueue_still_fails_and_never_runs_its_priority(priority: SimpleNamespace) -> None:
+    def refusing(command: list[str], **kwargs: Any) -> Any:
+        if command[2] == "graphql" and command[4] == f"query={merge_queue.QUEUE}":
+            return subprocess.CompletedProcess(command, 1, "", "GraphQL: Pull request is not mergeable\n")
+        return priority.queue.run(command, **kwargs)
+
+    callbacks: list[str] = []
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, run=refusing, priority=lambda: callbacks.append(URL))
+    assert str(caught.value) == "GraphQL: Pull request is not mergeable"
+    assert callbacks == []
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P2", "P3"]
