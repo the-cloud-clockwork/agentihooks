@@ -153,8 +153,19 @@ def observe(store: RedisStore, slug: str, live: set[str]) -> None:
         _change(store, slug, row["id"], change)
 
 
-def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -> dict:
-    def change(row):
+def normalized_next(slug: str, agent: AgentRecord, action: str) -> str:
+    if agent.lane == "master" and agent.harness == "codex":
+        from scripts.profiles.codex_master import next_action
+        from scripts.swarm import capabilities
+
+        return next_action(action, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
+    return action
+
+
+def confirm(
+    store: RedisStore, slug: str, transfer: str, agent: AgentRecord, next_action: str, at: int
+) -> dict[str, Any]:
+    def change(row: dict[str, Any]) -> None:
         occupancy = store.seats.occupant(row["seat"])
         if (
             row["successor"] != agent.name
@@ -162,12 +173,7 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
             or occupancy.generation != row["generation"]
         ):
             raise SwarmError("Only the current successor occupant can confirm this handoff")
-        expected = row["next"]
-        if agent.lane == "master" and agent.harness == "codex":
-            from scripts.profiles.codex_master import next_action as codex_next
-            from scripts.swarm import capabilities
-
-            expected = codex_next(expected, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
+        expected = normalized_next(slug, agent, row["next"])
         if not expected or next_action.strip() != expected:
             raise SwarmError("Confirm the first Next action exactly as written in the handoff")
         row["continuity"] = {"state": "confirmed", "at": at, "by": agent.name, "next": next_action.strip()}
@@ -175,11 +181,19 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
     return _change(store, slug, transfer, change, agent.seat)
 
 
-def priming(slug: str, transfer: dict | None) -> str:
+def priming(slug: str, transfer: dict[str, Any] | None, *, seated: bool = True) -> str:
     if not transfer or not transfer["handoff"]:
         return ""
-    return (
-        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
-        f"agentihooks swarm {slug} confirm-handoff {transfer['id']} --next "
-        f"{shlex.quote(transfer['next'])}\n{transfer['handoff']}"
+    instruction = (
+        "After reading the handoff in your seat brief, confirm you read it and will take its first Next action by running "
+        if seated
+        else "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
     )
+    text = (
+        instruction
+        + f"agentihooks swarm {slug} confirm-handoff {transfer['id']} --next "
+        + shlex.quote(transfer["next"])
+    )
+    if not seated:
+        text += f"\n{transfer['handoff']}"
+    return text
