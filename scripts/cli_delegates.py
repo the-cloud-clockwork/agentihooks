@@ -30,6 +30,7 @@ DELEGATED_CLIS = {
     "forge": "scripts.forge.cli",
     "safety-nudge": "scripts.swarm.safety_nudge",
     "quick": "scripts.quick.cli",
+    "seat": "scripts.seat_brief",
     "ci-lab-scheduler": "scripts.ci_lab.contract:scheduler",
     "ci-lab-worker": "scripts.ci_lab.contract:worker",
     "ci": "scripts.ci_lab.evidence:ci",

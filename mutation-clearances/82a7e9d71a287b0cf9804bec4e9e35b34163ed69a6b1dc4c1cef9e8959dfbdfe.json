@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.xǁSchedulerǁ__init__:39d8f664e7e9e0a6acdb369a6bdd906602f28a43914b8f6014b076238b4e2339": {
+    "reader": "standards_reader",
+    "reason": "the first read is if not self._undrained, which replaces None or an empty list with queue.undrained() before any slice or delete."
+  }
+}

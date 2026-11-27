@@ -94,8 +94,9 @@ positive. Shed fractions and `auditShare` range from 0 to 1; `moduleSweeps` is a
 the daily budget spent; reaching it sheds that class and every less urgent class. In this
 example, backfill is shed at half the daily budget remaining, promotion at a quarter and queue
 at a tenth; each stays shed as the remaining budget falls further.
-Hotfix and pull request work remain admitted. The budget resets on the next UTC day; work
-already queued still runs. See [Scheduler loop](#scheduler-loop) for admission rules.
+Hotfix and pull request work remain admitted. The budget resets on the next UTC day. Until
+then the queued units of a shed class wait in the queue, and its running units finish. See
+[Scheduler loop](#scheduler-loop) for admission rules.
 
 Validate the mounted file without connecting to the service dependencies:
 
@@ -218,6 +219,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
+| `CI_LAB_SERVED_REPOSITORIES` | yes | no | Repository URLs the scheduler serves, separated by commas or white space; unset or empty, it serves the one repository `CI_LAB_REPOSITORY` names. Intake ignores a head of any other repository |
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset. Also the image the lab wants: a worker whose pod names a floating tag and runs another digest is answered `426` on its next lease and restarts in place, see [Worker executors](#worker-executors) |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
@@ -1565,7 +1567,8 @@ Each unit the killed worker held goes through these steps:
    [Configure the counts](#configure-the-counts)). The pass counts the job in
    `ci_lab_units_redelivered_total` and the service prints `reaped <job> pending`. A job that
    already spent its lost retry, after an earlier crash or loss, becomes `lost` instead: the pass
-   counts `ci_lab_units_lost_total`, prints `reaped <job> lost`, and the grade turns red.
+   counts `ci_lab_units_lost_total`, prints `reaped <job> lost`, and leaves the unit without a
+   verdict, which turns the grade neutral unless another of its units failed.
 3. The dead worker's lease token is refused. A heartbeat or completion that carries it answers
    `403` with `lease token refused`, so a late call from the old pod changes nothing.
 4. Another worker leases the requeued job, such as the pod the Deployment started in place of the
@@ -1730,7 +1733,7 @@ count fall after a floor change, has no recorded evidence on this page.
 | The Job fails with `cannot list resource "pods"` or `cannot delete resource "pods"` | The Role or RoleBinding is missing, or the Job ran before its sync wave applied them | `kubectl -n ci-lab get role,rolebinding ci-lab-chaos`; the Application's sync status |
 | Argo CD cannot apply the ValidatingAdmissionPolicy | The cluster serves no `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy | `kubectl api-resources --api-group=admissionregistration.k8s.io` lists `validatingadmissionpolicies` on Kubernetes 1.30 or newer |
 | `ci_lab_units_redelivered_total` stays flat after the kill | The lease has not expired yet, the scrape has not run since, or the worker held no lease | Wait two and a half minutes; then the `reaped` lines in the scheduler log |
-| `ci_lab_units_lost_total` rises and the grade is red | The killed unit had already spent its lost retry on an earlier crash or loss | `lab.retry.lost` in `delivery.yaml`; rerequest a check run of the head on GitHub to grade it again, as the [Scheduler loop](#scheduler-loop) describes |
+| `ci_lab_units_lost_total` rises and the grade is neutral | The killed unit had already spent its lost retry on an earlier crash or loss | `lab.retry.lost` in `delivery.yaml`; rerequest a check run of the head on GitHub to grade it again, as the [Scheduler loop](#scheduler-loop) describes |
 | A second worker dies after the drill | The finished Job was deleted by hand, and self heal created it again | Disable the drill by pull request; never delete the Job |
 | The CI node count stays after a lower floor | Wanted slots still ask for more workers, the 300 second window has not passed, or each node still runs a worker | `kubectl -n ci-lab get hpa keda-hpa-ci-lab-worker`; the worker pods with `-o wide`; the autoscaler status ConfigMap |
 
@@ -2519,24 +2522,38 @@ key; the builders are pure and read no file, clock or network.
    rest is held for the budget.
 5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
-   until the budget resets the next UTC day, though its units already in the queue still run. Backfill
+   until the budget resets the next UTC day. Its units already in the queue wait until then: a lease
+   poll stops at the first pending job of a shed class, since every job after it, one with no class
+   included, ranks at or past it. The units of a shed class already leased finish as usual. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
    already waiting in the queue. A newer head of the lane drops the older head's held units. Each
    unit is enqueued under the class of its grade, and workers lease the most urgent class first, in
    the order of `delivery.CLASSES` (hotfix, pull request, queue, promotion, backfill), and first in
    first out inside a class. A unit that a more urgent grade enqueues again while it is still pending
-   moves to that class and keeps its place there by its sequence number; a leased or finished job is
-   left alone. A job enqueued with no class, as every job enqueued before the classes ordered the
-   queue was, leases after every job that has one. A lease poll reads the pending order
+   moves to that class and keeps its place there by its sequence number; a leased job is left alone,
+   and so is a finished one that ended with a verdict, while a finished job that ended without a
+   verdict, lost, crashed or unable to run, is replaced by a fresh pending job with its attempts
+   reset, so a grade that needs the unit, a rerequest included, runs it again. A job enqueued with
+   no class, as every job enqueued before the classes ordered the queue was, leases after every job
+   that has one. A lease poll reads the pending order
    `queue.PAGE` (64) jobs at a time, so a poll that fills its free slots from the first page reads
    one page.
 6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
-   default); the next loss is `lost`.
+   default); the next loss is `lost`. A job that settles, `done` when its worker completes it or `lost`
+   when reaping gives up, keeps its job hash and its head's done set for `Settings.retention_ms`
+   (`queue.RETENTION_MS`, six hours) and then expires; a requeue or a retry clears the expiry. No
+   transition writes the old global done set `agentihooks-ci:queue:done` any more: each pass drains at
+   most `DRAINED_PER_PASS` (500) of the jobs it still names, giving each done or lost one the same
+   expiry, and stops reading it once a read finds it empty. The set is read whole once per drain round,
+   since the lab's Redis user may not pop or scan a set. If a grade has not collected a settled job
+   within the retention, its slot is marked `dropped`. That happens only when passes fail for longer
+   than the retention while the lease API keeps accepting completions.
 7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
    `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
    Otherwise a graded outcome with an uploaded report becomes a verdict in the
-   store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red. A lease
-   completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
+   store; `lost`, `crash` and `cannot_run` stay out of it: a gate whose units all passed except
+   those concludes neutral, and one with a failed unit concludes failure whatever else it lost.
+   A lease completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
@@ -2545,7 +2562,12 @@ key; the builders are pure and read no file, clock or network.
    first pass for every gate the base's `lab.authoritative` lists that it runs no unit of. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
-   scheduler advances the same check run instead of opening a second one. A grade of a head pushed
+   scheduler advances the same check run instead of opening a second one. A check run the grade
+   state keeps no id of is unknown to the poster, whatever the poster remembers: the scheduler has
+   it forget that head, check name and run name before the post. A grade started again under the
+   run name of a grade the scheduler forgot, as after a pull request is closed and reopened on the
+   same head and base, therefore opens new check runs, as a restarted scheduler does, and the
+   check runs of the forgotten grade keep their last status. A grade of a head pushed
    to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
    relay. A gate that the grader revision's `delivery.yaml` lists as authoritative for the grade's
    class posts as `lab/<gate>`, the check run the lab-verdict job waits for: `lab.authoritative`
@@ -2587,6 +2609,10 @@ state's `idle` list and gets its `skipped` check run on the first pass. The `lab
 reads `skipped` for it instead of failing the gate when its 20 minute wait ends. `Gate — Required`
 accepts `skipped` only for a gate it does not require on that head, so a lab that skips a gate the
 head requires keeps the pull request red.
+
+A `lab/<gate>` check the lab posted `neutral` lost a unit and holds no verdict for it. The
+`lab-verdict` job fails that gate like any other and prints `::error::The lab lost a unit of
+<check> and posted no verdict: rerequest the <check> check to grade it again.`
 
 A gate passes when every unit passed. The `required` conclusion is
 `scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over
@@ -2663,6 +2689,15 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
   to a grade ref, the close starts from the live grades of the closed head that name the lane,
   and the lane keeps naming the grade it names.
+- A new head of a repository the scheduler does not serve gets no grade. Before anything else, intake
+  compares the head's repository with the served set by owner and name, with no `.git` suffix and
+  case folded, and prints `ignored <head>: <repository> is not a served repository`: it holds no
+  waiting entry, checks no actor, resolves no plant base, expands nothing and posts no check. Work
+  already stored for such a repository is not swept: each held head gets one more start, and when
+  it cannot be expanded there the release step drops it and posts its failed required check on
+  its commit. The service serves the
+  repositories `CI_LAB_SERVED_REPOSITORIES` lists, or else the one `CI_LAB_REPOSITORY` names. The
+  trust list and the shadow recorder stay those of the repository `CI_LAB_REPOSITORY` names.
 - A push that named no branch gets no promotion grade. Intake holds no head of the promotion class
   that has no grade ref and whose lane is its own head, and prints `ignored <head>: a push that
   named no branch asks for no grade`. On its first pass a scheduler retires what is stored that
@@ -2704,7 +2739,8 @@ pull request closed while a newer head waits names the base of that waiting head
 grade of its older head, started against an earlier base, stays until it finishes or the
 scheduler restarts; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
-rerequested grade reuses the finished jobs of its own head.
+rerequested grade reuses the finished jobs of its own head that ended with a verdict, and reruns
+one that ended without one.
 
 ### Static units
 
@@ -2897,8 +2933,10 @@ reads `cannot expand <head> against <base>: <error>`, so the head still shows a 
 with no plan has no authoritative gates, so the check posts under the shadow name. A post of that
 check that the App token, GitHub or the network refuses is recorded as
 `cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
-keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
-GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
+keeps no grade, and the pass goes on. A head refused a second time in this pass, from another
+waiting entry under a different lane, finds its required check already completed and that is
+recorded instead of posted again, so the pass still goes on. A head pushed to a grade ref gets no
+check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
 check run; [Test units](#test-units) describes both. The scheduler service prints
@@ -2935,9 +2973,10 @@ keeps `refs/pull/<n>/head` on each pull request's last head, so the post marks a
 and holds no merge. That post is tried once, like the cannot expand post: a refusal by the App
 token, GitHub or the network ends the same action with
 `; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
-on. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
-failed `git ls-remote` raises like any other failed git command, so the head takes the
-[cannot expand](#a-head-that-cannot-expand) path.
+on. A head retired a second time in this pass the same way finds its required check already
+completed and that is recorded instead of posted again. A head pushed to a grade ref skips the
+reachability check, since the lab remote serves it. A failed `git ls-remote` raises like any
+other failed git command, so the head takes the [cannot expand](#a-head-that-cannot-expand) path.
 
 #### The worker reads the same workflows
 
@@ -2957,6 +2996,10 @@ under the unit key, so a reader of the check run alone sees which diagnostic fai
 blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
 fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
 or an empty log, and the required check show only unit keys.
+
+A check run that concludes `neutral` adds one line below its unit keys naming how many of its
+units ended without a verdict, their keys, and that a rerequest of the check grades them again.
+A failed or cancelled check adds no such line, whatever its units lost.
 
 #### Limitations
 
@@ -3101,7 +3144,8 @@ at startup over every live grade, which took the swarm Redis from about 4 GiB to
 starts on a release without that copy, moves every manifest a live grade's slot or a queued, leased
 or finished job hash still carries to its object store path and removes it from Redis. It finds those
 records through the live grade set and the queue's state sets, so the lab's Redis user, which may not
-SCAN, runs it. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
+SCAN, runs it. Finished job hashes are found through the old global done set until the scheduler has
+drained it; a job it names whose hash has expired is skipped. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
 packed manifest at its grade's commit. A grade the scheduler writes while the command runs stays as
 the scheduler wrote it, manifests included, so run the command again while `grades written meanwhile`
 reads above zero. The command prints its counts as
@@ -3595,7 +3639,7 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 |---|---|
 | `run`, `repo`, `head`, `base`, `tree`, `grader` | What the grade grades and the grader revision it read |
 | `class`, `lane` | Its scheduling class and lane |
-| `conclusion` | `success` or `failure` once every unit is final, `null` while it runs |
+| `conclusion` | `success`, `neutral` or `failure` once every unit is final, `null` while it runs |
 | `superseded` | Whether a newer head of its lane cancelled it |
 | `units` | `total` units and how many are `final` |
 | `checks` | Each check run's last posted `status` and `conclusion`, `required` included |
@@ -4371,9 +4415,11 @@ Under the default counts, `lost: 1` and `failed: 0`:
 | `lost`, `crash` | `retry` | `final` | `final` |
 | `failed`, `gate_failed`, `survived`, any other | `final` | `final` | `final` |
 
-`red(result)` is `True` for every outcome except `passed`. It does not check that the result is
-final, so call it only after `decide` returned `final`. A unit lost on its first run and lost again
-on its rerun is `final` and red:
+`red(result)` is `True` for a failure, `failed`, `gate_failed`, `survived` or an outcome unknown to
+the policy, and `False` for `passed` and for an outcome that ends without a verdict, `lost`,
+`crash` or `cannot_run`, which leaves the grade neutral instead. It does not check that the result
+is final, so call it only after `decide` returned `final`. A unit lost on its first run and lost
+again on its rerun is `final` and leaves the grade neutral:
 
 ```python
 >>> from scripts.ci_lab import retry
@@ -4384,7 +4430,7 @@ on its rerun is `final` and red:
 >>> retry.decide(second)
 'final'
 >>> retry.red(second)
-True
+False
 ```
 
 With `retry.Policy(lost=2, failed=1)` a lost unit runs again twice and a failed one once:
@@ -4417,7 +4463,7 @@ lab:
 
 | Key | Default | Allowed | Effect |
 |---|---|---|---|
-| `lost` | `1` | An integer, `0` or more | Reruns `decide` allows after an expired lease or a crashed worker; `0` makes the first loss final and red |
+| `lost` | `1` | An integer, `0` or more | Reruns `decide` allows after an expired lease or a crashed worker; `0` makes the first loss final, which leaves the grade neutral |
 | `failed` | `0` | An integer, `0` or more | Reruns `decide` allows after a test failure, a static gate failure, a survived mutant or an unknown outcome; above `0` it reruns graded failures |
 
 The scheduler reads the counts from the repository's dev `delivery.yaml` when it starts; see
@@ -4504,18 +4550,20 @@ Each scheduler pass applies the counts on two paths:
 
 | Event | What the scheduler does |
 |---|---|
-| A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
+| A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, its hash kept with no expiry, else sets its state and outcome to `lost`, its hash and its head's done set expiring after the retention |
 | A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
 | A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle, followed by the error's traceback, whose last line names the path a missing file error could not open |
 
 A worker that completes a lease with `crash` therefore runs once more under the default
-`lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
-table, and the `lab-scheduler-test-units` feature tests cover the scheduler's retry path.
+`lost: 1`, and a second `crash` is final and leaves the grade neutral. `tests/ci_lab/test_retry.py`
+covers the decision table, and the `lab-scheduler-test-units` feature tests cover the scheduler's
+retry path.
 
 `queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
 job's worker and outcome and adds it back to the pending set under the same job id with a new
 sequence number in the class it was enqueued under, as `queue.Queue.reap` does for an expired
-lease; a job in any other state is left as it is and the call returns `False`. A job
+lease, and removes the expiry its finish set, so a job running again never expires mid run; a job in
+any other state is left as it is and the call returns `False`. A job
 reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
 reached `lab.retry.lost`, where `decide` is `final`.
 
@@ -4531,7 +4579,8 @@ verdict, and both attempts count when both uploaded a report.
 | Symptom | Cause | Check |
 |---|---|---|
 | A failed test, gate or mutant is never rerun | `failed` defaults to `0`: a graded failure is final | Read `lab.retry.failed` in `delivery.yaml`; the flake rule reruns a failed test batch once on its own |
-| A lost unit goes red after one rerun | `lost` defaults to `1`, so the second loss is final | Read `lab.retry.lost`; search the worker's standard error for `crashed` |
+| A lost unit ends without a verdict after one rerun | `lost` defaults to `1`, so the second loss is final | Read `lab.retry.lost`; search the worker's standard error for `crashed` |
+| A lab check concluded `neutral` | A unit of the gate ended without a verdict: its lease expired past `lab.retry.lost`, its worker reported `crash` or `cannot_run`, or its job vanished | Read the check summary for the lost unit keys; rerequest the check run to grade them again; search the worker's standard error for `crashed` |
 | An expired lease stays leased and is never rerun | No scheduler pass ran since it expired | Check the scheduler service is running; each pass reaps expired leases |
 | An outcome that should retry is final | The outcome text is not exactly `lost` or `crash`, so it counts as a failure | Compare the outcome the worker sent with the strings `lost` and `crash` |
 | `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |

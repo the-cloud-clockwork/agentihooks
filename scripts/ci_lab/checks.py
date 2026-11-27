@@ -47,6 +47,7 @@ __all__ = [
     "Budget",
     "Checks",
     "Dispatches",
+    "MoveRefused",
     "Output",
     "PostRefused",
     "Token",
@@ -87,6 +88,10 @@ Key = tuple[str, str, str]
 
 class PostRefused(RuntimeError):
     """GitHub refused a check run request with no rate limit wait left to retry it."""
+
+
+class MoveRefused(ValueError):
+    """A check run was asked to move to a status that is not ahead of the one it holds."""
 
 
 class Token(Protocol):
@@ -219,7 +224,7 @@ def _advance(before: str | None, status: str, conclusion: str | None) -> None:
     if status not in STATUSES:
         raise ValueError(f"Unknown check run status: {status}")
     if before is not None and STATUSES.index(status) <= STATUSES.index(before):
-        raise ValueError(f"A check run moves forward only, not from {before} to {status}")
+        raise MoveRefused(f"A check run moves forward only, not from {before} to {status}")
     if (status == "completed") != (conclusion is not None):
         raise ValueError("A check run carries a conclusion exactly when it is completed")
     if conclusion is not None and conclusion not in CONCLUSIONS:
@@ -310,6 +315,10 @@ class Checks:
     def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         self.runs[(head, name(gate, shadow), run)] = (run_id, status)
+
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of one check run, so its next post creates it again from any status."""
+        self.runs.pop((head, name(gate, shadow), run), None)
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create the check run on its first transition, else advance it in place; return its id."""

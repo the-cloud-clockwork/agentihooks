@@ -46,6 +46,7 @@ from scripts.ci_lab import (
     control,
     evidence,
     expand_tests,
+    git_auth,
     interaction,
     lease_api,
     metrics,
@@ -56,16 +57,16 @@ from scripts.ci_lab import (
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output, PostRefused
+from scripts.ci_lab.checks import Checks, MoveRefused, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
-from scripts.ci_lab.intake import GradeRequest, admit
+from scripts.ci_lab.intake import GradeRequest, admit, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
-from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
+from scripts.ci_lab.outcomes import DROPPED, FAILED, PASSED, UNGRADED
 from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
-from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -76,7 +77,7 @@ from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer, Delivery
-from scripts.github_app import GitAuthRefused
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 from scripts.swarm import metrics_outbox
 
 __all__ = [
@@ -120,7 +121,7 @@ TREES = f"{PREFIX}tree:"
 ORIGINS = f"{PREFIX}origins"
 MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
 GROUPS_TIMEOUT_S = 30.0
-UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
+NEUTRAL = "neutral"
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
 REQUIRED = "required"
@@ -168,6 +169,7 @@ INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
 LOOKED_AT_PER_PASS = 24
+DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
 CUT_SHORT_STARTS = 5
 POST_HOLD_MS = 60_000
@@ -366,6 +368,7 @@ class Plan:
     idle: frozenset[str] = frozenset()
     authoritative: frozenset[str] = frozenset()
     merge_base: str = ""
+    required: tuple[str, ...] = ()
 
 
 class Inbox(Protocol):
@@ -405,6 +408,10 @@ class Poster(Protocol):
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         ...
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of a check run the grade holds no id of, so its next post creates it."""
+        ...
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
         ...
@@ -434,11 +441,15 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit, the served repositories by slug and
+    how long a settled job's record outlives its settling; with no set of served repositories every repository is
+    served."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    served: frozenset[str] | None = None
+    retention_ms: int = RETENTION_MS
 
 
 @dataclass
@@ -488,6 +499,7 @@ class State:
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
     merge_base: str = ""
+    required: list[str] = field(default_factory=list[str])
 
 
 def _parse(raw: str | bytes) -> State:
@@ -495,6 +507,12 @@ def _parse(raw: str | bytes) -> State:
     store."""
     data = json.loads(raw)
     data["flags"] = Flags(**data["flags"])
+    if "required" not in data:
+        data["required"] = (
+            [gate for gate in data["gates"] if gate not in (FAIL_FAST, *UNIT_JOBS)]
+            if data["tier"] < Priority.PROMOTION
+            else []
+        )
     for slot in data["units"].values():
         slot.pop("manifest", None)
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
@@ -591,10 +609,13 @@ def job_id(head: str, unit: Unit) -> str:
 
 
 def _verdict(slots: Sequence[Slot]) -> str | None:
-    """Return success or failure once every slot is final, else None."""
+    """Return a gate's conclusion once every slot is final, else None: success when every unit passed, failure when
+    a unit failed, and neutral when the only units without a pass ended without a verdict."""
     if not all(slot.outcome for slot in slots):
         return None
-    return "success" if all(slot.outcome == PASSED for slot in slots) else "failure"
+    if all(slot.outcome == PASSED for slot in slots):
+        return "success"
+    return NEUTRAL if all(slot.outcome == PASSED or slot.outcome in UNGRADED for slot in slots) else "failure"
 
 
 def _target(state: State, refs: Sequence[str]) -> tuple[str, str | None]:
@@ -617,14 +638,44 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
     return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
+def _scope(state: State) -> str:
+    return state.outputs.get("select", {}).get("scope", "none")
+
+
+def _lost(slots: Sequence[Slot]) -> str:
+    """Return the line the summary of a check that concludes neutral adds for its units that ended without a
+    verdict: how many, their keys and that a rerequest of the check grades them again."""
+    keys = [slot.key for slot in slots if slot.outcome in UNGRADED]
+    listed = ", ".join(keys)
+    return (
+        f"\n{len(keys)} units ended without a verdict, lost by the lab: {listed}. "
+        "A rerequest of this check grades them again."
+    )
+
+
+def _concluded(state: State) -> str:
+    """Return the required check's conclusion over the grade's gates by its tier's rules: success when they pass,
+    neutral when they would pass had each neutral gate passed, and failure otherwise."""
+    event, needs = EVENTS[state.tier], _needs(state)
+    if fold(event, needs, state.flags):
+        return "success"
+    granted = {
+        gate: {**record, "result": "success"} if record["result"] == NEUTRAL else record
+        for gate, record in needs.items()
+    }
+    return NEUTRAL if fold(event, granted, state.flags) else "failure"
+
+
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
+    if not state.superseded and state.required != list(_frame_required(state.tier, _scope(state))):
+        return {}
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
     status, conclusion = _target(state, list(state.units))
     if status == "completed" and not state.superseded:
-        conclusion = "success" if fold(EVENTS[state.tier], _needs(state), state.flags) else "failure"
+        conclusion = _concluded(state)
     targets[REQUIRED] = (status, conclusion)
     return targets
 
@@ -654,6 +705,8 @@ class _Quiet:
     relayed: bool
     hold: int
     final: bool
+    required: tuple[str, ...]
+    scope: str
 
 
 def _quiet(state: State, revision: int) -> _Quiet:
@@ -671,6 +724,8 @@ def _quiet(state: State, revision: int) -> _Quiet:
         relayed=state.ref.startswith(GRADE_REFS),
         hold=state.hold,
         final=all(slot.outcome for slot in slots),
+        required=tuple(state.required),
+        scope=_scope(state),
     )
 
 
@@ -683,6 +738,8 @@ def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: 
     """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
     start is leased, given their states in waiting then started order, and either a moved check run waits out its
     hold or nothing moved and the grade cannot close."""
+    if quiet.required != _frame_required(quiet.tier, quiet.scope):
+        return False
     if any(state is None or state in FINISHED for state in states) or "leased" in states[: len(quiet.waiting)]:
         return False
     if quiet.moved:
@@ -742,14 +799,22 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
+        self._undrained: list[str] = []
+        self._drained = False
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
-        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
-        live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
+        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, drain a batch
+        of the old global done set, refresh the live grade summaries, enqueue the held units the budget admits, then
+        advance every live grade, counting each finished job in the most urgent tier of the live grades holding it."""
         swept = self._sweep()
-        actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._drain(),
+        ]
         self._survey()
         actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
@@ -908,6 +973,9 @@ class Scheduler:
         fixes = self.ports.hotfixes() if heads else frozenset[str]()
         actions: list[str] = []
         for head in heads:
+            if not serves(self.settings.served, head.event.repo):
+                actions.append(f"ignored {head.event.head}: {head.event.repo} is not a served repository")
+                continue
             if head.event.action == CLOSED:
                 actions.append(self._close(head.event, head.lane))
                 continue
@@ -1109,12 +1177,15 @@ class Scheduler:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade."""
+        retried, since the head keeps no grade. A head already refused or retired once in this pass finds its
+        required check already completed and that is recorded instead of posted again."""
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
         except (GitAuthRefused, PostRefused, OSError) as refusal:
             return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        except MoveRefused:
+            return [f"the failed {REQUIRED} check of {request.head} was already posted in this pass"]
         return []
 
     def _retire(self, request: GradeRequest, now_ms: int) -> str:
@@ -1169,7 +1240,7 @@ class Scheduler:
         for repo in sorted({origin["repo"] for origin in groups.values()}):
             try:
                 carried = self.ports.expander.groups(repo)
-            except subprocess.SubprocessError as error:
+            except (subprocess.SubprocessError, GitAuthRefused) as error:
                 actions.append(f"cannot list the merge groups of {repo}: {error}")
                 continue
             for run, origin in groups.items():
@@ -1266,12 +1337,17 @@ class Scheduler:
         self.client.hdel(WAITING, name)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
-        if self.client.exists(GRADES + run):
+        carried: dict[str, str] = {}
+        if existing := self.grade(run):
             if not request.bypass_negative:
-                self._take_lane(request, lane, run)
-                return f"already graded {run}"
+                matching = self._matching(request, lane, run, plan.required)
+                if matching is not None:
+                    self._take_lane(request, lane, matching)
+                    return f"already graded {matching}"
+            if existing.required != list(plan.required):
+                carried = self._replace_frame(existing)
             run = f"{run}-{now_ms}"
-        carried = self._supersede(request, lane)
+        carried.update(self._supersede(request, lane))
         state = State(
             run=run,
             repo=request.repo,
@@ -1289,6 +1365,7 @@ class Scheduler:
             idle=sorted(plan.idle),
             authoritative=sorted(plan.authoritative),
             merge_base=plan.merge_base,
+            required=list(plan.required),
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1305,6 +1382,22 @@ class Scheduler:
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
 
+    def _matching(self, request: GradeRequest, lane: str, run: str, required: tuple[str, ...]) -> str | None:
+        latest = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
+        for candidate in dict.fromkeys((run, latest)):
+            if candidate is None or not (candidate == run or candidate.startswith(f"{run}-")):
+                continue
+            state = self.grade(candidate)
+            if state is not None and not state.superseded and state.required == list(required):
+                return candidate
+        return None
+
+    def _replace_frame(self, state: State) -> dict[str, str]:
+        state.superseded = True
+        self.save(state)
+        self._drop(state.run)
+        return {ref: slot.job for ref, slot in state.units.items() if slot.job and not (slot.outcome or slot.held)}
+
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
         """Return the passing merge group grade of the tree a push grade grades, if one exists."""
         if request.tier != Priority.PROMOTION:
@@ -1316,7 +1409,11 @@ class Scheduler:
         """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
-        if old is None or old.head == request.head:
+        if old is None:
+            return {}
+        if old.head == request.head:
+            if old.required != list(_frame_required(old.tier, _scope(old))):
+                return self._replace_frame(old)
             return {}
         dropped = set(self.queue.supersede(old.head))
         old.superseded = True
@@ -1362,11 +1459,29 @@ class Scheduler:
         actions: list[str] = []
         for expired in self.queue.expired(now_ms):
             job = self.queue.job(expired)
-            if job is not None and (state := self.queue.reap(job, now_ms, self.settings.retries.lost)):
+            if job is not None and (
+                state := self.queue.reap(job, now_ms, self.settings.retries.lost, self.settings.retention_ms)
+            ):
                 self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
                 release(self.queue, self.ports.pods, job.worker)
         return actions
+
+    def _drain(self) -> list[str]:
+        """Give the jobs the old global done set names the retention, at most DRAINED_PER_PASS a pass, until a read
+        finds it empty; the set is read whole once its last read is drained, since the lab's Redis user may not pop
+        or scan a set, and is never read again in this process once it reads empty."""
+        if self._drained:
+            return []
+        if not self._undrained:
+            self._undrained = self.queue.undrained()
+        batch = self._undrained[-DRAINED_PER_PASS:]
+        del self._undrained[-DRAINED_PER_PASS:]
+        if not batch:
+            self._drained = True
+            return []
+        settled = self.queue.drain(batch, self.settings.retention_ms)
+        return [f"drained {len(batch)} jobs of the old done set, {settled} settled, {len(self._undrained)} left"]
 
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
@@ -1432,6 +1547,13 @@ class Scheduler:
         queued = [slot for slot in state.units.values() if not (slot.outcome or slot.held) and slot.job]
         for slot, job in zip(queued, self.queue.jobs([slot.job for slot in queued])):
             self._collect(slot, job, tiers, state)
+        scope = _scope(state)
+        if not state.superseded and state.required != list(_frame_required(state.tier, scope)):
+            self._keep(state)
+            request = GradeRequest(
+                state.repo, state.head, state.base, Priority(state.tier), "scheduler", False, plant=scope == "full"
+            )
+            return [self._start(request, state.lane, state.ref, now_ms, name="")]
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
@@ -1505,7 +1627,9 @@ class Scheduler:
     def _post(self, state: State, now_ms: int) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
-        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
+        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. One the grade
+        holds no id of is forgotten by the poster first, so a grade started again under the run name of a grade the
+        scheduler forgot opens new check runs instead of meeting the statuses of the forgotten one. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
         head before the relay pushes it. A post the App token or the network refuses holds every post of the
         repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
@@ -1525,6 +1649,8 @@ class Scheduler:
             shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
+            else:
+                poster.forget(state.head, check, state.run, shadow)
             output = self._output(state, check, status)
             try:
                 state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
@@ -1541,13 +1667,17 @@ class Scheduler:
         return actions
 
     def _output(self, state: State, check: str, status: str) -> Output:
-        """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
-        revision, the head's commit page and, on a gate's check run, the stored log of each failed static unit."""
+        """Return a check run's output: its units, none for a skipped authoritative gate, the units a check that
+        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page and, on
+        a gate's check run, the stored log of each failed static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
-        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
+        slots = [state.units[ref] for ref in refs]
+        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in slots)
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
-        logs = () if check == REQUIRED else self._logs([state.units[ref] for ref in refs])
+        if _checks(state)[check][1] == NEUTRAL:
+            summary += _lost(slots)
+        logs = () if check == REQUIRED else self._logs(slots)
         return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)
 
     def _logs(self, slots: Sequence[Slot]) -> tuple[tuple[Unit, str], ...]:
@@ -1653,6 +1783,14 @@ def authoritative_gates(block: Mapping[str, Any], tier: Priority) -> frozenset[s
     return frozenset(block["authoritative"])
 
 
+def _frame_required(tier: int, scope: str) -> tuple[str, ...]:
+    if tier >= Priority.PROMOTION:
+        return ()
+    if tier == Priority.QUEUE:
+        return QUEUE_REQUIRED
+    return (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+
+
 def frame(
     tier: Priority,
     tree: str,
@@ -1672,21 +1810,22 @@ def frame(
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
     backfill grade takes every lab gate, since those rules require no job by name, and lists none.
     """
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = _frame_required(tier, scope)
     if tier >= Priority.PROMOTION:
-        return Plan(tree, grader, dict(gates))
+        return Plan(tree, grader, dict(gates), required=required)
     listed = frozenset(authoritative)
     if tier == Priority.QUEUE:
-        required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
-        queued = {job: gates.get(job, ()) for job in required}
-        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
-    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+        queued = {job: gates.get(job, ()) for job in (*required, FAIL_FAST, UNIT_JOBS[0])}
+        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed, required=required)
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
+    return Plan(
+        tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed, required=required
+    )
 
 
 @dataclass(frozen=True)
@@ -1787,7 +1926,9 @@ class MirrorExpander:
         manifests: Manifests,
         verdicts: Verdicts,
         lab: Lab | None = None,
+        auth: Callable[[str], Token] | None = None,
     ) -> None:
+        self.auth = auth
         self.node = node
         self.root = root
         self.toolchain = toolchain
@@ -1795,9 +1936,16 @@ class MirrorExpander:
         self.verdicts = verdicts
         self.lab = lab
 
+    def _environment(self, repo: str) -> dict[str, str] | None:
+        if self.auth is None or not repo.startswith(git_auth.GITHUB):
+            return None
+        return git_auth.environ(self.auth(repo))
+
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
-        return Mirror(self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab)
+        return Mirror(
+            self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab, environ=self._environment(repo)
+        )
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -1827,7 +1975,11 @@ class MirrorExpander:
         """Return the repository's dev branch head as the remote lists it, fetched into the mirror; git fails when the
         remote lists no dev branch."""
         listing = subprocess.run(
-            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"],
+            env=mirror.environ,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
@@ -1851,7 +2003,11 @@ class MirrorExpander:
         repository names it, or the dev branch head, fetched into the mirror, descends from it. The head itself is
         never fetched, since GitHub may no longer serve a head no ref reaches."""
         listing = subprocess.run(
-            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"],
+            env=self._environment(repo),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         if head in {line.split()[0] for line in listing.stdout.splitlines()}:
             return True
@@ -1865,7 +2021,9 @@ class MirrorExpander:
         """Return the head of every merge group ref the repository lists; git fails when it cannot list them within
         GROUPS_TIMEOUT_S."""
         argv = ["git", "ls-remote", repo, MERGE_GROUPS]
-        listing = subprocess.run(argv, capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S)
+        listing = subprocess.run(
+            argv, env=self._environment(repo), capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S
+        )
         return frozenset(line.split()[0] for line in listing.stdout.splitlines())
 
     def trusted(self, repo: str) -> frozenset[str]:
@@ -2096,12 +2254,22 @@ def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev, its mirrors falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
-    names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
-    the scheduler's registry; without it completed checks are acknowledged unrecorded."""
+    repository's dev, serving the repositories the environment lists or else that one repository, its mirrors
+    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP` names the lab's GitHub App, its
+    bus inbox hands each completed check of the repository to a shadow recorder on the scheduler's registry; without
+    it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))
+    credentials: dict[str, GitHubAppAuth] = {}
+
+    def auth(repo: str) -> Token:
+        if repo not in credentials:
+            credentials[repo] = GitHubAppAuth(f"github.com/{_slug(repo)}", permissions={"contents": "read"})
+        return credentials[repo]
+
+    expander = MirrorExpander(
+        node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ), auth=auth
+    )
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
@@ -2113,7 +2281,8 @@ def build(
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
-    settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
+    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)
     if app:
@@ -2260,6 +2429,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         manifests,
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
+        scheduler.settings.retention_ms,
+        shed=lambda: spending.status().shed,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)

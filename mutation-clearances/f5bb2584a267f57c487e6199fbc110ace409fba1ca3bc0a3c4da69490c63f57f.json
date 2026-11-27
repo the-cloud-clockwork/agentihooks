@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x\u01c1Scheduler\u01c1_matching:51106cd565ec820e84d3a4fb57a223654024946b36a7a52215fa4d40bca7ac66": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: the first candidate is the supplied run string and cannot fail this validity guard. An invalid candidate can therefore occur only in the final latest position; break and continue both finish the loop and return None."
+  }
+}

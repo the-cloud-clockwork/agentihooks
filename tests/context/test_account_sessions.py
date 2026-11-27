@@ -324,6 +324,67 @@ def test_a_managed_execution_counts_once_whatever_its_viewers(tmp_path, viewers,
     assert acc.local_processes(root)["codex"] == {801: "alpha"}
 
 
+def _exits_after_first_read(monkeypatch: pytest.MonkeyPatch, pid: int) -> list[int]:
+    real = acc._cmdline
+    reads: list[int] = []
+
+    def read(seen: int, proc: Path) -> list[str]:
+        reads.append(seen)
+        return real(seen, proc) if seen != pid or reads.count(pid) == 1 else []
+
+    monkeypatch.setattr(acc, "_cmdline", read)
+    return reads
+
+
+@pytest.mark.feature("codex-scan-survives-a-vanishing-process")
+def test_codex_session_detection_reads_the_command_line_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "proc"
+    _proc(root, 900, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    reads = _exits_after_first_read(monkeypatch, 900)
+    assert acc._is_codex_session(900, root) is True
+    assert reads == [900]
+
+
+@pytest.mark.feature("codex-scan-survives-a-vanishing-process")
+def test_a_codex_process_with_an_empty_command_line_is_no_session(tmp_path: Path) -> None:
+    root = tmp_path / "proc"
+    _proc(root, 901, "codex", 1, [], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 904, "kthreadd", 0, [], {})
+    for pid in (901, 904):
+        assert acc._is_codex_session(pid, root) is False
+        assert acc._managed_execution(pid, root) == ""
+
+
+@pytest.mark.feature("codex-scan-survives-a-vanishing-process")
+def test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "proc"
+    _proc(root, 902, "tokio-runtime-w", 1, ["/home/u/.local/bin/codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(
+        root,
+        903,
+        "codex",
+        1,
+        ["/opt/codex/bin/codex-x86_64-unknown-linux-musl", "exec", "ok"],
+        {"AH_CX_TOKEN_beta": "b"},
+    )
+    monkeypatch.setattr(acc, "handed_off_pids", set)
+    _exits_after_first_read(monkeypatch, 902)
+    assert acc.local_processes(root) == {"claude": {}, "codex": {902: "alpha", 903: "beta"}}
+
+
+@pytest.mark.feature("codex-scan-survives-a-vanishing-process")
+def test_a_managed_execution_is_judged_from_one_command_line_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "proc"
+    _managed_host(root, 0)
+    reads = _exits_after_first_read(monkeypatch, 801)
+    assert acc._managed_execution(801, root) == "0123456789abcdef"
+    assert reads == [801]
+
+
 def test_an_execution_key_names_the_execution_of_its_endpoint():
     assert acc.execution_key(_endpoint("exe-0123456789abcdef0123")) == "0123456789abcdef"
     assert acc.execution_key("unix:///tmp/probe.sock") == ""
