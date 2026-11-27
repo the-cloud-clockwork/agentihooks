@@ -4,7 +4,7 @@
   "operator_words": "This prevented a recurring error I've been having with my agents that they sometimes ignore reading their learnings, culture, or seat notes.",
   "ordered_at": "2026-11-26",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-gate",
-  "behaviour": "Seated Claude Code and Codex sessions observe a requirement to run seat brief before ordinary tools; successful brief sets a session marker and compaction clears it. Standalone sessions and bootstrap calls stay exempt.",
+  "behaviour": "Seated Claude Code and Codex sessions are refused ordinary tools until they run seat brief; a successful brief, including the plain output Codex returns, sets a session marker and compaction clears it. Standalone sessions and bootstrap calls stay exempt.",
   "seam": "scripts.gates.first_read.FirstRead and package pre, post and start conditions",
   "semgrep_rule": "first-read-pre-any-fast-exit",
   "live_check": ["python", "-m", "scripts.gates", "first-read"],

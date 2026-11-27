@@ -204,7 +204,7 @@ def reset(payload: dict[str, Any]) -> None:
 
 class FirstRead(Gate):
     name = "first-read"
-    default_mode = "observe"
+    default_mode = "enforce"
 
     def matches(self, call: Call) -> bool:
         if not _member() or not call.session:
