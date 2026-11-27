@@ -1134,6 +1134,19 @@ class Scheduler:
         self.client.hdel(WAITING, name)
         return [f"dropped the waiting head {waiting['request']['head']}"]
 
+    def _hold_unmerged(
+        self, name: str, held: dict[str, Any], now_ms: int, unmerged: int, head: str, error: Exception
+    ) -> str:
+        """Hold a head whose merge resolution failed again, restarting its waiting window under `UNMERGED_TRIES`; at
+        it, give up on asking for a merge without restarting the window, so the next pass starts the head bare at
+        once with no further call of the merges port."""
+        tries = unmerged + 1
+        if tries < UNMERGED_TRIES:
+            self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": tries}))
+            return f"holding {head}: {error}"
+        self.client.hset(WAITING, name, json.dumps({**held, "unmerged": tries}))
+        return f"the lab gives up on a merge of {head}: {error}"
+
     def _release(self, now_ms: int) -> list[str]:
         """Look at up to `LOOKED_AT_PER_PASS` held heads whose quiet window ended, except one a pause of its class
         holds: the most urgent class first and the longest waiting first within a class. A head still quiet or paused
@@ -1196,13 +1209,7 @@ class Scheduler:
                         actions.append(f"cannot expand {request.head}: {refusal}")
                         actions.extend(self._refuse(request, ref, refusal, now_ms))
                 except (Unmerged, merges.MergeRefused) as error:
-                    tries = unmerged + 1
-                    if tries < UNMERGED_TRIES:
-                        self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": tries}))
-                        actions.append(f"holding {request.head}: {error}")
-                    else:
-                        self.client.hset(WAITING, name, json.dumps({**held, "unmerged": tries}))
-                        actions.append(f"the lab gives up on a merge of {request.head}: {error}")
+                    actions.append(self._hold_unmerged(name, held, now_ms, unmerged, request.head, error))
                 except (
                     subprocess.CalledProcessError,
                     ValueError,
