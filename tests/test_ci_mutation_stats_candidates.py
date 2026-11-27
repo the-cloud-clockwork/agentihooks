@@ -162,6 +162,22 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
             ["test_constructor"],
         ),
         (
+            "class Helper:\n"
+            "    def __enter__(self):\n        return target(1)\n"
+            "    def __exit__(self, *args):\n        return False\n"
+            "def test_context():\n    with Helper() as value:\n        assert value == 2\n",
+            ["test_context"],
+        ),
+        (
+            "class Helper:\n"
+            "    @property\n"
+            "    def value(self):\n        return target(1)\n"
+            "@pytest.fixture\n"
+            "def helper():\n    return Helper()\n"
+            "def test_property(helper):\n    assert helper.value == 2\n",
+            ["test_property"],
+        ),
+        (
             "from pathlib import Path\n"
             "def test_file_unrelated():\n"
             "    with Path('runs.txt').open('a') as stream:\n"
@@ -189,6 +205,8 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "conditional-reassignment",
         "child-module-initialization",
         "constructor-reach",
+        "context-manager-reach",
+        "property-reach",
         "unrelated-file-methods",
     ],
 )
@@ -212,8 +230,19 @@ def test_statistics_candidates_preserve_indirect_reach_and_order(
         "        self.record()\n"
         "    def record(self):\n        from app import target\n        target(1)\n"
         "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
+        "class Recorder:\n"
+        "    def pytest_runtest_logreport(self, report):\n        self.record()\n"
+        "    def record(self):\n        from app import target\n        target(1)\n"
+        "    def unused(self):\n        self.record = print\n"
+        "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
+        "class Base:\n"
+        "    def pytest_runtest_logreport(self, report):\n        self.record()\n"
+        "    def record(self):\n        pass\n"
+        "class Recorder(Base):\n"
+        "    def record(self):\n        from app import target\n        target(1)\n"
+        "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
     ],
-    ids=["function-call", "assertion-pass", "bound-method"],
+    ids=["function-call", "assertion-pass", "bound-method", "possible-field-replacement", "inherited-hook"],
 )
 def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester, hook: str) -> None:
     result = select(
