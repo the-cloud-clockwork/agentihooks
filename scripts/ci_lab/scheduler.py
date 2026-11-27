@@ -662,6 +662,15 @@ def _lost(slots: Sequence[Slot]) -> str:
     )
 
 
+def _fallback(state: State) -> str:
+    """Return the line the summary of a fallback grade's required check adds: that GitHub held no test merge of
+    the head and the lab graded it against its event base instead."""
+    return (
+        f"\nGitHub held no test merge of {state.head} with that head as its second parent, so the lab graded "
+        "the head itself against its event base."
+    )
+
+
 def _concluded(state: State) -> str:
     """Return the required check's conclusion over the grade's gates by its tier's rules: success when they pass,
     neutral when they would pass had each neutral gate passed, and failure otherwise."""
@@ -1677,8 +1686,9 @@ class Scheduler:
 
     def _output(self, state: State, check: str, status: str) -> Output:
         """Return a check run's output: its units, none for a skipped authoritative gate, the units a check that
-        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page and, on
-        a gate's check run, the stored log of each failed static unit."""
+        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page, the
+        line a fallback grade's required check adds and, on a gate's check run, the stored log of each failed
+        static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
         slots = [state.units[ref] for ref in refs]
         units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in slots)
@@ -1686,6 +1696,8 @@ class Scheduler:
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
         if _checks(state)[check][1] == NEUTRAL:
             summary += _lost(slots)
+        if check == REQUIRED and state.merge_fallback:
+            summary += _fallback(state)
         logs = () if check == REQUIRED else self._logs(slots)
         return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)
 
@@ -2142,22 +2154,19 @@ class MirrorExpander:
                 text=True,
                 check=True,
             ).stdout.split()[1:]
-            with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
-                subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(store),
-                        "bundle",
-                        "create",
-                        handle.name,
-                        sha,
-                        *(f"^{parent}" for parent in parents),
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-                return Path(handle.name).read_bytes()
+            ref = f"refs/lab-bundle/{sha}"
+            subprocess.run(["git", "-C", str(store), "update-ref", ref, sha], check=True, capture_output=True)
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
+                    subprocess.run(
+                        ["git", "-C", str(store), "bundle", "create", handle.name, ref]
+                        + [f"^{parent}" for parent in parents],
+                        check=True,
+                        capture_output=True,
+                    )
+                    return Path(handle.name).read_bytes()
+            finally:
+                subprocess.run(["git", "-C", str(store), "update-ref", "-d", ref], check=True, capture_output=True)
         return None
 
     def _tests(

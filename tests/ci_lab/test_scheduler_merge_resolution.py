@@ -12,14 +12,29 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.ci_lab import merges, scheduler
+from scripts.ci_lab import budget, merges, scheduler
+from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.intake import GradeRequest
+from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
-from tests.ci_lab.test_scheduler import ACTOR, BASE, HEAD_A, HEAD_B, REPO, TREE, Run, unit
+from tests.ci_lab.test_scheduler import (
+    ACTOR,
+    BASE,
+    HEAD_A,
+    HEAD_B,
+    REPO,
+    TREE,
+    Consumer,
+    FakeChecks,
+    Run,
+    fake_redis,
+    unit,
+)
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
 from tests.ci_lab.test_scheduler_merge_base import _expander, _tree
@@ -189,3 +204,102 @@ def test_expand_reads_the_tree_and_diffs_against_the_first_parent_of_a_resolved_
     assert found.graded_commit == merge
     assert found.merge_base == fork
     assert found.tree == _tree(repo, head)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_bundle_answers_a_bundle_of_the_commit_fetchable_once_its_two_parents_are_held(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base, head = origin
+    merge = _synthetic_merge(repo, base, head)
+    expander = _expander(tmp_path, monkeypatch)
+    mirror = expander.mirror(f"file://{repo}")
+    mirror.fetch(base)
+    mirror.fetch(head)
+    mirror.fetch(merge)
+    found = expander.bundle(merge)
+    assert found is not None
+    target = tmp_path / "target.git"
+    _git(tmp_path, "init", "-q", "--bare", str(target))
+    _git(target, "fetch", "--quiet", str(mirror.store), f"{base}:refs/heads/base", f"{head}:refs/heads/head")
+    bundle_file = tmp_path / "found.bundle"
+    bundle_file.write_bytes(found)
+    _git(target, "fetch", "--quiet", str(bundle_file), f"{merge}:refs/heads/merge")
+    assert _git(target, "rev-parse", "refs/heads/merge").strip() == merge
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_bundle_answers_none_when_no_served_repository_store_holds_the_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expander = _expander(tmp_path, monkeypatch)
+    assert expander.bundle("f" * 40) is None
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_build_wires_the_merges_and_bundle_ports_from_the_expander(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
+    monkeypatch.setattr(scheduler, "Checks", FakeChecks)
+    environ = {
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        scheduler.MIRROR_STORE: str(tmp_path / "stores"),
+        scheduler.REPOSITORY: "repository",
+        scheduler.IMAGE: "image",
+    }
+    client = fake_redis()
+    objects = LocalObjects(tmp_path / "objects")
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    built = scheduler.build(environ, client, objects, Consumer([]), spending)
+    expander = built.ports.expander
+    assert isinstance(expander, scheduler.MirrorExpander)
+    assert isinstance(built.ports.merges, merges.Background)
+    assert isinstance(built.ports.merges.resolve, merges.Resolver)
+    assert built.ports.merges.resolve.mirror == expander.mirror
+    assert built.ports.bundle == expander.bundle
+
+
+def _required_output(run: Run, head: str) -> Output:
+    posts = [post[4] for post in run.lab.poster.posts if post[0] == head and post[1] == scheduler.REQUIRED]
+    return posts[-1]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_fallback_grades_required_check_names_that_github_held_no_merge(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=None))
+    run.cache(unit(1))
+    _push(run, HEAD_A, 41)
+    for _ in range(scheduler.UNMERGED_TRIES + 1):
+        run.tick(1000)
+    output = _required_output(run, HEAD_A)
+    assert f"GitHub held no test merge of {HEAD_A}" in output.summary
+    assert "graded the head itself against its event base" in output.summary
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_grade_on_a_resolved_merge_names_no_fallback_on_its_required_check(lab: Callable[..., Run]) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    run.engine.ports = replace(run.engine.ports, merges=Mock(return_value=(MERGE, PARENT)))
+    run.cache(unit(1))
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    output = _required_output(run, HEAD_A)
+    assert "GitHub held no test merge" not in output.summary
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_grade_with_no_pull_request_number_names_no_fallback_on_its_required_check(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    run.cache(unit(1))
+    run.push(HEAD_A, lane=HEAD_A, event="pull_request", action="opened")
+    run.tick(1000)
+    output = _required_output(run, HEAD_A)
+    assert "GitHub held no test merge" not in output.summary

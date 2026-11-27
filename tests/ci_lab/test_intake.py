@@ -372,6 +372,11 @@ def test_only_a_trusted_actors_head_becomes_a_grade_request() -> None:
     assert intake.admit(head("push", "stranger[bot]", "pushed"), trusted) is None
 
 
+def test_request_from_carries_the_pull_request_number_onto_the_grade_request() -> None:
+    event = head("pull_request", "agenticore-app[bot]", "opened", pull_number=41)
+    assert intake.request_from(event).pull_number == 41
+
+
 def test_a_trusted_sender_reopening_an_untrusted_authors_pull_request_admits_nothing() -> None:
     (event,) = webhooks.head_events("pull_request", pull_request("reopened", author="stranger", sender="nestorcolt"))
     assert isinstance(event, HeadEvent)
@@ -394,8 +399,9 @@ def test_a_cached_negative_answers_a_request_unless_it_is_a_rerequested_check() 
     assert seen == [(REPO, HEAD)]
 
 
-def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:
+def open_pull(sha: str, author: str = "agenticore-app[bot]", number: int = 41) -> dict[str, Any]:
     return {
+        "number": number,
         "head": {"sha": sha, "ref": "feature", "label": "acme:feature"},
         "base": {"sha": BASE, "label": "acme:dev", "repo": {"html_url": REPO}},
         "user": {"login": author},
@@ -410,13 +416,23 @@ def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
         seen.append((repo, sha))
         return (repo, sha) in graded
 
-    pulls = [open_pull(HEAD), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt")]
+    pulls = [open_pull(HEAD, number=7), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt", number=9)]
     assert intake.reconcile(pulls, has_grade) == [
-        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile", "feature"),
-        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile", "feature"),
+        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile", "feature", 7),
+        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile", "feature", 9),
     ]
     assert seen == [(REPO, HEAD), (REPO, "c" * 40), (REPO, "d" * 40)]
     assert intake.reconcile([], has_grade) == []
+
+
+def test_reconcile_of_a_pull_with_no_number_key_keeps_no_pull_request_number() -> None:
+    pull = {
+        "head": {"sha": HEAD, "ref": "feature", "label": "acme:feature"},
+        "base": {"sha": BASE, "label": "acme:dev", "repo": {"html_url": REPO}},
+        "user": {"login": "agenticore-app[bot]"},
+    }
+    (event,) = intake.reconcile([pull], lambda repo, sha: False)
+    assert event.pull_number == 0
 
 
 def test_a_reconciled_head_is_graded_in_the_pull_request_tier() -> None:

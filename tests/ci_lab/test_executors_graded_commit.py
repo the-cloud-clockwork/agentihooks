@@ -4,6 +4,7 @@
 
 import json
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,9 @@ import pytest
 from scripts.ci_lab import executors, lease_api, leases, queue, static_gates
 from scripts.ci_lab.leases import Grant
 from scripts.ci_lab.units import Unit
-from scripts.ci_lab.worker import Lease, _lease
-from tests.ci_lab.test_executors import FakeWorktrees, folder, pod_of
+from scripts.ci_lab.worker import Client, Lease, _lease
+from scripts.dep_manifest import _git
+from tests.ci_lab.test_executors import FakeWorktrees, environ_of, folder, pod_of
 from tests.ci_lab.test_lease_api import Signer, post
 from tests.ci_lab.test_lease_api import clock as _clock
 from tests.ci_lab.test_lease_api import jobs as _jobs
@@ -43,9 +45,10 @@ def _gate() -> static_gates.StaticGate:
 
 
 class FakeMirror:
-    def __init__(self, fails: bool = False) -> None:
+    def __init__(self, fails: bool = False, store: Path | None = None) -> None:
         self.fails = fails
         self.fetched: list[str] = []
+        self.store = store
 
     def fetch(self, sha: str) -> bool:
         self.fetched.append(sha)
@@ -107,6 +110,117 @@ def test_static_cuts_its_shared_tree_from_the_graded_commit_when_the_lease_names
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_static_cuts_its_owned_tree_from_the_graded_commit_when_its_gate_rewrites_the_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.ci_lab import run_static
+
+    workflow = """
+on: pull_request
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        run: semgrep --baseline-commit HEAD^
+"""
+    registry = {"semgrep/scan": {"paths": ["scripts"], "tools": ["semgrep"]}}
+    merged = folder(tmp_path, "merged", {".github/test-requirements.lock": "lock-m"})
+    base = folder(tmp_path, "base", {".github/test-requirements.lock": "lock-b"})
+    grader = folder(
+        tmp_path,
+        "grader",
+        {
+            ".github/workflows/test.yml": workflow,
+            ".github/input-keys.json": json.dumps(registry),
+            ".github/test-requirements.lock": "lock-g",
+        },
+    )
+    head_tree = folder(tmp_path, "head", {})
+    trees = FakeWorktrees({MERGE: merged, "b1": base, "g1": grader, "h1": head_tree}, mirror=FakeMirror())
+    pod = pod_of(tmp_path, trees)
+    [found] = static_gates.discover(workflow, registry)
+    assert found.rewrites_tree
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+
+    def ran(*_args: object) -> run_static.Result:
+        return run_static.Result(found.name, 0, tmp_path / "log.txt", summary)
+
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    monkeypatch.setattr(executors.venvs, "venv_for", lambda *_a, **_kw: (tmp_path / "venv", False))
+    lease = Lease("job", "tok", "h1", Unit("static", "k", (found.name,)), 1, 1500, "b1", "g1", MERGE)
+
+    executors.static(pod, lease, pod.runs)
+
+    assert ("own", MERGE, "b1") in trees.calls
+    assert ("own", "h1", "b1") not in trees.calls
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_ensure_graded_does_nothing_more_once_the_mirror_already_holds_the_commit(tmp_path: Path) -> None:
+    trees = FakeWorktrees({}, mirror=FakeMirror())
+    base_pod = pod_of(tmp_path, trees)
+    calls: list[tuple[str, str, str]] = []
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        calls.append((job, token, sha))
+        return None
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", MERGE)
+    executors._ensure_graded(pod, lease)
+    assert trees.mirror.fetched == [MERGE]
+    assert calls == []
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_ensure_graded_applies_the_bundle_the_bundler_serves(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _git(tmp_path, "init", "-q", str(source))
+    _git(source, "config", "user.email", "t@t")
+    _git(source, "config", "user.name", "t")
+    (source / "a.txt").write_text("a\n")
+    _git(source, "add", "a.txt")
+    _git(source, "commit", "-qm", "root")
+    root = _git(source, "rev-parse", "HEAD").strip()
+    bundle_path = tmp_path / "root.bundle"
+    _git(source, "bundle", "create", str(bundle_path), "HEAD")
+    bundle_bytes = bundle_path.read_bytes()
+    store = tmp_path / "store.git"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True, store=store))
+    base_pod = pod_of(tmp_path, trees)
+    calls: list[tuple[str, str, str]] = []
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        calls.append((job, token, sha))
+        return bundle_bytes
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", root)
+    executors._ensure_graded(pod, lease)
+    assert calls == [("job", "tok", root)]
+    found = subprocess.run(["git", "-C", str(store), "cat-file", "-t", root], capture_output=True, text=True)
+    assert found.stdout.strip() == "commit"
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_ensure_graded_asks_the_bundler_when_the_node_mirror_lacks_the_commit(tmp_path: Path) -> None:
     trees = FakeWorktrees({}, mirror=FakeMirror(fails=True))
     base_pod = pod_of(tmp_path, trees)
@@ -129,6 +243,14 @@ def test_ensure_graded_asks_the_bundler_when_the_node_mirror_lacks_the_commit(tm
     with pytest.raises(subprocess.CalledProcessError):
         executors._ensure_graded(pod, lease)
     assert calls == [("job", "tok", MERGE)]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_settings_wires_the_pods_bundler_to_the_scheduler_url(tmp_path: Path) -> None:
+    pod, _, _ = executors.settings(environ_of(tmp_path))
+    assert isinstance(pod.bundler, types.MethodType)
+    assert isinstance(pod.bundler.__self__, Client)
+    assert pod.bundler.__self__.url == "http://scheduler:8800"
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -178,6 +300,13 @@ def test_a_grant_without_a_graded_commit_omits_it_from_the_lease_api_reply() -> 
     unit = Unit("static", "k", ("lint",))
     grant = Grant("j", "t", "h1", unit, 1, 1500, "b1", "g1")
     assert "graded_commit" not in lease_api._grant(grant)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_granted_lease_carries_its_graded_commit(jobs: queue.Queue, lab: leases.Leases, signer: Signer) -> None:
+    jobs.enqueue([Unit(kind="static", key="a", members=("lint",))], "h1", {}, "b1", "g1", graded_commit=MERGE)
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+    assert grant.graded_commit == MERGE
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
