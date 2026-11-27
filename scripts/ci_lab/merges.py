@@ -169,7 +169,9 @@ class Background:
     resolution still running past `bound_s` after it started raises MergeUnanswered instead, counting as one
     try, and keeps running orphaned; a later call starts it again. A resolution that found a merge answers
     every call until `fresh_s` after it started, so no merge stays in memory longer; an absent answer is read
-    once and then gone, so the next call starts a new resolution and so reads GitHub again."""
+    once and then gone, so the next call starts a new resolution and so reads GitHub again. The bound runs
+    from the call that submitted the resolution, not from the worker thread that picks it up, so one queued
+    behind `workers` others can spend a whole try without ever having run."""
 
     def __init__(
         self,

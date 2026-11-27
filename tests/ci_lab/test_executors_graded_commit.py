@@ -16,7 +16,16 @@ from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Client, Lease, _lease
 from scripts.dep_manifest import _git
-from tests.ci_lab.test_executors import FakeWorktrees, environ_of, folder, pod_of
+from tests.ci_lab.test_executors import (
+    Box,
+    FakeWorktrees,
+    environ_of,
+    folder,
+    mutation_settings,
+    pod_of,
+)
+from tests.ci_lab.test_executors import mutation_tree as _mutation_tree
+from tests.ci_lab.test_executors import trampolines as _trampolines
 from tests.ci_lab.test_lease_api import Signer, post
 from tests.ci_lab.test_lease_api import clock as _clock
 from tests.ci_lab.test_lease_api import jobs as _jobs
@@ -27,6 +36,8 @@ clock = _clock
 jobs = _jobs
 lab = _lab
 signer = _signer
+mutation_tree = _mutation_tree
+trampolines = _trampolines
 
 MERGE = "m" * 40
 WORKFLOW = """
@@ -154,6 +165,35 @@ def test_tests_runs_its_batch_on_the_graded_commit_when_the_lease_names_one(
     assert ("lease", MERGE) in trees.calls
     assert ("lease", "h1") not in trees.calls
     assert trees.mirror.fetched == [MERGE]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_mutation_runs_its_trampolines_and_tree_from_the_graded_commit_when_the_lease_names_one(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation_tree: Path,
+    trampolines: list[tuple[Path, str, set[int]]],
+) -> None:
+    graded = _git(mutation_tree, "rev-parse", "h1").strip()
+    stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
+    box = Box([(0, stats)], tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    monkeypatch.setattr(executors.venvs, "venv_for", lambda *_a, **_kw: (tmp_path / "venv", False))
+    grader = tmp_path / "grader"
+    trees = FakeWorktrees({graded: mutation_tree, "g1": grader}, fetched=frozenset({graded}), mirror=FakeMirror())
+    pod = pod_of(tmp_path, trees)
+    lease = Lease("job", "tok", "h1", Unit("stats", "k1", ("tests/test_alpha.py",)), 1, 1500, "b1", "g1", graded)
+
+    executors.mutation(pod, mutation_settings(tmp_path), lease, pod.runs)
+
+    assert ("own", graded, "b1") in trees.calls
+    assert ("own", "h1", "b1") not in trees.calls
+    assert trampolines == [
+        (mutation_tree, "hooks/beta.py", {1}),
+        (mutation_tree, "hooks/pkg/gamma.py", {2}),
+        (mutation_tree, "scripts/alpha.py", {2}),
+    ]
+    assert trees.mirror.fetched == [graded]
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -293,6 +333,64 @@ def test_ensure_graded_applies_the_bundle_the_bundler_serves(tmp_path: Path) -> 
     assert calls == [("job", "tok", root)]
     found = subprocess.run(["git", "-C", str(store), "cat-file", "-t", root], capture_output=True, text=True)
     assert found.stdout.strip() == "commit"
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_ensure_graded_with_no_bundler_raises_the_fetch_error(tmp_path: Path) -> None:
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True))
+    pod = pod_of(tmp_path, trees)
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", MERGE)
+    with pytest.raises(subprocess.CalledProcessError):
+        executors._ensure_graded(pod, lease)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_ensure_graded_writes_the_fetched_bundle_with_the_tree_lock_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    _git(tmp_path, "init", "-q", str(source))
+    _git(source, "config", "user.email", "t@t")
+    _git(source, "config", "user.name", "t")
+    (source / "a.txt").write_text("a\n")
+    _git(source, "add", "a.txt")
+    _git(source, "commit", "-qm", "root")
+    root = _git(source, "rev-parse", "HEAD").strip()
+    bundle_path = tmp_path / "root.bundle"
+    _git(source, "bundle", "create", str(bundle_path), "HEAD")
+    bundle_bytes = bundle_path.read_bytes()
+    store = tmp_path / "store.git"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True, store=store))
+    base_pod = pod_of(tmp_path, trees)
+    freed: list[bool] = []
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        freed.append(not base_pod.trees.lock.locked())
+        return bundle_bytes
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", root)
+    real_run = subprocess.run
+    locked: list[bool] = []
+
+    def recording_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "fetch" in argv and "--no-write-fetch-head" in argv:
+            locked.append(pod.trees.lock.locked())
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(executors.subprocess, "run", recording_run)
+    executors._ensure_graded(pod, lease)
+    assert freed == [True]
+    assert locked == [True]
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

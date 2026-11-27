@@ -87,6 +87,18 @@ class HoldsBoundedByTheResolverFamily:
             return [f"holding {held['request']}: {error}"]
 
 
+class HoldsBoundedWithNoCount:
+    def _release(self, name: str, held: dict[str, Any], now_ms: int) -> list[str]:
+        self: Any
+        unmerged = held.get("unmerged", 0)
+        try:
+            return [self._start(held["request"], unmerged)]
+        except (Unmerged, merges.MergeRefused) as error:
+            # ruleid: lab-unanswered-fetch-holds-forever
+            self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
+            return [f"holding {held['request']}: {error}"]
+
+
 class KeepsTheWindowWhileFetching:
     def _release(self, name: str, raw: str) -> list[str]:
         self: Any

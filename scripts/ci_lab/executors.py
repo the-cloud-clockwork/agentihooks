@@ -357,14 +357,18 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease, root: Path) -> Finished
     and the tests the stats records of the test files its manifest names show reaching its function, in a private
     tree of the head that holds behind trampolines the functions the head changes against the lease's base,
     graded by the grader tree's copy of the mutation runner, cutting every request and report folder inside root;
-    the report counts the git and uv cache lookups it made."""
+    the report counts the git and uv cache lookups it made. A lease that names a graded commit runs in that
+    commit's tree and traces its changes against the lease's base instead of the bare head."""
     unit = lease.unit
+    reading = lease.graded_commit or lease.head
+    if lease.graded_commit:
+        _ensure_graded(pod, lease)
     with (
         pod.trees.shared(lease.grader) as ((grader,), shared),
-        pod.trees.owned(lease.head, lease.base) as (tree, fetched),
+        pod.trees.owned(reading, lease.base) as (tree, fetched),
     ):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        written = _trampolined(tree, lease.base, lease.head)
+        written = _trampolined(tree, lease.base, reading)
         files = list(unit.members) if unit.kind == STATS else _traced(unit, written)
         started = pod.clock()
         named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS), "tree": str(tree)}

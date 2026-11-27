@@ -2762,9 +2762,9 @@ repository's store under its root already holds it.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
-each held under `merges.Background` and reused for `FRESH_S` (30) seconds once resolved, so a pass asking
-again soon after a found merge rarely repeats the GitHub read; an absent answer or a failed resolution is read
-once and forgotten, so the next pass that asks always reads GitHub again. A head whose merge GitHub has not
+each held under `merges.Background` and reused until `FRESH_S` (30) seconds after its resolution started, so
+a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
+answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again. A head whose merge GitHub has not
 built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose
 resolution ran past `merges.BOUND_S` (45) seconds, waits out its quiet window again with the try counted in its
 waiting entry; at the `UNMERGED_TRIES` (4) one the lab stops asking and grades the bare head against its event

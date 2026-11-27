@@ -20,6 +20,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.outcomes import DROPPED
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
@@ -35,6 +36,7 @@ from tests.ci_lab.test_scheduler import (
     FakeChecks,
     Run,
     fake_redis,
+    ref,
     unit,
 )
 from tests.ci_lab.test_scheduler import lab as lab
@@ -355,16 +357,18 @@ def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_un
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Callable[..., Run]) -> None:
-    gates = {"lint": (unit(1),)}
+    leased_unit, held_unit = unit(1), unit(2)
+    gates = {"lint": (leased_unit, held_unit)}
     other_merge, other_parent = "7" * 40, "6" * 40
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
     port = Mock(side_effect=[(MERGE, PARENT), (other_merge, other_parent)])
     run.engine.ports = replace(run.engine.ports, merges=port)
-    run.cache(unit(1))
     _push(run, HEAD_A, 41)
     run.tick(1000)
     old = run.grade(HEAD_A)
     assert old.graded_commit == MERGE
+    [grant] = run.lease(slots=1)
+    assert grant.unit == leased_unit
     event = HeadEvent("check_run", REPO, HEAD_A, BASE, ACTOR, "rerequested", pull_number=41)
     run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
     run.tick(2000)
@@ -372,6 +376,10 @@ def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Calla
     assert [grade.head for grade in live] == [HEAD_A]
     assert live[0].graded_commit == other_merge
     assert live[0].run != old.run
+    assert live[0].units[ref(leased_unit)].held is True
+    assert live[0].units[ref(leased_unit)].outcome == ""
+    stale = run.engine.grade(old.run)
+    assert stale is not None and stale.units[ref(held_unit)].outcome == DROPPED
     assert any(post[0] == HEAD_A for post in run.lab.poster.posts)
     assert port.call_count == 2
 
@@ -545,6 +553,19 @@ def test_bundle_answers_two_requests_for_one_commit_at_once(
     mirror.fetch(merge)
     found: list[bytes | None] = [None, None]
     errors: list[BaseException] = []
+    first_created = threading.Event()
+    second_created = threading.Event()
+    real_run = scheduler.subprocess.run
+
+    def paced_run(argv: list[str], **kwargs: object) -> scheduler.subprocess.CompletedProcess[bytes]:
+        result = real_run(argv, **kwargs)
+        if "update-ref" in argv and "-d" not in argv:
+            if not first_created.is_set():
+                first_created.set()
+                second_created.wait(10.0)
+            else:
+                second_created.set()
+        return result
 
     def ask(slot: int) -> None:
         try:
@@ -552,6 +573,7 @@ def test_bundle_answers_two_requests_for_one_commit_at_once(
         except BaseException as error:
             errors.append(error)
 
+    monkeypatch.setattr(scheduler.subprocess, "run", paced_run)
     threads = [threading.Thread(target=ask, args=(0,)), threading.Thread(target=ask, args=(1,))]
     for thread in threads:
         thread.start()

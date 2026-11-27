@@ -85,6 +85,9 @@
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_regrades_spent_try_survives_a_new_scheduler_over_the_same_store",
     "tests/ci_lab/test_executors_graded_commit.py::test_the_bundle_route_refuses_a_job_with_no_graded_commit",
     "tests/ci_lab/test_worker.py::test_the_client_lets_a_bundle_routes_server_error_raise",
-    "tests/ci_lab/test_scheduler_merge_resolution.py::test_bundle_leaves_no_ref_behind_after_it_answers"
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_bundle_leaves_no_ref_behind_after_it_answers",
+    "tests/ci_lab/test_executors_graded_commit.py::test_mutation_runs_its_trampolines_and_tree_from_the_graded_commit_when_the_lease_names_one",
+    "tests/ci_lab/test_executors_graded_commit.py::test_ensure_graded_with_no_bundler_raises_the_fetch_error",
+    "tests/ci_lab/test_executors_graded_commit.py::test_ensure_graded_writes_the_fetched_bundle_with_the_tree_lock_held"
   ]
 }
