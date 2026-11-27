@@ -179,7 +179,7 @@ class Admission:
 
     def _account_hold(self, slug: str, lane: str, task: dict[str, Any]) -> str:
         environ = dict(os.environ)
-        rows = offer_quota.accounts(environ, time.time(), redis=self.store.redis)
+        rows = offer_quota.accounts(environ, time.time(), redis=self.store.redis)  # pyright: ignore[reportUnknownMemberType]
         return ACCOUNT_HOLD if not offer_quota.available(self.store.config(slug), lane, task, rows, environ) else ""
 
     def _held(self, offer: str) -> dict[str, Any] | None:
