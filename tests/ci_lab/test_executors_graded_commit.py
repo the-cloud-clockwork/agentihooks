@@ -430,3 +430,21 @@ def test_the_bundle_route_answers_404_when_no_store_holds_the_commit(
     )
     assert status == 404
     assert body == {"error": "no served repository's store holds the graded commit"}
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_bundle_route_refuses_a_job_with_no_graded_commit(
+    jobs: queue.Queue, lab: leases.Leases, signer: Signer
+) -> None:
+    jobs.enqueue([Unit(kind="static", key="a", members=("lint",))], "h1", {}, "b1", "g1")
+    granted = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+    [grant] = granted[1]["leases"]
+    status, body = lease_api.respond(
+        lab,
+        signer,
+        "POST",
+        "/bundle",
+        json.dumps({"job": grant["job"], "token": grant["token"]}).encode(),
+        lambda sha: b"unused",
+    )
+    assert (status, body) == (400, {"error": "bad request"})

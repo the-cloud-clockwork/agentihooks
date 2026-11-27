@@ -131,6 +131,25 @@ def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
         mirror.fetch("1" * 40)
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_remote_fetch(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    mirror = _mirror(tmp_path, origin, base)
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_lab_remote_fallback_too(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "origin.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
 def _graded(tmp_path: Path, origin: Path, lab: Path) -> str:
     _git(tmp_path, "init", "-q", "--bare", str(lab))
     side = tmp_path / "side"

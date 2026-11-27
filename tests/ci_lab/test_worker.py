@@ -809,6 +809,25 @@ def test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none(schedu
     assert client.bundle(lease.job, lease.token, "m" * 40) is None
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: Sink, jobs: queue.Queue) -> None:
+    def broken_bundler(sha: str) -> bytes | None:
+        raise RuntimeError("boom")
+
+    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), broken_bundler)
+    _serving(server)
+    try:
+        jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+        with pytest.raises(urllib.error.HTTPError) as error:
+            client.bundle(lease.job, lease.token, "m" * 40)
+        assert error.value.code == 500
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
     seen: list[bytes] = []

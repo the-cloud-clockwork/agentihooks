@@ -95,6 +95,37 @@ def test_resolve_lets_a_refused_pull_request_read_propagate() -> None:
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_resolve_wraps_a_failed_fetch_of_the_merge_as_unanswered(tmp_path: Path) -> None:
+    repo, base, head = _repo(tmp_path)
+    merge = _merge_commit(repo, base, head)
+    reader = FakePullRequests({41: {"merge_commit_sha": merge}})
+    mirror = Mirror(tmp_path / "node", tmp_path / "store", str(tmp_path / "no-such-remote"))
+    with pytest.raises(merges.MergeUnanswered, match="fetching the merge"):
+        merges.resolve(reader, mirror, 41, head)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_resolve_wraps_a_timed_out_fetch_of_the_merge_as_unanswered(tmp_path: Path) -> None:
+    repo, base, head = _repo(tmp_path)
+    merge = _merge_commit(repo, base, head)
+    reader = FakePullRequests({41: {"merge_commit_sha": merge}})
+    mirror = _mirror(tmp_path, repo)
+    with pytest.raises(merges.MergeUnanswered, match="fetching the merge"):
+        merges.resolve(reader, mirror, 41, head, timeout=1e-9)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_resolve_wraps_a_timed_out_parents_read_as_unanswered(tmp_path: Path) -> None:
+    repo, base, head = _repo(tmp_path)
+    merge = _merge_commit(repo, base, head)
+    reader = FakePullRequests({41: {"merge_commit_sha": merge}})
+    mirror = _mirror(tmp_path, repo)
+    mirror.fetch(merge)
+    with pytest.raises(merges.MergeUnanswered, match="fetching the merge"):
+        merges.resolve(reader, mirror, 41, head, timeout=1e-9)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_resolver_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []
 

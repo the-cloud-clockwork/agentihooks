@@ -418,6 +418,60 @@ def test_a_promotion_grade_resolves_no_merge_and_closes_with_no_fallback(lab: Ca
     assert "merge_fallback" not in scheduler.summary(grade)
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_an_unreachable_pull_request_head_is_retired_before_any_merge_is_asked(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
+    port = Mock(side_effect=AssertionError("the merges port must not be asked for an unreachable head"))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    monkeypatch.setattr(type(run.lab.expander), "reachable", lambda self, repo, head: False)
+    _push(run, HEAD_A, 41)
+    actions = run.tick(1000)
+    assert actions[-1].startswith(f"retiring {HEAD_A}")
+    port.assert_not_called()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_pending_regrade_resolution_holds_and_counts_nothing(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    port.side_effect = merges.MergePending("still resolving")
+    actions = run.tick(2000)
+    assert any(action.endswith("is still resolving") for action in actions)
+    assert run.grade(HEAD_A).unmerged == 0
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_regrades_spent_try_survives_a_new_scheduler_over_the_same_store(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    port.side_effect = merges.MergeRefused("GET pulls/41 answered 404")
+    run.tick(2000)
+    assert run.grade(HEAD_A).unmerged == 1
+    rebuilt = run.lab.build(0, Policy(), None)
+    rebuilt.ports = replace(rebuilt.ports, merges=port)
+    again = Run(run.lab, rebuilt)
+    actions = again.tick(3000)
+    assert any("holding the required-frame regrade" in action for action in actions)
+    assert again.grade(HEAD_A).unmerged == 2
+
+
 def _synthetic_merge(repo: Path, base: str, head: str, monkeypatch: pytest.MonkeyPatch) -> str:
     """A commit whose tree is the head's own and whose parents are base then head, as GitHub builds a test merge."""
     for name, value in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t")):
@@ -460,6 +514,21 @@ def test_bundle_answers_a_bundle_of_the_commit_fetchable_once_its_two_parents_ar
     bundle_file.write_bytes(found)
     _git(target, "fetch", "--quiet", str(bundle_file), f"{merge}:refs/heads/merge")
     assert _git(target, "rev-parse", "refs/heads/merge").strip() == merge
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_bundle_leaves_no_ref_behind_after_it_answers(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base, head = origin
+    merge = _synthetic_merge(repo, base, head, monkeypatch)
+    expander = _expander(tmp_path, monkeypatch)
+    mirror = expander.mirror(f"file://{repo}")
+    mirror.fetch(base)
+    mirror.fetch(head)
+    mirror.fetch(merge)
+    assert expander.bundle(merge) is not None
+    assert _git(mirror.store, "for-each-ref", "refs/lab-bundle/").strip() == ""
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

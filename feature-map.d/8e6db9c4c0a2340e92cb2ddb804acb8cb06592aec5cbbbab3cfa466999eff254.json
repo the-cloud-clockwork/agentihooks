@@ -74,6 +74,17 @@
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_an_arbitrary_resolver_error_holds_the_required_frame_regrade",
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_hotfix_head_with_no_merge_yet_spends_one_real_read_per_try",
     "tests/ci_lab/test_scheduler_merge_resolution.py::test_the_summary_carries_the_graded_commit_key_of_a_resolved_grade_and_the_fallback_key_of_one",
-    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge"
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge",
+    "tests/ci_lab/test_merges.py::test_resolve_wraps_a_failed_fetch_of_the_merge_as_unanswered",
+    "tests/ci_lab/test_merges.py::test_resolve_wraps_a_timed_out_fetch_of_the_merge_as_unanswered",
+    "tests/ci_lab/test_merges.py::test_resolve_wraps_a_timed_out_parents_read_as_unanswered",
+    "tests/ci_lab/test_worktrees.py::test_fetch_passes_its_timeout_to_the_remote_fetch",
+    "tests/ci_lab/test_worktrees.py::test_fetch_passes_its_timeout_to_the_lab_remote_fallback_too",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_an_unreachable_pull_request_head_is_retired_before_any_merge_is_asked",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_pending_regrade_resolution_holds_and_counts_nothing",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_regrades_spent_try_survives_a_new_scheduler_over_the_same_store",
+    "tests/ci_lab/test_executors_graded_commit.py::test_the_bundle_route_refuses_a_job_with_no_graded_commit",
+    "tests/ci_lab/test_worker.py::test_the_client_lets_a_bundle_routes_server_error_raise",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_bundle_leaves_no_ref_behind_after_it_answers"
   ]
 }
