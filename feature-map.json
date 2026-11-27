@@ -17101,6 +17101,7 @@
         "tests/hub/test_pulls.py::test_a_swarm_whose_last_pull_request_closed_unmerged_hears_nothing_from_its_repository",
         "tests/hub/test_pulls.py::test_a_swarm_with_another_open_pull_request_stays_on_the_repository_record",
         "tests/hub/test_pulls.py::test_an_open_pull_request_in_another_repository_keeps_no_swarm_listed",
+        "tests/hub/test_pulls.py::test_a_close_drops_the_swarm_from_the_repository_before_the_last_pull_segment",
         "tests/hub/test_pulls.py::test_a_merged_last_pull_request_keeps_its_swarm_until_one_release_reaches_it",
         "tests/hub/test_pulls.py::test_a_swarm_awaiting_a_release_stays_listed_when_its_other_pull_request_closes",
         "tests/hub/test_pulls.py::test_a_legacy_list_record_names_the_recipients_and_clears_at_the_next_release",

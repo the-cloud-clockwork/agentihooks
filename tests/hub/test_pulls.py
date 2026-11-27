@@ -793,6 +793,14 @@ def test_an_open_pull_request_in_another_repository_keeps_no_swarm_listed() -> N
 
 
 @pytest.mark.feature("hub-repository-record-drops-closed-swarms")
+def test_a_close_drops_the_swarm_from_the_repository_before_the_last_pull_segment() -> None:
+    bus, hub, _ = setup()
+    hub.track("crew", "https://github.com/pull/pull/pull/3")
+    hub.observe(Observation("https://github.com/pull/pull/pull/3", "closed", "a1"))
+    assert record(bus, "https://github.com/pull/pull") == {"swarms": [], "unreleased": []}
+
+
+@pytest.mark.feature("hub-repository-record-drops-closed-swarms")
 def test_a_merged_last_pull_request_keeps_its_swarm_until_one_release_reaches_it() -> None:
     bus, hub, consumer = setup()
     hub.track("crew", URL)
@@ -814,9 +822,10 @@ def test_a_swarm_awaiting_a_release_stays_listed_when_its_other_pull_request_clo
     bus, hub, _ = setup()
     hub.track("crew", URL)
     hub.track("crew", OTHER)
+    hub.track("other", "https://github.com/acme/widgets/pull/9")
     hub.observe(Observation(URL, "merged", "a1"))
     hub.observe(Observation(OTHER, "closed", "b1"))
-    assert record(bus) == {"swarms": ["crew"], "unreleased": ["crew"]}
+    assert record(bus) == {"swarms": ["crew", "other"], "unreleased": ["crew"]}
 
 
 @pytest.mark.feature("hub-repository-record-drops-closed-swarms")
