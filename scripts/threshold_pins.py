@@ -36,6 +36,7 @@ SHRINK_ONLY = (
     "tests/TICK_PATTERN_ALLOWLIST.json",
     "tests/DOCS_SANITY_BASELINE.json",
     "tests/LEDGER_WRITE_DOCTRINE_ALLOWLIST.json",
+    "tests/REPLY_BOUND_ALLOWLIST.json",
 )
 # Each of these moves only with its own gate's evidence, which that gate checks against the base.
 GRADED_BY = (

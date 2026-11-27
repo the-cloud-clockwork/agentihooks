@@ -73,8 +73,18 @@ def head(event: str, actor: str, action: str, base: str = BASE, lane: str = "") 
     return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action, lane=lane)
 
 
-def test_a_push_to_a_branch_is_a_head_event() -> None:
-    assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed")]
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_a_push_to_dev_is_a_head_event_on_the_dev_lane() -> None:
+    assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed", lane="dev")]
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+@pytest.mark.parametrize(
+    "ref",
+    ["refs/heads/feature", "refs/heads/main", "refs/heads/devel", "refs/heads/feature/dev", "refs/heads/a-dev"],
+)
+def test_a_push_to_a_branch_other_than_dev_names_no_head(ref: str) -> None:
+    assert webhooks.head_events("push", push(ref=ref)) == []
 
 
 @pytest.mark.feature("lab-plant-push-intake")
@@ -95,12 +105,12 @@ def test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_b
     ],
 )
 def test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push(ref: str) -> None:
-    assert webhooks.head_events("push", push(ref=ref)) == [head("push", "nestorcolt", "pushed")]
+    assert webhooks.head_events("push", push(ref=ref)) == []
 
 
 @pytest.mark.feature("lab-zero-base-push")
 def test_a_new_branch_push_with_a_zero_before_names_no_head() -> None:
-    payload = push(ref="refs/heads/new-branch")
+    payload = push()
     payload["before"] = "0" * 40
     assert webhooks.head_events("push", payload) == []
 

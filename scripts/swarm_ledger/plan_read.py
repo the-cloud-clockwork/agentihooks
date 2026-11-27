@@ -160,8 +160,22 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
-    ref = phase.get("plan_ref")
+def _own_ref(doc: Mapping[str, Any], phase: Mapping[str, Any], task: Mapping[str, Any]) -> dict[str, str] | None:
+    link = task.get("plan_url")
+    if not link or link == phase.get("plan_url"):
+        return None
+    rows: list[dict[str, Any]] = doc.get("plans") or []
+    artifact = next(
+        (str(row["artifact"]) for row in rows if row.get("artifact") and link in (row.get("url"), row["artifact"])),
+        None,
+    )
+    return {"artifact": artifact, "lines": str(task["plan_lines"])} if artifact else None
+
+
+def _stored(
+    doc: dict[str, Any], phase: dict[str, Any], task: dict[str, Any], load: Callable[[str, str], bytes] | None = None
+) -> str:
+    ref = _own_ref(doc, phase, task) or phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
     if not ref:
@@ -241,7 +255,7 @@ def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, C
     return doc, functools.partial(_served, env) if hosted else None
 
 
-def main(argv=None, environ=None) -> int:
+def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -260,7 +274,7 @@ def main(argv=None, environ=None) -> int:
     from scripts.swarm_ledger.storage import read_ledger
 
     hosted = ledger_link.remote(env)
-    keys = ("tasks", "phases", "artifacts")
+    keys = ("tasks", "phases", "artifacts", "plans")
     doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")
