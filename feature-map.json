@@ -17070,6 +17070,7 @@
         "tests/hub/test_pulls.py::test_the_repository_key_hashes_the_lowercased_repository",
         "tests/hub/test_pulls.py::test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment",
         "tests/hub/test_pulls.py::test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind",
+        "tests/hub/test_pulls.py::test_a_swarm_with_an_open_pull_request_still_hears_its_repository_after_another_one_closes",
         "tests/tick/steps/test_review_queue.py::test_a_pull_review_task_names_its_change_and_author_exactly",
         "tests/tick/steps/test_review_queue.py::test_a_release_review_task_names_its_tag_and_no_author",
         "tests/tick/steps/test_review_queue.py::test_a_merge_group_naming_no_pull_request_has_no_author",

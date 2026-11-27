@@ -742,6 +742,21 @@ def test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind():
     assert event.data == {"repository": REPO, "head": "a1"}
 
 
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_swarm_with_an_open_pull_request_still_hears_its_repository_after_another_one_closes() -> None:
+    _, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.track("crew", OTHER)
+    hub.observe(Observation(URL, "closed", "a1"))
+    drain(consumer)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    assert [(e.swarm, e.type, e.key) for e in drain(consumer)] == [
+        ("crew", "merge_group.requested", "a1"),
+        ("crew", "release.published", "v1"),
+    ]
+
+
 SWEPT = [f"https://github.com/acme/widgets/pull/{number}" for number in range(100, 106)]
 
 
