@@ -147,6 +147,16 @@ configured baseline, and the override clears when the session ends.
 
 ---
 
+## Delivery Requirements
+
+Every agent session starts with a delivery requirements summary of at most 50 words, injected at `SessionStart` on the Claude, Codex and Copilot targets for standalone sessions and swarm seats alike. `agentihooks init` prints the same summary as its last line. The summary asks for each change as one complete pull request, split in two only when it changes more than the file limit, never smaller for size alone, and for the source root fix rather than a workaround the user did not ask for.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_CODEREVIEW_FILELIMIT` | `20` | Code review file limit: a change may be split into two pull requests only when it changes more than this many files. |
+
+---
+
 ## Context Preprocessor (token compression)
 
 > **Periodic rules / CLAUDE.md re-injection was removed on 2026-07-20.** Claude

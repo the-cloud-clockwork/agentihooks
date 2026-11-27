@@ -88,7 +88,7 @@ def test_reopening_scoped_queue_preserves_the_existing_stream_configuration(monk
         stream_info=AsyncMock(side_effect=[NotFoundError(), SimpleNamespace(), SimpleNamespace()]),
         add_stream=AsyncMock(),
     )
-    pull = AsyncMock(return_value=SimpleNamespace())
+    pull = AsyncMock(return_value=(SimpleNamespace(), None))
     monkeypatch.setattr(nats, "_pull", pull)
     loop = SimpleNamespace(run=asyncio.run)
     policy = QueuePolicy(max_deliver=2)
