@@ -3,9 +3,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-import fakeredis
 import pytest
-from redis.exceptions import ConnectionError as RedisConnectionError
 
 import scripts.seat_brief as seat_brief
 from hooks.context import injection_trace
@@ -54,6 +52,8 @@ def plain_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     found.put_agent("sw", AgentRecord(NAME, "eng", "t1", seat=SEAT))
     monkeypatch.setattr(sources, "connect", lambda: found)
@@ -267,6 +267,8 @@ def test_a_store_failure_prints_the_error_and_exits_one(
 def test_a_redis_error_while_reading_prints_the_error_and_exits_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
     def refused() -> RedisStore:
         raise RedisConnectionError("Connection refused")
 
@@ -297,6 +299,8 @@ def test_a_swarm_name_outside_every_lane_holds_no_seat(store: RedisStore, capsys
 
 @pytest.mark.feature("seat-brief")
 def test_a_swarm_seat_reads_the_swarm_store_the_environment_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(swarm_store, "connect", lambda: found)
 
