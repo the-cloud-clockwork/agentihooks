@@ -827,7 +827,7 @@ def test_a_legacy_list_record_names_the_recipients_and_clears_at_the_next_releas
     entry = state.get(pulls.repository_key(REPO))
     assert entry is not None
     state.update(pulls.repository_key(REPO), json.dumps(["crew", "gone"]).encode(), entry.revision)
-    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    hub.announce("https://github.com/Acme/Widgets", "release.published", "v1", {"tag": "v1"})
     hub.announce(REPO, "release.published", "v2", {"tag": "v2"})
     assert [(e.swarm, e.key) for e in drain(consumer)] == [("crew", "v1"), ("gone", "v1"), ("crew", "v2")]
     assert record(bus) == {"swarms": ["crew"], "unreleased": []}

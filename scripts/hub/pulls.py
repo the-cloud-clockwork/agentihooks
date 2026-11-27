@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from scripts.events.bus import Bus, StateConflict, StateStore
 from scripts.events.envelope import Envelope
@@ -56,14 +56,49 @@ def key(url: str) -> str:
 
 
 def repository_key(repository: str) -> str:
-    """Return the state key of the swarms tracking a pull request in ``repository``."""
+    """Return the state key of the swarms with an open or unreleased tracked pull request in ``repository``."""
     return "repo." + hashlib.sha256(repository.lower().encode()).hexdigest()
 
 
-def _joined(swarm: str, swarms: Any) -> list[str] | None:
-    """Return ``swarms`` with ``swarm`` added in order, or None when it is already there."""
-    swarms = swarms or []
-    return None if swarm in swarms else sorted([*swarms, swarm])
+def _record(value: Any) -> dict[str, list[str]]:
+    """Return the repository record ``value`` as its swarms and the swarms awaiting a release, reading a legacy list of
+    swarms as both."""
+    if isinstance(value, list):
+        return {"swarms": value, "unreleased": value}
+    return {"swarms": [], "unreleased": [], **(value or {})}
+
+
+def _joined(swarm: str, value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` with ``swarm`` listed in order, or None when it already is."""
+    record = _record(value)
+    if swarm in record["swarms"]:
+        return None
+    return {**record, "swarms": sorted([*record["swarms"], swarm])}
+
+
+def _merged(swarms: list[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` with ``swarms`` awaiting a release, or None when they already are."""
+    record = _record(value)
+    unreleased = sorted({*record["unreleased"], *swarms})
+    return None if unreleased == record["unreleased"] else {**record, "unreleased": unreleased}
+
+
+def _closed(swarms: list[str], busy: set[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` without each of ``swarms`` that has no open pull request in ``busy`` and
+    no merge awaiting a release, or None when every one stays."""
+    record = _record(value)
+    kept = [
+        swarm for swarm in record["swarms"] if swarm not in swarms or swarm in busy or swarm in record["unreleased"]
+    ]
+    return None if kept == record["swarms"] else {**record, "swarms": kept}
+
+
+def _released(busy: set[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` once a release reached its swarms, keeping only those with an open pull
+    request in ``busy``, or None when that changes nothing."""
+    record = _record(value)
+    released = {"swarms": [swarm for swarm in record["swarms"] if swarm in busy], "unreleased": []}
+    return None if released == record else released
 
 
 def suite_result(app: dict | None, conclusion: str) -> dict:
@@ -197,20 +232,25 @@ class Pulls:
             return {**snapshot, "swarms": sorted([*snapshot["swarms"], swarm])}
 
         _update(self._state, key(url), add)
-        _update(self._state, repository_key(url.rsplit("/pull/", 1)[0]), partial(_joined, swarm))
         stored = self._snapshot(url)
         if stored["state"] not in TERMINAL:
             self._index(stored["url"], True)
+            _update(self._state, repository_key(url.rsplit("/pull/", 1)[0]), partial(_joined, swarm))
 
     def observe(self, seen: Observation) -> None:
         now = self._clock()
         created = []
+        moved: list[str] = []
+        swarms: list[str] = []
 
         def change(snapshot):
             if snapshot is None:
                 return None
             after = json.loads(json.dumps(snapshot))
-            created[:] = _rows(after, _changes(after, seen), now)
+            found = cast(list[tuple[str, Any]], _changes(after, seen))
+            moved[:] = [kind for kind, _ in found]
+            swarms[:] = after["swarms"]
+            created[:] = _rows(after, found, now)
             after["pending"] += created
             return None if after == snapshot else after
 
@@ -218,18 +258,52 @@ class Pulls:
         self._publish(seen.url, created)
         if written is not None:
             self._index(written["url"], written["state"] not in TERMINAL)
+        self._follow(seen.url.rsplit("/pull/", 1)[0], swarms, moved)
 
     def announce(self, repository: str, kind: str, ident: str, data: dict[str, object]) -> None:
-        """Publish event ``kind`` about change ``ident`` of ``repository`` to every swarm tracking a pull request in
-        it, under one id per swarm and change so a redelivery is the same event."""
+        """Publish event ``kind`` about change ``ident`` of ``repository`` to every swarm on its record, under one id
+        per swarm and change so a redelivery is the same event; a release then drops each swarm with nothing open
+        there and leaves none awaiting a release."""
         entry = self._state.get(repository_key(repository))
         now = self._clock()
-        swarms: list[str] = json.loads(entry.value) if entry else []
+        swarms = _record(json.loads(entry.value) if entry else None)["swarms"]
         for swarm in swarms:
             digest = hashlib.sha256(json.dumps([swarm, kind, repository.lower(), ident]).encode()).hexdigest()
             entity = kind.split(".")[0]
             event = Envelope(digest, kind, swarm, entity, ident, 1, now, AUTHOR, {"repository": repository, **data})
             self._events.publish(subject(swarm, *kind.split(".")), event)
+        if kind == "release.published":
+            self._settle(repository, _released)
+
+    def _follow(self, repository: str, swarms: list[str], kinds: list[str]) -> None:
+        """Keep the record of ``repository`` in step with a pull request of ``swarms`` that moved through ``kinds``: a
+        merge leaves its swarms awaiting a release, a close drops those with nothing else open or unreleased there,
+        and a reopen lists them again."""
+        name = repository_key(repository)
+        if "pull.merged" in kinds:
+            _update(self._state, name, partial(_merged, swarms))
+        elif "pull.closed" in kinds:
+            self._settle(repository, partial(_closed, swarms))
+        elif "pull.reopened" in kinds:
+            for swarm in swarms:
+                _update(self._state, name, partial(_joined, swarm))
+
+    def _settle(self, repository: str, change: Callable[[set[str], Any], dict[str, list[str]] | None]) -> None:
+        """Rewrite the record of ``repository`` through ``change`` given the swarms with an open tracked pull request
+        there, then list again each swarm a pull request opened for while it was rewritten."""
+        name = repository_key(repository)
+        busy = self._busy(repository)
+        _update(self._state, name, partial(change, busy))
+        for swarm in self._busy(repository) - busy:
+            _update(self._state, name, partial(_joined, swarm))
+
+    def _busy(self, repository: str) -> set[str]:
+        """Return the swarms tracking an open pull request in ``repository``."""
+        index = self._state.get(OPEN)
+        prefix = repository.lower() + "/pull/"
+        urls: list[str] = json.loads(index.value) if index else []
+        entries = self._state.get_many([key(url) for url in urls if url.lower().startswith(prefix)])
+        return {swarm for entry in entries if entry is not None for swarm in json.loads(entry.value)["swarms"]}
 
     def _snapshot(self, url: str) -> dict | None:
         entry = self._state.get(key(url))
