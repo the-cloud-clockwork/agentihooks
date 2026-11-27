@@ -52,7 +52,9 @@ class World:
             "permission_mode": "bypassPermissions",
             "cwd": str(self.directory.parent),
         }
-        return conditions.run_step("pre", payload)
+        result = conditions.run_step("pre", payload)
+        assert result is not None
+        return result
 
     def rows(self) -> list[dict]:
         path = log.gate_log_path(SLUG)
