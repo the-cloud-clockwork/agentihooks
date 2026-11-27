@@ -503,3 +503,17 @@ def test_rebound_names_a_walrus_rename_of_the_op_context() -> None:
 def test_the_real_core_never_renames_its_op_context() -> None:
     tree = ast.parse(Path(str(core.__file__)).read_text())
     assert check.rebound(tree, "ledger_core") == []
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_main_names_a_core_that_renames_its_op_context_by_its_short_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    planted = tmp_path / "ledger_core.py"
+    planted.write_text("def apply_op(doc, op, ctx):\n    c = ctx\n    return c\n")
+    monkeypatch.setattr(core, "__file__", str(planted))
+    assert check.main() == 1
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        "FAIL: ledger_core.apply_op renames the op context to c",
+        HELD,
+    ]

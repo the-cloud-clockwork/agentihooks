@@ -50,6 +50,7 @@
     "tests/test_op_context_typed_check.py::test_rebound_is_empty_when_no_function_renames_the_op_context",
     "tests/test_op_context_typed_check.py::test_rebound_names_an_annotated_rename_of_the_op_context",
     "tests/test_op_context_typed_check.py::test_rebound_names_a_walrus_rename_of_the_op_context",
-    "tests/test_op_context_typed_check.py::test_the_real_core_never_renames_its_op_context"
+    "tests/test_op_context_typed_check.py::test_the_real_core_never_renames_its_op_context",
+    "tests/test_op_context_typed_check.py::test_main_names_a_core_that_renames_its_op_context_by_its_short_name"
   ]
 }
