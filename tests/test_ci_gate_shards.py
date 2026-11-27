@@ -2,6 +2,7 @@ import json
 import math
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -101,11 +102,11 @@ def test_a_transient_github_failure_is_retried_with_backoff(binary):
     assert [call.args for call in sleep.call_args_list] == [(5,), (10,)]
 
 
-def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
+def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path: Path) -> None:
     with (
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": []}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=[]),
         pytest.raises(RuntimeError, match="timed out"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
@@ -113,10 +114,12 @@ def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "skipped"])
-def test_nonqueue_verification_rejects_a_terminal_failed_original_without_waiting_for_recovery(tmp_path, conclusion):
+def test_nonqueue_verification_rejects_a_terminal_failed_original_without_waiting_for_recovery(
+    tmp_path: Path, conclusion: str
+) -> None:
     jobs = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": conclusion}]
     with (
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=jobs),
         patch.object(ci_gate_shards.time, "sleep", side_effect=AssertionError("must not wait")),
         pytest.raises(RuntimeError, match="unit \\(3.12, 1\\)"),
     ):
@@ -142,14 +145,14 @@ def test_the_workflow_waits_for_recovery_only_in_the_queue(event):
     assert watch.call_args.kwargs == {"recover": event == "merge_group"}
 
 
-def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accepts_success(tmp_path):
+def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accepts_success(tmp_path: Path) -> None:
     pending = {"name": "unit (3.12, 1)", "status": "in_progress", "conclusion": None}
     passed = {**pending, "status": "completed", "conclusion": "success"}
     other = {"name": "other", "status": "completed", "conclusion": "failure"}
-    pages = [[{"jobs": [pending, other]}], [{"jobs": [passed, other]}]]
+    pages = [[pending, other], [passed, other]]
 
     with (
-        patch.object(ci_gate_shards, "api", side_effect=pages),
+        patch.object(ci_gate_shards, "read_jobs", side_effect=pages),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 0, 1200]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
     ):
@@ -157,43 +160,44 @@ def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accept
     sleep.assert_called_once_with(15)
 
 
-def test_existing_watch_callers_keep_queue_recovery_without_a_new_argument(tmp_path):
+def test_existing_watch_callers_keep_queue_recovery_without_a_new_argument(tmp_path: Path) -> None:
     jobs = [
         {"name": "unit (3.12, 1)", "status": "completed", "conclusion": "failure"},
         {"name": "unit rerun (3.12, 1)", "status": "completed", "conclusion": "success"},
     ]
 
     with (
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=jobs),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
         patch.object(ci_gate_shards.time, "sleep"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
 
 
-def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
+@pytest.mark.feature("shard-verifier-small-job-pages")
+def test_wait_polls_only_the_jobs_page_until_every_shard_passes() -> None:
     polls = iter(
         [
-            [{"jobs": [{"name": "unit (3.12, 1)", "conclusion": "success"}]}],
-            [{"jobs": [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in [1, 2]]}],
+            [{"name": "unit (3.12, 1)", "conclusion": "success"}],
+            [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in [1, 2]],
         ]
     )
     with (
-        patch.object(ci_gate_shards, "api", side_effect=lambda endpoint: next(polls)) as api,
+        patch.object(ci_gate_shards, "read_jobs", side_effect=lambda endpoint, size: next(polls)) as read_jobs,
         patch.object(ci_gate_shards.time, "sleep") as sleep,
     ):
         assert ci_gate_shards.watch("org/repo", "123", "2", [1, 2]) is None
-    assert [call.args for call in api.call_args_list] == [
-        ("repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100",)
+    assert [call.args for call in read_jobs.call_args_list] == [
+        ("repos/org/repo/actions/runs/123/attempts/2/jobs", 10)
     ] * 2
     sleep.assert_called_once_with(15)
 
 
 @pytest.mark.parametrize("name", ["unit (3.12, 1)", "unit rerun (3.12, 1)"])
-def test_a_queued_planned_job_never_extends_the_watch_deadline(name):
+def test_a_queued_planned_job_never_extends_the_watch_deadline(name: str) -> None:
     queued = {"name": name, "status": "queued", "conclusion": None}
     with (
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=[queued]),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
         pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
@@ -204,10 +208,10 @@ def test_a_queued_planned_job_never_extends_the_watch_deadline(name):
 
 
 @pytest.mark.parametrize("name", ["lint", "unit (3.12, 2)", "unit rerun (3.12, 2)", "unit (3.11, 1)"])
-def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name):
+def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name: str) -> None:
     queued = {"name": name, "status": "queued", "conclusion": None}
     with (
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": [queued]}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=[queued]),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 200, 300]),
         patch.object(ci_gate_shards.time, "sleep"),
         pytest.raises(RuntimeError, match="timed out after 300 s and 2 polls"),
@@ -216,9 +220,9 @@ def test_a_queued_job_outside_the_plan_never_extends_the_watch_deadline(name):
     assert ci_gate_shards.rate_limit.deadline == 300
 
 
-def test_a_wait_that_never_polls_names_every_planned_shard():
+def test_a_wait_that_never_polls_names_every_planned_shard() -> None:
     with (
-        patch.object(ci_gate_shards, "api", side_effect=AssertionError("must not poll")),
+        patch.object(ci_gate_shards, "read_jobs", side_effect=AssertionError("must not poll")),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 300]),
         pytest.raises(RuntimeError) as raised,
     ):
@@ -258,7 +262,7 @@ def test_waiting_names_each_missing_shard_by_its_unit_and_rerun_state():
     assert ci_gate_shards.waiting([], []) == []
 
 
-def test_watch_logs_one_line_per_poll_with_what_it_still_waits_for(capsys):
+def test_watch_logs_one_line_per_poll_with_what_it_still_waits_for(capsys: pytest.CaptureFixture[str]) -> None:
     pending = {"name": "unit (3.12, 2)", "status": "in_progress", "conclusion": None}
     first = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"}, pending]
     second = [
@@ -267,7 +271,7 @@ def test_watch_logs_one_line_per_poll_with_what_it_still_waits_for(capsys):
         {"name": "unit (3.12, 3)", "status": "completed", "conclusion": "success"},
     ]
     with (
-        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": first}], [{"jobs": second}]]),
+        patch.object(ci_gate_shards, "read_jobs", side_effect=[first, second]),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[100, 100, 115]),
         patch.object(ci_gate_shards.time, "sleep"),
     ):
@@ -280,10 +284,10 @@ def test_watch_logs_one_line_per_poll_with_what_it_still_waits_for(capsys):
     ]
 
 
-def test_timeout_names_every_shard_still_missing_at_the_last_poll():
+def test_timeout_names_every_shard_still_missing_at_the_last_poll() -> None:
     jobs = [{"name": "unit (3.12, 1)", "status": "in_progress", "conclusion": None}]
     with (
-        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards, "read_jobs", return_value=jobs),
         patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 299, 300]),
         patch.object(ci_gate_shards.time, "sleep"),
         pytest.raises(RuntimeError) as raised,

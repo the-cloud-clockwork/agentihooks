@@ -10,6 +10,7 @@
   "tests": [
     "tests/test_ci_gate_shards.py::test_watch_passes_every_planned_shard_although_a_full_jobs_page_answers_bad_gateway",
     "tests/test_ci_gate_shards.py::test_watch_reads_attempt_jobs_ten_per_page_and_never_a_hundred",
-    "tests/test_ci_gate_shards.py::test_the_jobs_reader_returns_every_job_of_a_102_job_attempt_when_pages_above_25_fail"
+    "tests/test_ci_gate_shards.py::test_the_jobs_reader_returns_every_job_of_a_102_job_attempt_when_pages_above_25_fail",
+    "tests/test_ci_gate_shards.py::test_wait_polls_only_the_jobs_page_until_every_shard_passes"
   ]
 }
