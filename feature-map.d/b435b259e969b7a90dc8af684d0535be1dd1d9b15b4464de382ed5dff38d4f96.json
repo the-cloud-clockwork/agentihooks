@@ -1,0 +1,13 @@
+{
+  "id": "hive-stop-drain-notice",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2863",
+  "behaviour": "The tick step hive drain notice runs in group wrapper health on the slow lane every 120 seconds, and past a ledger stop, as the tick controller, which is not a hive member. Each pass walks every indexed hive and, for a hive whose drain flag and newest drain entry both read draining, leaves one fyi item from swarm at the master seat of each swarm with a live agent on the hive, naming the hive, the drain reason and that swarm's agents. A worker pod stop drain, written by the hive member whose own master item send writes nothing, reaches its masters this way. The item id names the drain entry, so a later pass from any swarm's tick, or a drain whose item another sender already left, sends none. A hive whose newest drain entry reads undrained sends none, and a drain whose agents all ended before the next pass sends none.",
+  "seam": "scripts.tick.steps.host._hive_drain_notice registered as tick step hive drain notice, calling scripts.hive.master_notice.drained for each record of scripts.hive.sweep.indexed; items read through scripts.inbox.store.InboxStore.inbox at master@<slug>",
+  "tests": [
+    "tests/tick/steps/test_hive_drain_notice.py::test_hive_drain_notice",
+    "tests/tick/steps/test_hive_drain_notice.py::test_a_worker_member_stop_drain_reaches_each_served_master_once_from_the_tick",
+    "tests/tick/steps/test_hive_drain_notice.py::test_a_second_pass_over_the_same_drain_sends_no_new_master_item",
+    "tests/tick/steps/test_hive_drain_notice.py::test_a_hive_whose_newest_drain_entry_no_longer_reads_draining_tells_no_master"
+  ]
+}
