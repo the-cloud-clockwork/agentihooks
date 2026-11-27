@@ -1,0 +1,10 @@
+{
+  "id": "lab-remote-basic-scheme",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+  "behaviour": "The lab fallback fetch gives git the header Authorization: Basic with the base64 of lab and AGENTIHOOKS_LAB_REMOTE_TOKEN, the exact credential the lab remote accepts, so the scheduler, relay and worker mirrors reach a head pushed only to the lab remote instead of stopping on the 401 a lowercase basic scheme earns.",
+  "seam": "scripts.ci_lab.worktrees.Lab.environ, the environment Mirror.fetch passes git for the lab remote",
+  "tests": [
+    "tests/ci_lab/test_worktrees.py::test_a_lab_fetch_header_is_the_exact_basic_credential_the_lab_remote_accepts"
+  ]
+}
