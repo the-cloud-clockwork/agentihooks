@@ -525,7 +525,7 @@ def cmd_artifact(args):
     refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
-def cmd_publish_plan(args):
+def cmd_publish_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_ranges
 
     if args.task:
@@ -544,7 +544,7 @@ def cmd_publish_plan(args):
     except ValueError as exc:
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
-    stored = {}
+    stored: dict[str, Any] = {}
     try:
         issue_title = ", ".join(phase["title"] for phase in selected)
         url, where = ledger_publish.publish(
