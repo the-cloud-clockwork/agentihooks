@@ -755,7 +755,6 @@ def test_the_first_pass_retires_the_pull_request_grades_whose_head_nothing_wants
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_first_pass_retires_a_resolved_merge_grade_by_its_head(lab: Callable[..., Run]) -> None:
     merge, parent = "9" * 40, "8" * 40
     run = lab({HEAD_A: replace(plan({"lint": (unit(1),)}), merge_base=parent, graded_commit=merge)})

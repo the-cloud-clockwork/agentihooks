@@ -56,6 +56,13 @@
     "tests/ci_lab/test_merges.py::test_resolve_lets_a_refused_pull_request_read_propagate",
     "tests/ci_lab/test_merges.py::test_the_resolver_reads_each_repository_through_one_reader_of_its_own",
     "tests/ci_lab/test_merges.py::test_background_raises_pending_while_a_resolution_runs_and_answers_it_once_finished",
-    "tests/ci_lab/test_merges.py::test_background_raises_the_resolutions_own_error_once_on_a_later_ask"
+    "tests/ci_lab/test_merges.py::test_background_raises_the_resolutions_own_error_once_on_a_later_ask",
+    "tests/ci_lab/test_merges.py::test_background_raises_unanswered_once_a_resolution_runs_past_its_bound",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_bundle_answers_two_requests_for_one_commit_at_once",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_promotion_grade_resolves_no_merge_and_closes_with_no_fallback",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_a_required_frame_regrade_with_no_merge_yet_holds_then_falls_back_at_the_bound",
+    "tests/ci_lab/test_executors_graded_commit.py::test_tests_runs_its_batch_on_the_graded_commit_when_the_lease_names_one",
+    "tests/ci_lab/test_executors_graded_commit.py::test_ensure_graded_asks_the_bundler_outside_the_tree_lock",
+    "tests/ci_lab/test_worker.py::test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none"
   ]
 }

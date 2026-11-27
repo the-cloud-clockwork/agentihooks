@@ -2760,6 +2760,19 @@ registry and delivery.yaml come from stays the event's own base regardless. `Mir
 worker's request for the graded commit's git bundle, prerequisite on its two parents, from whichever served
 repository's store under its root already holds it.
 
+Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
+read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
+each held under `merges.Background` and reused for `FRESH_S` (30) seconds once resolved or `ABSENT_S` (10)
+seconds once found absent, so a pass asking again soon after rarely repeats the GitHub read. A head whose merge
+GitHub has not built yet, whose read was refused or unanswered, or whose resolution ran past `merges.BOUND_S`
+(45) seconds, waits out its quiet window again with the try counted in its waiting entry; at the `UNMERGED_TRIES`
+(4) one the lab stops asking and grades the bare head against its event base instead, as it did before this
+merge resolution existed, and the grade's required check names that it did. A live grade whose `required` frame
+goes stale (a release requirement changed after it started) regrades through the same bound: the regrade keeps
+its own count of tries on the grade document across passes and restarts, so a pull request or hotfix regrade
+whose merge has not resolved again yet holds rather than failing the check, and reaches the same bare-head
+fallback at the same bound.
+
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
 | `.github/workflows/test.yml` | `git show <grader>:.github/workflows/test.yml` | The workflow text |
@@ -2791,7 +2804,13 @@ toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that 
 is the delivered base whenever that base is an ancestor of the head and the head itself when the
 base descends from it: GitHub delivers a pull
 request's base with its head, and a base ahead of the fork point would read what dev gained since
-as removed by the head. The grader, the run key and the base a grade names stay the delivered
+as removed by the head. A pull request or hotfix grade that resolved the test merge GitHub built
+for its pull request diffs against that merge's first parent instead, and reads its head files,
+tree and unit keys from the merge commit rather than the bare head; the context a static unit's
+steps read gives `github.sha` as that merge and `inputs.base`/`github.event.pull_request.base.sha`
+as the merge's first parent, since that is the base the job and lease carry for such a grade,
+while `github.event.pull_request.head.sha` stays the head and the grader stays the event's own
+base. The grader, the run key and the base a grade names stay the delivered
 base, and a head that shares no history with its base fails expansion. The plan groups units by
 label, so each label is one gate with its own check run.
 
@@ -2846,7 +2865,7 @@ The static executor supplies these names:
 
 | Name | Value |
 |---|---|
-| `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
+| `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision: the merge's first parent for a resolved pull request grade, its event base otherwise |
 | `github.sha` | The lease's graded commit, the test merge GitHub built for a resolved pull request, when it names one, else the lease's head |
 | `github.event.pull_request.head.sha` | The lease's head, whether or not the lease names a graded commit |
 | `github.event_name` | `pull_request`, at every class, since a static unit's key holds no class |
