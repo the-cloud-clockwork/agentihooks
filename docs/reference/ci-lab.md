@@ -2452,6 +2452,7 @@ key; the builders are pure and read no file, clock or network.
 | `grade` | `base` | Base commit sha |
 | `grade` | `tier` | Delivery tier: pull request, queue or promotion |
 | `grade` | `grader` | The protected grader revision |
+| `grade` | `graded_commit` | The test merge GitHub built for a resolved pull request, omitted from the key when none resolved |
 
 ### Rules the keys rely on
 
@@ -2676,6 +2677,14 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   one. A head whose grade already exists still takes its lane: the lane's older head is
   superseded and the lane names the existing run, so a head first graded outside its pull request
   lane holds that lane afterwards.
+- A head announced twice holds one live grade. When a pull request or hotfix request resolves a
+  merge, `Scheduler._replace_others` finds every other live grade of its head in either class,
+  carrying no grade ref, on a different commit, whatever its lane, and replaces it the way a
+  lane's older head is replaced, carrying its unfinished jobs into the new grade; a notice naming
+  no pull request yields instead of holding, with `Scheduler._hold` printing `left <head> to
+  <what>` and writing nothing, when a waiting pull request entry of its head or a live grade of
+  it already on a resolved merge covers it, and a request naming a pull request number drops the
+  waiting notice its head left in the other class.
 - A `closed` pull request head starts no grade. `Scheduler._close` ends what the closed pull
   request holds in its lane of the pull request class, told by its base: GitHub sets a pull
   request's base commit at its last head and repeats it when the pull request closes. It drops
@@ -2729,8 +2738,10 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   in neither listing, so a restart retires its grade and the pull request's `opened` delivery
   grades it again.
 
-Known limits: a rerequested check run and a signed notice name no lane, so such a head's lane is
-its own sha until its pull request delivers it; two open pull requests from two branches whose
+Known limits: a rerequested check run and a signed notice name no lane, so such a head still has
+its own lane, its sha, until its pull request delivers it, but a grade on a resolved merge
+replaces the head's other pull request grades in every lane, and a notice yields to a waiting or
+live pull request grade of its head; two open pull requests from two branches whose
 heads are one commit graded against one base share a single grade, so closing one of them, or
 pushing a newer head to it, ends the pending units of that commit for both until the other is
 pushed or reopened; of two pull requests from one head branch whose heads arrive in one quiet
@@ -2748,9 +2759,37 @@ one that ended without one.
 Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
 workflow: `lint`, `type-gate`, `semgrep` and `test-count`, the jobs
 `scripts.ci_lab.static_gates.STATIC_JOBS` names. The grader revision is the head of a promotion or
-backfill grade and the base of every other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand`
+backfill grade and the base of every other grade, whether or not the grade carries a graded commit.
+`scripts.ci_lab.scheduler.MirrorExpander.expand`
 reads three inputs at that revision from the git mirror and passes them to
 `scripts.ci_lab.static_gates.discover`:
+
+A pull request or hotfix head resolved against the test merge GitHub built for its pull request reads its static
+gate's head files and its tree from that merge commit instead of the bare head, and its units diff against the
+merge's first parent instead of the git merge base of head and base; the grader revision a gate's workflow,
+registry and delivery.yaml come from stays the event's own base regardless. `MirrorExpander.bundle` answers a
+worker's request for the graded commit's git bundle, prerequisite on its two parents, from whichever served
+repository's store under its root already holds it.
+
+Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
+read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
+each held under `merges.Background` and reused until `FRESH_S` (30) seconds after a thread began its resolution, so
+a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
+answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again.
+A resolution still waiting for one of the `merges.WORKERS` (4) threads has read nothing, so its head stays held
+and spends no try, and the bound of a resolution runs from when a thread began it. A head whose merge GitHub has not
+built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose
+resolution ran past `merges.BOUND_S` (45) seconds, waits out its quiet window again with the try counted in its
+waiting entry, under the `UNMERGED_TRIES` (4) one; at that one the lab gives up on asking for a merge of the
+head instead, keeps its waiting entry's window from that try unrestarted, and starts the next pass on it at
+once with no further read of GitHub, grading the bare head against its event base instead, as it did before
+this merge resolution existed, and the grade's required check names that the lab got no test merge within that
+many tries, true of every one of those causes. A live grade whose `required` frame goes stale (a release
+requirement changed after it started) regrades through the same bound. It has no waiting entry and so no
+window: each pass that advances the grade spends one try, unlike a fresh head's hold, and the regrade keeps its
+count of tries on the grade document across passes and restarts, so a pull request or hotfix regrade whose merge
+has not resolved again yet holds rather than failing the check, and grades the bare head with the same fallback
+on the pass after its `UNMERGED_TRIES`th try.
 
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
@@ -2783,7 +2822,13 @@ toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that 
 is the delivered base whenever that base is an ancestor of the head and the head itself when the
 base descends from it: GitHub delivers a pull
 request's base with its head, and a base ahead of the fork point would read what dev gained since
-as removed by the head. The grader, the run key and the base a grade names stay the delivered
+as removed by the head. A pull request or hotfix grade that resolved the test merge GitHub built
+for its pull request diffs against that merge's first parent instead, and reads its head files,
+tree and unit keys from the merge commit rather than the bare head; the context a static unit's
+steps read gives `github.sha` as that merge and `inputs.base`/`github.event.pull_request.base.sha`
+as the merge's first parent, since that is the base the job and lease carry for such a grade,
+while `github.event.pull_request.head.sha` stays the head and the grader stays the event's own
+base. The grader, the run key and the base a grade names stay the delivered
 base, and a head that shares no history with its base fails expansion. The plan groups units by
 label, so each label is one gate with its own check run.
 
@@ -2845,8 +2890,9 @@ The static executor supplies these names:
 
 | Name | Value |
 |---|---|
-| `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
-| `github.sha`, `github.event.pull_request.head.sha` | The lease's head |
+| `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision: the merge's first parent for a resolved pull request grade, its event base otherwise |
+| `github.sha` | The lease's graded commit, the test merge GitHub built for a resolved pull request, when it names one, else the lease's head |
+| `github.event.pull_request.head.sha` | The lease's head, whether or not the lease names a graded commit |
 | `github.event_name` | `pull_request`, at every class, since a static unit's key holds no class |
 | `github.run_id` | The lease's job id |
 | `github.run_attempt`, `github.run_number` | `1` |
@@ -2965,7 +3011,9 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 
 #### A head no node mirror can hold
 
-Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, never the test
+merge `refs/pull/*/merge` GitHub builds and replaces, so a worker's lease API bundle request is the only path a
+graded commit reaches a node, and so a
 worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
 `gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
 `MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a

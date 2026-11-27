@@ -1058,7 +1058,8 @@
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_whose_token_is_refused_raises_an_os_error",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_without_the_lab_app_settings_raises_an_os_error",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_asks_the_lab_app_for_read_access_to_pull_requests_and_refs",
-        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_service_scheduler_lists_wanted_heads_through_the_lab_app"
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_service_scheduler_lists_wanted_heads_through_the_lab_app",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_first_pass_retires_a_resolved_merge_grade_by_its_head"
       ]
     },
     {

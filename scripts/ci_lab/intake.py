@@ -35,7 +35,9 @@ TIER_EVENTS = {"check_run": PULL_REQUEST, NOTICE: PULL_REQUEST, PLANT: PULL_REQU
 
 @dataclass(frozen=True)
 class GradeRequest:
-    """One head of one repository the lab is asked to grade against its base, in a tier, for an actor."""
+    """One head of one repository the lab is asked to grade against its base, in a tier, for an actor. A pull
+    request head carries its pull request number, 0 for every other event, and, once resolved, the test merge
+    GitHub built for it, empty until then."""
 
     repo: str
     head: str
@@ -44,6 +46,8 @@ class GradeRequest:
     actor: str
     bypass_negative: bool
     plant: bool = False
+    pull_number: int = 0
+    graded_commit: str = ""
 
 
 def request_from(event: HeadEvent) -> GradeRequest:
@@ -56,6 +60,7 @@ def request_from(event: HeadEvent) -> GradeRequest:
         actor=event.actor,
         bypass_negative=event.action == RERUN,
         plant=event.event == "plant",
+        pull_number=event.pull_number,
     )
 
 
@@ -98,5 +103,10 @@ def reconcile(open_pull_requests: Iterable[Mapping[str, Any]], graded: Callable[
         repo, head = pull["base"]["repo"]["html_url"], pull["head"]["sha"]
         if not graded(repo, head):
             author, lane = pull["user"]["login"], pull_lane(pull)
-            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, lane))
+            number = pull.get("number", 0)
+            heads.append(
+                HeadEvent(
+                    PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, lane=lane, pull_number=number
+                )
+            )
     return heads
