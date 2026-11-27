@@ -2767,6 +2767,21 @@
       ]
     },
     {
+      "id": "hub-preemption-victim-rotation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-preempt-victim-rotation",
+      "behaviour": "Preemption skips a victim task for thirty minutes across successor holders, new waiting tasks and store reconstruction. It asks another eligible holder or nobody when only recent victims remain. At exactly thirty minutes the task is eligible again; remaining holders keep their rank and newest start order, and urgent and focused holders stay exempt.",
+      "seam": "preempt.step through the hub relaunch fixture; victim task history; thirty minute boundary",
+      "tests": [
+        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_rotates_to_other_holder",
+        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_waits_for_thirty_minutes",
+        "tests/hub/test_preemption_relaunch.py::test_victim_task_history_survives_claim_refund_and_expires"
+      ],
+      "rules": [
+        "preempt-repeated-victim-task"
+      ]
+    },
+    {
       "id": "swarm-preempt-claim-view-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
