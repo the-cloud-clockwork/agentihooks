@@ -4,17 +4,15 @@ import error, and raises one setup alert per gate per hour naming the gate and t
 import fcntl
 import io
 import json
+import os
 import re
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
-from threading import Timer
-from typing import Any, TextIO
+from typing import Any
 
 import pytest
 
@@ -22,6 +20,8 @@ from scripts.gates import entry, import_failure, log
 from scripts.gates.base import Decision
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api.client import ResourceClient
+
+pytest_plugins = ("pytest_timeout",) if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1" else ()
 
 ROOT = Path(__file__).resolve().parents[2]
 SLUG, ME, TASK = "sw", "engineer@1-1", "t1"
@@ -449,36 +449,28 @@ def test_no_gate_name_exits_one(world: World) -> None:
     assert entry.main([], io.StringIO(PAYLOAD), dict(ENV), world.home) == 1
 
 
-@contextmanager
-def held_lock(path: Path) -> Iterator[TextIO]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)
-        release = Timer(1.0, held.close)
-        release.start()
-        try:
-            yield held
-        finally:
-            release.cancel()
-            release.join()
-
-
 @pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.timeout(3, method="signal")
 def test_a_held_lock_is_tried_a_bounded_number_of_times(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pauses: list[float] = []
     monkeypatch.setattr(import_failure.time, "sleep", pauses.append)
     lock = log.gates_dir(SLUG, tmp_path) / "import-alerts.lock"
-    with held_lock(lock):
+    lock.parent.mkdir(parents=True)
+    with lock.open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
         with pytest.raises(TimeoutError, match="stayed locked"):
             import_failure.claim(SLUG, "absent", int(START * 1000), tmp_path)
     assert pauses == [0.05] * 20
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.timeout(3, method="signal")
 def test_a_lock_freed_between_tries_is_taken(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pauses: list[float] = []
     lock = log.gates_dir(SLUG, tmp_path) / "import-alerts.lock"
-    with held_lock(lock) as held:
+    lock.parent.mkdir(parents=True)
+    with lock.open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
 
         def release(pause: float) -> None:
             pauses.append(pause)
@@ -491,13 +483,16 @@ def test_a_lock_freed_between_tries_is_taken(tmp_path: Path, monkeypatch: pytest
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
+@pytest.mark.timeout(3, method="signal")
 def test_a_held_lock_skips_the_alert_and_keeps_the_call(
     world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.absent_gate_module"))
     monkeypatch.setattr(import_failure.time, "sleep", lambda pause: None)
     lock = log.gates_dir(SLUG, world.home) / "import-alerts.lock"
-    with held_lock(lock):
+    lock.parent.mkdir(parents=True)
+    with lock.open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
         assert world.main("absent") == 0
     assert "agentihooks gate absent: alert hour not claimed: TimeoutError: " in capsys.readouterr().err
     assert len(world.rows()) == 1 and world.sent == []
