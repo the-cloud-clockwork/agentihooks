@@ -109,6 +109,8 @@ def test_a_failed_unit_keeps_its_gate_failed_whatever_else_the_gate_lost(lab: Ca
     assert last(run, "lint") == ("completed", "failure")
     assert last(run, scheduler.REQUIRED) == ("completed", "failure")
     assert run.grade(HEAD_A).conclusion == "failure"
+    assert shown(run, "lint").summary == f"2 units of lint on {HEAD_A} against {BASE}"
+    assert shown(run, scheduler.REQUIRED).summary == f"2 units of required on {HEAD_A} against {BASE}"
 
 
 @pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
@@ -122,10 +124,13 @@ def test_a_failed_gate_keeps_the_required_check_failed_beside_a_gate_that_only_l
 
     run.tick(1100)
 
+    note = f"1 units ended without a verdict, lost by the lab: {lost.key}. A rerequest of this check grades them again."
     assert last(run, "lint") == ("completed", "neutral")
     assert last(run, "semgrep") == ("completed", "failure")
     assert last(run, scheduler.REQUIRED) == ("completed", "failure")
     assert run.grade(HEAD_A).conclusion == "failure"
+    assert shown(run, "lint").summary == f"1 units of lint on {HEAD_A} against {BASE}\n{note}"
+    assert shown(run, scheduler.REQUIRED).summary == f"2 units of required on {HEAD_A} against {BASE}"
 
 
 @pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
@@ -214,11 +219,12 @@ def test_a_sibling_head_s_grade_completes_in_the_pass_that_concludes_a_grade_wit
     run.push(HEAD_A, event="pull_request", action="synchronize")
     run.push(HEAD_B, lane="other", event="pull_request", action="synchronize")
     run.tick(1000)
-    run.lease(ttl_ms=100)
-    run.finish(run.lease()[0], outcomes.PASSED, {})
+    grants = {grant.head: grant for grant in run.lease(slots=2, ttl_ms=100)}
+    run.finish(grants[HEAD_B], outcomes.PASSED, {})
 
     run.tick(1100)
 
+    assert run.grade(HEAD_A).units[ref(lost)].outcome == outcomes.LOST
     assert last(run, scheduler.REQUIRED, HEAD_B) == ("completed", "success")
     assert last(run, scheduler.REQUIRED, HEAD_A)[0] == "completed"
     assert run.lab.client.smembers(scheduler.LIVE) == set()
