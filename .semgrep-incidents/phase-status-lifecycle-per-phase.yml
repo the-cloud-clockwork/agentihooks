@@ -1,0 +1,23 @@
+rules:
+  - id: phase-status-lifecycle-per-phase
+    languages: [python]
+    severity: ERROR
+    message: >-
+      phase_state.status builds the phase states of every new ledger generation for the page. Calling lifecycle or
+      label there rebuilds the done phase set over every phase and scans every task for the plan task, once per phase
+      and twice through label, so the view costs phases times all phases and tasks. Build the done set, the phase map
+      and the plan task index once in status and pass them to _lifecycle and _waits.
+    paths:
+      include:
+        - /scripts/swarm/phase_state.py
+        - phase-status-lifecycle-per-phase.py
+    patterns:
+      - pattern-inside: |
+          def $STATUS(...):
+              ...
+      - metavariable-regex:
+          metavariable: $STATUS
+          regex: ^status(_\w+)?$
+      - pattern-either:
+          - pattern: lifecycle(...)
+          - pattern: label(...)

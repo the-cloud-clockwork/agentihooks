@@ -6136,6 +6136,28 @@
       ]
     },
     {
+      "id": "swarm-phase-status-linear",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The page view's phase status builds the done phase set, the phase map and each phase's own plan task once per call, so publishing a watched ledger costs work linear in its phases and tasks instead of phases times phases and tasks, with each phase's state and label unchanged.",
+      "seam": "scripts.swarm.phase_state.status over lifecycle and label",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_status_scans_phases_and_tasks_a_fixed_number_of_times_whatever_the_phase_count",
+        "tests/swarm/test_phase_state.py::test_status_reports_each_phase_s_lifecycle_and_label_exactly"
+      ]
+    },
+    {
+      "id": "swarm-published-status-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The published swarm status keeps only the newest hundred transfers, as status already does for history, and the swarm view reads and decodes the published key once, so the ledger server's two second watch of each ledger stops fetching every handoff body ever written.",
+      "seam": "scripts.swarm.commands.publish and scripts.swarm.commands.view over lifecycle.view",
+      "tests": [
+        "tests/swarm/test_commands.py::test_publish_keeps_the_newest_hundred_transfers_and_every_other_status_key",
+        "tests/swarm/test_commands.py::test_view_reads_the_published_status_once"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
