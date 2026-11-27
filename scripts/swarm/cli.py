@@ -2330,7 +2330,7 @@ def _close_members(ledger, slug, agent, lead, fields):
             ledger.update_task(slug, member, fields, by=agent.name)
 
 
-def cmd_block(store, args):
+def cmd_block(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     ledger = LedgerClient()
     row = ledger.task(args.slug, agent.task)

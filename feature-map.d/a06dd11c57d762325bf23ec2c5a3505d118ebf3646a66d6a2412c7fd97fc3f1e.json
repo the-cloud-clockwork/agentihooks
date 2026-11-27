@@ -8,6 +8,7 @@
   "tests": [
     "tests/swarm/test_block_push.py::test_block_under_panic_saves_the_unpushed_commit_as_a_patch_and_blocks",
     "tests/swarm/test_block_push.py::test_block_under_panic_saves_only_the_commits_after_the_last_push",
+    "tests/swarm/test_block_push.py::test_save_patch_creates_a_missing_work_folder",
     "tests/swarm/test_block_push.py::test_block_under_panic_still_refuses_a_registered_fix_branch"
   ]
 }

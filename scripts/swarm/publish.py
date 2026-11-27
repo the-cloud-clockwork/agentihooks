@@ -301,8 +301,8 @@ def task_worktrees(repo: str, task: dict[str, Any], agent: AgentRecord) -> Itera
             yield repository, scoped, root
 
 
-def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
-    record = {}
+def pushed_branches(repo: str, task: dict[str, Any], agent: AgentRecord) -> dict[str, Any]:
+    record: dict[str, Any] = {}
     for repository, scoped, root in task_worktrees(repo, task, agent):
         if stack.pushed(root, scoped["branch"]):
             record = branch_record(checkout_fields(root), repository, {**task, **record})
@@ -323,10 +323,10 @@ def block_branches(
 def held_branches(
     repo: str, task: dict[str, Any], agent: AgentRecord, slug: str
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Record each pushed task worktree and save each unpushed one whose push the swarm's panic holds as a patch in the
-    task work folder; any other unpushed worktree refuses as the pushed branches check does."""
+    """Record each pushed task worktree and, once no unpushed worktree refuses as the pushed branches check does, save
+    each unpushed one whose push the swarm's panic holds as a patch in the task work folder."""
     record: dict[str, Any] = {}
-    held: list[dict[str, Any]] = []
+    waiting: list[tuple[Path, Path, stack.Unpushed]] = []
     for repository, scoped, root in task_worktrees(repo, task, agent):
         try:
             if stack.pushed(root, scoped["branch"]):
@@ -334,8 +334,9 @@ def held_branches(
         except stack.Unpushed as unpushed:
             if not blocker_window.held_push(str(root), unpushed.branch, slug):
                 raise
-            held.append(save_patch(root, repository, unpushed, ledger_workspace.folder(slug, agent.task)))
-    return record, held
+            waiting.append((root, repository, unpushed))
+    folder = ledger_workspace.folder(slug, agent.task)
+    return record, [save_patch(root, repository, unpushed, folder) for root, repository, unpushed in waiting]
 
 
 def save_patch(root: Path, repository: Path, unpushed: stack.Unpushed, folder: Path) -> dict[str, Any]:
@@ -344,7 +345,7 @@ def save_patch(root: Path, repository: Path, unpushed: stack.Unpushed, folder: P
     text = execute(["git", "format-patch", "--stdout", span], root)
     folder.mkdir(parents=True, exist_ok=True)
     patch = folder / f"{repository.name}.patch"
-    patch.write_text(text)
+    patch.write_text(text, encoding="utf-8")
     return {
         "repository": str(repository),
         "branch": unpushed.branch,
