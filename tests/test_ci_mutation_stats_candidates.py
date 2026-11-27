@@ -30,7 +30,12 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute:
         "    Path('selection.json').write_text(json.dumps(result))\n" + plugin
     )
     if not execute:
-        items = pytester.getitems(root / "test_sample.py")
+        if plugin:
+            items = pytester.getitems(root / "test_sample.py")
+        else:
+            pytester.syspathinsert()
+            module = pytest.Module.from_parent(pytester._request.session, path=root / "test_sample.py")
+            items = pytester.genitems([module])
         selected = stats_candidates.candidate_tests(items, root, {"app.py": [2]})
         return {"original": [item.name for item in items], "selected": [item.name for item in selected]}
     result = pytester.runpytest_inprocess(
