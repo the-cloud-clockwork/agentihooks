@@ -7,6 +7,9 @@ Agent text is for the operator: plain words saying what was done or why it was s
 import re
 from collections.abc import Collection
 from itertools import groupby
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
@@ -81,7 +84,15 @@ def can_change(entry, by, members):
     return entry.get("by") == by or members.get(by, {}).get("role") == "orchestrator"
 
 
-def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
+def post_status(
+    thread: list[dict[str, Any]],
+    by: str,
+    entry_id: str,
+    text: str,
+    ctx: OpContext,
+    target: str,
+    attachments: list[dict[str, Any]] | None = None,
+) -> None:
     """An agent's comment amends its own latest one on the item, unless anyone commented after it or it is a notice."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
@@ -102,14 +113,14 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     seen(ctx, by)
 
 
-def post_outcome(thread, op, ctx, target):
+def post_outcome(thread: list[dict[str, Any]], op: dict[str, Any], ctx: OpContext, target: str) -> None:
     if not any(e["id"] == op["id"] for e in thread):
         thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "outcome": op["outcome"]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
 
-def post_answer(thread, op, ctx, target):
+def post_answer(thread: list[dict[str, Any]], op: dict[str, Any], ctx: OpContext, target: str) -> None:
     """An answer to the operator or a swarm notice never amends a status comment and is never amended."""
     if not any(e["id"] == op["id"] for e in thread):
         key = "to" if "to" in op else "notice"
@@ -118,7 +129,7 @@ def post_answer(thread, op, ctx, target):
     seen(ctx, op["by"])
 
 
-def seen(ctx, by):
+def seen(ctx: OpContext, by: str) -> None:
     member = ctx.meta.get("members", {}).get(by)
     if member is not None:
         member["last_seen"] = ctx.at
@@ -145,7 +156,7 @@ def worktree(op, carries):
     return folder
 
 
-def refused(text, kind, where, ctx):
+def refused(text: str, kind: str, where: str, ctx: OpContext) -> bool:
     found = problems(text, kind)
     if found:
         ctx.refused.append(f"{where} refused: {'; '.join(found)}")
@@ -156,7 +167,7 @@ def addressed(thread, op):
     return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
 
 
-def agent_thread_op(thread, op, ctx, target, noun):
+def agent_thread_op(thread: list[dict[str, Any]], op: dict[str, Any], ctx: OpContext, target: str, noun: str) -> bool:
     by, text = op["by"], op.get("text", "")
     if op.get("attachments") and by not in ctx.meta.get("members", {}):
         return False

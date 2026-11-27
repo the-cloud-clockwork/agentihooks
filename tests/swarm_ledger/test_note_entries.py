@@ -1,6 +1,8 @@
 from types import SimpleNamespace
+from typing import cast
 
 from scripts.swarm_ledger import ledger_comments, ledger_core
+from scripts.swarm_ledger.op_context import OpContext
 
 
 def context():
@@ -32,7 +34,7 @@ def test_an_entry_on_any_other_thread_has_no_comments_thread():
 def test_a_member_note_is_stored_through_the_shared_entry():
     thread, ctx = [], context()
     op = {"op": "add", "id": "n2", "thread": "notes", "by": "eng", "text": "Later"}
-    assert ledger_comments.agent_thread_op(thread, op, ctx, "notes/n2", "note") is True
+    assert ledger_comments.agent_thread_op(thread, op, cast(OpContext, ctx), "notes/n2", "note") is True
     assert thread == [{"id": "n2", "by": "eng", "at": 42, "text": "Later", "comments": []}]
     assert ctx.events == [(("eng", "note added", "notes/n2"), {"id": "n2", "text": "Later"})]
 
@@ -41,7 +43,7 @@ def test_an_operator_note_is_stored_through_the_shared_entry():
     doc, ctx, stamps = {"notes": []}, context(), []
     ctx.stamp = lambda *args: stamps.append(args)
     op = {"op": "add", "id": "n3", "thread": "notes", "text": "Later"}
-    assert ledger_core.apply_op(doc, op, ctx) is True
+    assert ledger_core.apply_op(doc, op, cast(OpContext, ctx)) is True
     assert doc["notes"] == [{"id": "n3", "by": "operator", "at": 42, "text": "Later", "comments": []}]
     assert ctx.events == [(("operator", "note added", ""), {"id": "n3", "text": "Later"})]
     assert stamps == [("notes", "operator")]

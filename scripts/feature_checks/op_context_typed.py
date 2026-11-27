@@ -173,7 +173,8 @@ def main(modules: Iterable[ModuleType] | None = None, context: object = None) ->
 
         stamps: dict[str, dict[str, Any]] = {}
         modules = op_modules(ledger_core)
-        context = ledger_core.Context({"rev": 0, "stamps": stamps}, 0)
+        pinned: OpContext = ledger_core.Context({"rev": 0, "stamps": stamps}, 0)
+        context = pinned
     found = lines(modules, context)
     for line in found:
         print(line)
