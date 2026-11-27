@@ -117,7 +117,7 @@ def failed(store: RedisStore, slug: str, agent: AgentRecord, reason: str = LAUNC
         retry = {
             **row,
             "id": uuid4().hex,
-            "at": at,
+            "at": max(at, row["at"] + 1),
             "successor": "",
             "continuity": {"state": "pending"} if row["handoff"] else row["continuity"],
             "binding": {"state": "pending"},

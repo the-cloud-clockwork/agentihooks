@@ -15484,7 +15484,7 @@
       "id": "expert-newest-seat-transfer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-newest-seat-transfer",
-      "behaviour": "An expert successor receives the newest transfer of its own lineage seat. Older pending history and foreign seats cannot suppress recovery or replace that transfer. Failed launch retries, room refusal, history and current occupant confirmation keep their existing behavior.",
+      "behaviour": "An expert successor receives the newest transfer of its own lineage seat. Older pending history and foreign seats cannot suppress recovery or replace that transfer. The runtime handoff matches the selected transfer. Failed launch retries sort after their originals even when the clock regresses or ties, while failed bindings retain the observed clock. Room refusal, history and current occupant confirmation keep their existing behavior.",
       "seam": "swarm.expert_seat.run; handoff.transfers.attach and confirm",
       "tests": [
         "tests/swarm/test_expert_seat_transfer.py::test_first_expert_needs_no_transfer",

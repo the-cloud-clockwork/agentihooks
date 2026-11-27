@@ -205,13 +205,14 @@ def _launch(
     counted: list[int] = []
 
     def prepare(record: AgentRecord) -> dict[str, Any]:
+        transfer: dict[str, Any] | None = SEAT.transfers.attach(store, slug, record, seat=record.seat)
         task: dict[str, Any] = {
             "id": lineage.id,
             "title": lineage.title,
             "mission": lineage.mission,
             "generation": number,
-            "handoff": store.handoff(slug, lineage.id),
-            "transfer": SEAT.transfers.attach(store, slug, record, seat=record.seat),
+            "handoff": transfer["handoff"] if transfer else store.handoff(slug, lineage.id),
+            "transfer": transfer,
             "requires_harness": expert_launch.HARNESS,
             expert_launch.EFFORT_KEY: lineage.effort,
         }
