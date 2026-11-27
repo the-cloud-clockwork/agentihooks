@@ -77,6 +77,26 @@ def test_fetch_takes_only_the_objects_the_node_mirror_lacks(
     assert capfd.readouterr() == ("", "")
 
 
+@pytest.mark.feature("lab-scheduler-git-fetch-bound")
+def test_worker_mirror_fetch_keeps_the_unbounded_default(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _commit(origin, "a", "a")
+    mirror = worktrees.Mirror(tmp_path / "node", tmp_path / "store", origin.as_uri())
+    calls: list[float | None] = []
+    run = subprocess.run
+
+    def recorded(*args: Any, **kwargs: Any) -> Any:
+        if "fetch" in args[0]:
+            calls.append(kwargs.get("timeout"))
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    assert mirror.fetch(head) is True
+    assert mirror.fetch(head) is False
+    assert calls == [None]
+
+
 @pytest.mark.feature("lab-store-incremental-fetch")
 @pytest.mark.parametrize("fallback", [False, True])
 def test_fetch_without_a_node_mirror_keeps_heads_and_takes_only_new_objects(

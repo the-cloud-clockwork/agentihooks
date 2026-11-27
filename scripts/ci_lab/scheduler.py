@@ -121,6 +121,7 @@ TREES = f"{PREFIX}tree:"
 ORIGINS = f"{PREFIX}origins"
 MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
 GROUPS_TIMEOUT_S = 30.0
+FETCH_TIMEOUT_S = 60.0
 NEUTRAL = "neutral"
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
@@ -1000,7 +1001,7 @@ class Scheduler:
         keyed, or none after naming in the actions why git could not resolve one."""
         try:
             return replace(request, base=self.ports.expander.merge_base(request.repo, request.head))
-        except subprocess.CalledProcessError as error:
+        except (subprocess.CalledProcessError, FetchUnanswered) as error:
             actions.append(f"cannot resolve the dev merge base of plant head {request.head}: {error}")
             return None
 
@@ -1944,8 +1945,21 @@ class MirrorExpander:
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
         return Mirror(
-            self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab, environ=self._environment(repo)
+            self.node,
+            self.root / _slug(repo).replace("/", "--"),
+            repo,
+            self.lab,
+            environ=self._environment(repo),
+            timeout_s=FETCH_TIMEOUT_S,
         )
+
+    def _fetch(self, mirror: Mirror, sha: str) -> None:
+        try:
+            mirror.fetch(sha)
+        except subprocess.TimeoutExpired as error:
+            raise FetchUnanswered(
+                f"git fetch of {sha} from {mirror.remote} got no answer in {FETCH_TIMEOUT_S} seconds"
+            ) from error
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -1982,7 +1996,7 @@ class MirrorExpander:
             check=True,
         )
         head = listing.stdout.split()[0]
-        mirror.fetch(head)
+        self._fetch(mirror, head)
         return head
 
     def _on_dev(self, repo: str, path: str) -> str:
@@ -1995,7 +2009,7 @@ class MirrorExpander:
         fails when the head shares no history with dev."""
         mirror = self._mirror(repo)
         dev = self._dev_head(repo, mirror)
-        mirror.fetch(head)
+        self._fetch(mirror, head)
         return self._git(mirror, "merge-base", head, dev).strip()
 
     def reachable(self, repo: str, head: str) -> bool:
@@ -2068,7 +2082,7 @@ class MirrorExpander:
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
-            mirror.fetch(sha)
+            self._fetch(mirror, sha)
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         merge_base, diffed = self._diffed(mirror, request, base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")

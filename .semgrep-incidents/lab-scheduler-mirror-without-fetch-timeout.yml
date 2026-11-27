@@ -1,0 +1,20 @@
+rules:
+  - id: lab-scheduler-mirror-without-fetch-timeout
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A scheduler mirror without a fetch timeout can block the scheduler pass on a missing commit.
+      Pass FETCH_TIMEOUT_S as timeout_s so unanswered fetches use the existing head retry policy.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-scheduler-mirror-without-fetch-timeout.py
+    patterns:
+      - pattern-inside: |
+          def _mirror(...):
+              ...
+      - pattern-either:
+          - patterns:
+              - pattern: Mirror(...)
+              - pattern-not: Mirror(..., timeout_s=$TIMEOUT, ...)
+          - pattern: Mirror(..., timeout_s=None, ...)

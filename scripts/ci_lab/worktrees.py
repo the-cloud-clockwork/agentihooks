@@ -19,8 +19,8 @@ WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 OWNED = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
 
 
-def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
+def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None, timeout_s: float | None = None) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, env=env, timeout=timeout_s)
 
 
 @dataclass(frozen=True)
@@ -93,6 +93,7 @@ class Mirror:
     lab: Lab | None = None
     repository: str | None = None  # pragma: no mutate
     environ: Mapping[str, str] | None = field(default=None, repr=False)
+    timeout_s: float | None = None
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
@@ -107,12 +108,30 @@ class Mirror:
             return False
         ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref, env=self.environ)
+            _git(
+                self.store,
+                "fetch",
+                "--quiet",
+                "--no-write-fetch-head",
+                self.remote,
+                ref,
+                env=self.environ,
+                timeout_s=self.timeout_s,
+            )
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
+            _git(
+                self.store,
+                "fetch",
+                "--quiet",
+                "--no-write-fetch-head",
+                self.lab.url,
+                ref,
+                env=self.lab.environ(),
+                timeout_s=self.timeout_s,
+            )
         return True
 
 

@@ -690,6 +690,21 @@
       ]
     },
     {
+      "id": "lab-scheduler-git-fetch-bound",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2720",
+      "behaviour": "Scheduler git fetches time out after sixty seconds, hold unanswered heads through the existing retry cap, and report plant merge base timeouts without stopping intake. Worker fetches remain unbounded by default.",
+      "seam": "Mirror.fetch over a hanging git remote helper, MirrorExpander fetch sites and Scheduler.tick release and plant intake",
+      "tests": [
+        "tests/ci_lab/test_worktrees.py::test_worker_mirror_fetch_keeps_the_unbounded_default",
+        "tests/ci_lab/test_scheduler_fetch_timeout.py::test_mirror_fetch_times_out_against_a_hanging_remote",
+        "tests/ci_lab/test_scheduler_fetch_timeout.py::test_each_expander_fetch_translates_a_hanging_remote",
+        "tests/ci_lab/test_scheduler_fetch_timeout.py::test_tick_holds_a_hanging_fetch_and_continues_with_the_next_head",
+        "tests/ci_lab/test_scheduler_fetch_timeout.py::test_plant_names_a_timed_out_merge_base_and_continues_intake"
+      ],
+      "rules": ["lab-scheduler-mirror-without-fetch-timeout"]
+    },
+    {
       "id": "lab-plant-push-intake",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-plant-push-intake",
