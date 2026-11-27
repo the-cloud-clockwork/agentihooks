@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -120,6 +121,60 @@ def test_database_env_helper_never_duplicates_a_components_own_entry() -> None:
     assert '{{- define "swarm.databaseEnv" -}}' in helpers
     assert 'hasKey $env "AGENTIHOOKS_SWARM_DATABASE_URL"' in helpers
     assert 'has "AGENTIHOOKS_SWARM_DATABASE_URL" $ownNames' in helpers
+
+
+def _database_url_holders() -> list[str]:
+    """Return the first name part of every chart template whose container gets the shared database URL."""
+    holders: set[str] = set()
+    for template in (CHART / "templates").glob("*.yaml"):
+        text = template.read_text()
+        if 'include "swarm.databaseEnv"' in text or ".Values.ledger.secretEnv" in text:
+            holders.add(template.stem.split("-", 1)[0])
+    return sorted(holders)
+
+
+def _unnamed_holders(text: str) -> list[str]:
+    """Return the database URL holders the text never names as a word outside a path segment."""
+    return [holder for holder in _database_url_holders() if not re.search(rf"(?<![\w/]){holder}\b", text)]
+
+
+def _ledger_secret_env_note() -> str:
+    """Return the comment lines directly above the ledger's secretEnv value, lower cased and joined."""
+    lines = (CHART / "values.yaml").read_text().splitlines()
+    start = lines.index("ledger:")
+    end = lines.index("  secretEnv: []", start)
+    note: list[str] = []
+    for line in reversed(lines[start:end]):
+        if not line.startswith("  #"):
+            break
+        note.insert(0, line)
+    return " ".join(note).lower()
+
+
+@pytest.mark.feature("chart-docs-name-every-database-url-holder")
+def test_database_url_holders_are_read_from_the_templates() -> None:
+    assert _database_url_holders() == ["api", "controller", "hub", "ledger", "worker"]
+
+
+@pytest.mark.feature("chart-docs-name-every-database-url-holder")
+def test_ledger_secret_env_note_names_every_service_that_gets_the_database_url() -> None:
+    note = _ledger_secret_env_note()
+
+    assert "database url" in note
+    assert _unnamed_holders(note) == []
+
+
+@pytest.mark.feature("chart-docs-name-every-database-url-holder")
+def test_service_split_names_every_holder_wherever_it_names_an_only_holder() -> None:
+    text = (CHART.parents[2] / "docs/reference/service-split.md").read_text()
+    blocks = [
+        block.lower()
+        for block in re.split(r"\n(?=- |\n)", text)
+        if "AGENTIHOOKS_SWARM_DATABASE_URL" in block and re.search(r"\b(only|sole|solely)\b", block)
+    ]
+
+    assert len(blocks) == 2
+    assert [_unnamed_holders(block) for block in blocks] == [[], []]
 
 
 def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
