@@ -35,6 +35,11 @@ def test_parser_declares_every_subcommand_with_its_exact_help_and_options() -> N
     assert (agents.type, agents.default, agents.help) == (int, layout.DEFAULT_AGENTS, "Agents with the master, 2 to 5")
     harness = up._option_string_actions["--harness"]
     assert (harness.default, harness.help) == ("claude", "Engineer harness, or one per engineer: claude,codex")
+    authentication = up._option_string_actions["--auth"]
+    assert (authentication.default, authentication.help) == (
+        "routed",
+        "routed, default or named:reference; one choice or one per engineer",
+    )
     directory = up._option_string_actions["--dir"]
     assert (directory.default, directory.help) == ("", "Directory the engineers work in; default the current one")
 
@@ -55,7 +60,7 @@ def test_parser_declares_every_subcommand_with_its_exact_help_and_options() -> N
 
 
 def _namespace(agents: int = 4, harness: str = "claude") -> argparse.Namespace:
-    return argparse.Namespace(agents=agents, harness=harness)
+    return argparse.Namespace(agents=agents, harness=harness, auth="routed")
 
 
 def test_swarm_for_reads_the_target_harness_and_the_raw_session_from_the_environ(
@@ -94,6 +99,15 @@ def test_swarm_for_builds_its_panes_with_the_real_directory_and_environ(
     environ = {"marker": "yes"}
     cli._swarm_for(_namespace(agents=2), environ, "w1:p1", "quick-test", tmp_path)
     assert captured == {"directory": tmp_path, "environ": environ}
+
+
+def test_swarm_for_refuses_a_layout_with_fewer_panes_than_engineers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli.layout, "HerdrPanes", FakePanes)
+    monkeypatch.setattr(cli.layout, "build", lambda caller, count, panes: [caller, "w1:p2"])
+    with pytest.raises(ValueError, match="zip"):
+        cli._swarm_for(_namespace(agents=3), {}, "w1:p1", "quick-test", tmp_path)
 
 
 def test_up_passes_its_real_arguments_to_every_collaborator_and_prints_exact_json(

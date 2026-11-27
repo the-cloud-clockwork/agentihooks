@@ -890,7 +890,7 @@ agentihooks quota --json
 Start and run a [quick swarm](../pillars/swarm.md#quick-swarm) in the current herdr tab.
 
 ```bash
-agentihooks quick up [--agents 4] [--harness claude|codex,claude,...] [--dir PATH]   # this session is master
+agentihooks quick up [--agents 4] [--harness claude|codex,claude,...] [--auth routed|default|named:reference|list] [--dir PATH]
 agentihooks quick status                  # one JSON line per seat
 agentihooks quick send <seat> "<text>"    # post to another seat through the room
 agentihooks quick room                    # the room lines sent to this seat since it last read
@@ -901,6 +901,32 @@ agentihooks quick relaunch <seat> --folder <quick folder> --adopt   # seat this 
 agentihooks quick tick                    # one quick tick round, as the hourly safety nudge round runs it
 agentihooks quick stop                    # remove the room and the registry; seat folders stay
 ```
+
+Authentication applies to native engineers; the calling session remains master
+with its current login. Omitted `--auth` keeps automatic routed selection.
+`--auth default` uses each harness's ordinary local login, and
+`--auth named:reference` selects an existing account suffix or token environment
+variable name. Default and named modes bypass automatic quota tiers and account
+switching. A missing or incompatible reference is refused before panes are
+created. Pass names, never credential values.
+
+One choice applies to every engineer. A comma separated list must contain one
+choice per engineer, in pane order. For example:
+
+```bash
+agentihooks quick up \
+  --agents 3 \
+  --harness claude,codex \
+  --auth default
+agentihooks quick up \
+  --agents 3 \
+  --harness claude,codex \
+  --auth named:claude_account,named:codex_account
+```
+
+Status exposes the saved `auth` mode and safe `account` reference. Handoff,
+forced relaunch and automatic retry retain that selection. Native sign in and
+session binding checks still apply; an unavailable login leaves the seat pending.
 
 ## `agentihooks seat brief`
 
