@@ -25,6 +25,27 @@ def policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     }
 
 
+def startup_environments(
+    environ: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> tuple[dict[str, str], dict[str, str]]:
+    if not enabled:
+        return environ, environ
+    root = tmp_path / "cache"
+    root.mkdir(mode=0o750)
+    requested = environ | {
+        cache.ROOT: str(root),
+        cache.LIMIT: str(1024 * 1024),
+        cache.POD_UID: FIRST_POD,
+    }
+    generation = root / FIRST_POD
+    resolved = requested | {
+        contract.GIT_MIRROR: str(generation / "node"),
+        "CI_LAB_MIRROR_STORE": str(generation / "store"),
+    }
+    monkeypatch.setattr(cache, "_pid", lambda: 1)
+    return requested, resolved
+
+
 @pytest.mark.feature("lab-scheduler-cache-policy")
 @pytest.mark.parametrize("empty", [False, True])
 def test_disabled_policy_preserves_mapping_identity_and_callback_result(empty: bool) -> None:

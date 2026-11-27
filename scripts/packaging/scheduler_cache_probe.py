@@ -89,7 +89,7 @@ def main(argv: list[str]) -> int:
         return verify()
     assert os.getpid() == 1 and os.getuid() == os.getgid() == 10001
     cache.SCAN_SECONDS = 0.1
-    scheduler._run_service = {"breach": breach, "restart": restart, "reused": reused}[mode]
+    setattr(scheduler, "_run_service", {"breach": breach, "restart": restart, "reused": reused}[mode])
     environ: dict[str, str] = dict(os.environ)
     environ.update(dict.fromkeys(scheduler.GITHUB_APP_SETTINGS, "fixture"))
     return scheduler.main(["--require-cache-policy"], environ)

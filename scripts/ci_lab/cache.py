@@ -5,7 +5,7 @@ import os
 import shutil
 import stat
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event, Thread
@@ -106,7 +106,7 @@ def _generation(root: Path, pod: str) -> Path:
 
 
 @contextmanager
-def _owned(root: Path, pod: str) -> Iterator[Path]:
+def _owned(root: Path, pod: str) -> Generator[Path, None, None]:
     try:
         descriptor = os.open(root / ".lock", os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     except OSError as exc:

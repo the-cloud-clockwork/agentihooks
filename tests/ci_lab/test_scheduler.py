@@ -2662,8 +2662,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
-    from scripts.ci_lab import cache
     from scripts.events import config, factory
+    from tests.ci_lab.test_scheduler_cache import startup_environments
 
     calls: dict[str, Any] = {"served": 0}
     client = fake_redis()
@@ -2750,22 +2750,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.contract.CONTROL_TOKEN: "tok",
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
     } | APP_SETTINGS
-    if with_policy:
-        root = tmp_path / "cache"
-        root.mkdir(mode=0o750)
-        environ |= {
-            cache.ROOT: str(root),
-            cache.LIMIT: str(1024 * 1024),
-            cache.POD_UID: "11111111-1111-4111-8111-111111111111",
-        }
-        monkeypatch.setattr(cache, "_pid", lambda: 1)
-    requested = environ
-    if with_policy:
-        generation = Path(environ[cache.ROOT]) / environ[cache.POD_UID]
-        environ = environ | {
-            scheduler.contract.GIT_MIRROR: str(generation / "node"),
-            "CI_LAB_MIRROR_STORE": str(generation / "store"),
-        }
+    requested, environ = startup_environments(environ, tmp_path, monkeypatch, with_policy)
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
