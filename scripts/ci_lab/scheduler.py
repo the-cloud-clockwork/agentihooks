@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
@@ -176,6 +176,7 @@ LOOKED_AT_PER_PASS = 24
 DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
 UNMERGED_TRIES = 4
+YIELDING_TIERS = frozenset({Priority.HOTFIX, Priority.PULL_REQUEST})
 CUT_SHORT_STARTS = 5
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
@@ -1049,7 +1050,13 @@ class Scheduler:
 
     def _hold(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Hold a head and its grade ref in its lane's quiet window; a new head of the lane restarts the window, and the
-        held head arriving again with a grade ref keeps its window and takes that ref."""
+        held head arriving again with a grade ref keeps its window and takes that ref. A request that names a pull
+        request first drops the waiting notice of its head, and a request that names none, as a signed notice does,
+        is not held while a pull request of its head waits or a grade of its head on a resolved merge is live: the
+        pull request grades that head on its merge."""
+        self._unhold_notice(request)
+        if covered := self._covered(request, ref):
+            return f"left {request.head} to {covered}"
         name = f"{request.repo}|{lane}|{int(request.tier)}"
         held = self.client.hget(WAITING, name)
         waiting = None if held is None else json.loads(held)
@@ -1060,6 +1067,40 @@ class Scheduler:
         waiting = {"request": asdict(request), "lane": lane, "ref": ref, "since": now_ms}
         self.client.hset(WAITING, name, json.dumps(waiting))
         return f"received {request.head} on {lane}"
+
+    def _unhold_notice(self, request: GradeRequest) -> None:
+        """Drop the waiting notice a request's head left in either class once a pull request names it: the fields it
+        was held under, `<repo>|<head>|<tier>`, only when that entry's own request holds the same head and names no
+        pull request."""
+        if not request.pull_number:
+            return
+        for tier in YIELDING_TIERS:
+            name = f"{request.repo}|{request.head}|{int(tier)}"
+            held = self.client.hget(WAITING, name)
+            if held is None:
+                continue
+            waiting = json.loads(held)["request"]
+            if waiting["head"] == request.head and not waiting.get("pull_number"):
+                self.client.hdel(WAITING, name)
+
+    def _covered(self, request: GradeRequest, ref: str) -> str:
+        """Return what already covers a bare-head request so it need not be held: another entry of the `WAITING`
+        hash naming a pull request number of the same repository and head, or a live grade of that head already on
+        a resolved merge; empty when the request itself cannot yield or neither covers it."""
+        if request.pull_number or request.plant or request.bypass_negative or request.tier not in YIELDING_TIERS:
+            return ""
+        if ref.startswith(GRADE_REFS):
+            return ""
+        for name, raw in self.client.hgetall(WAITING).items():
+            if request.head not in raw:
+                continue
+            waiting = json.loads(raw)["request"]
+            if waiting["repo"] == request.repo and waiting["head"] == request.head and waiting.get("pull_number"):
+                return f"pull request {waiting['pull_number']} waiting in {name}"
+        for state in self._siblings(request):
+            if state.graded_commit:
+                return f"its live grade {state.run} on the merge"
+        return ""
 
     def _close(self, closed: HeadEvent, lane: str) -> str:
         """End what a closed pull request holds in its lane of the pull request class, told by its base, which
@@ -1426,8 +1467,11 @@ class Scheduler:
         to a grade ref, which the lab remote serves. A pull request or hotfix request that is not a plant resolves
         the test merge GitHub built for its pull request first, through `_merge_resolution`, raising Unmerged while
         GitHub has none yet and `tries` is under `UNMERGED_TRIES`; at the bound it grades the bare head and the
-        state remembers the fallback. The waiting field of `name` comes out of the hash only once this start cannot
-        be repeated: before the retirement, and right after the expansion returns, before the first grade write."""
+        state remembers the fallback. A request that resolved a merge also replaces, through `_replace_others`,
+        every other live pull request or hotfix grade of its head on a different commit, in any lane, carrying
+        their unfinished jobs into this one. The waiting field of `name` comes out of the hash only once this start
+        cannot be repeated: before the retirement, and right after the expansion returns, before the first grade
+        write."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
             self.client.hdel(WAITING, name)
             return self._retire(request, now_ms)
@@ -1449,6 +1493,7 @@ class Scheduler:
                 carried = self._replace_frame(existing)
             run = f"{run}-{now_ms}"
         carried.update(self._supersede(request, lane))
+        carried.update(self._replace_others(request))
         state = State(
             run=run,
             repo=request.repo,
@@ -1509,17 +1554,37 @@ class Scheduler:
         run = self.client.get(f"{TREES}{request.repo}|{tree}")
         return None if run is None else self.grade(run)
 
+    def _siblings(self, request: GradeRequest) -> Iterator[State]:
+        """Yield the live, not superseded pull request or hotfix grades of a request's head that carry no grade
+        ref, whatever their lane: filtered from `_origins` alone, reading a grade document only for a match."""
+        for run, origin in self._origins().items():
+            if origin["repo"] != request.repo or origin["head"] != request.head:
+                continue
+            if origin["tier"] not in YIELDING_TIERS or origin["ref"]:
+                continue
+            state = self.grade(run)
+            if state is not None and not state.superseded:
+                yield state
+
+    def _replace_others(self, request: GradeRequest) -> dict[str, str]:
+        """Replace, through `_replace_frame`, every sibling grade of a resolved request's head on a different
+        commit, the bare head a notice asked for or an older merge, whatever its lane, and return their carried
+        unfinished jobs by unit. A request that resolved no merge, or a sibling on the same commit, is untouched."""
+        if not request.graded_commit:
+            return {}
+        carried: dict[str, str] = {}
+        for state in self._siblings(request):
+            if state.graded_commit != request.graded_commit:
+                carried.update(self._replace_frame(state))
+        return carried
+
     def _supersede(self, request: GradeRequest, lane: str) -> dict[str, str]:
-        """Drop the pending and held units of the lane's older head, or of its own older grade once a newer merge
-        resolved for the same head and the required frame did not otherwise change. A same head's older grade on a
-        different merge is superseded exactly like a different head's: every unit keeps its unfinished job by its
-        own content key, so one whose tree did not change runs on under the job already leased for it. Return the
-        dropped grade's unfinished jobs by unit."""
+        """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
         if old is None:
             return {}
-        if old.head == request.head and old.graded_commit == request.graded_commit:
+        if old.head == request.head:
             if old.required != list(_frame_required(old.tier, _scope(old))):
                 return self._replace_frame(old)
             return {}

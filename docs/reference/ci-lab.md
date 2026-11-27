@@ -2676,6 +2676,14 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   one. A head whose grade already exists still takes its lane: the lane's older head is
   superseded and the lane names the existing run, so a head first graded outside its pull request
   lane holds that lane afterwards.
+- A head announced twice holds one live grade. When a pull request or hotfix request resolves a
+  merge, `Scheduler._replace_others` finds every other live grade of its head in either class,
+  carrying no grade ref, on a different commit, whatever its lane, and replaces it the way a
+  lane's older head is replaced, carrying its unfinished jobs into the new grade; a notice naming
+  no pull request yields instead of holding, with `Scheduler._hold` printing `left <head> to
+  <what>` and writing nothing, when a waiting pull request entry of its head or a live grade of
+  it already on a resolved merge covers it, and a request naming a pull request number drops the
+  waiting notice its head left in the other class.
 - A `closed` pull request head starts no grade. `Scheduler._close` ends what the closed pull
   request holds in its lane of the pull request class, told by its base: GitHub sets a pull
   request's base commit at its last head and repeats it when the pull request closes. It drops
@@ -2729,8 +2737,10 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   in neither listing, so a restart retires its grade and the pull request's `opened` delivery
   grades it again.
 
-Known limits: a rerequested check run and a signed notice name no lane, so such a head's lane is
-its own sha until its pull request delivers it; two open pull requests from two branches whose
+Known limits: a rerequested check run and a signed notice name no lane, so such a head still has
+its own lane, its sha, until its pull request delivers it, but a grade on a resolved merge
+replaces the head's other pull request grades in every lane, and a notice yields to a waiting or
+live pull request grade of its head; two open pull requests from two branches whose
 heads are one commit graded against one base share a single grade, so closing one of them, or
 pushing a newer head to it, ends the pending units of that commit for both until the other is
 pushed or reopened; of two pull requests from one head branch whose heads arrive in one quiet
