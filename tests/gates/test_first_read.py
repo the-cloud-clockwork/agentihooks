@@ -363,9 +363,21 @@ def test_exec_pragma_canary_is_exempt(pragma: str, program: str) -> None:
         f"// @exec: {{}}\r\nconst r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
         f"// @exec: {{}}\n// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
         f"// @exec: {{}}text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2028fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2029fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
         f"// other comment\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
     ],
-    ids=["suffix", "prefix", "second-call", "crlf-suffix", "two-pragmas", "no-newline", "foreign-comment"],
+    ids=[
+        "suffix",
+        "prefix",
+        "second-call",
+        "crlf-suffix",
+        "two-pragmas",
+        "no-newline",
+        "line-separator",
+        "paragraph-separator",
+        "foreign-comment",
+    ],
 )
 def test_exec_pragma_cannot_hide_other_work(program: str) -> None:
     decision = first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": program}, session="s"), ME, None)
