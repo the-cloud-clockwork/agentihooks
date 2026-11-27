@@ -1,3 +1,4 @@
+import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 
 from scripts.swarm import cli, publish, stack
 from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_comments, ledger_workspace
 from tests.helpers.seat import seat
 from tests.swarm.test_cli import env
 
@@ -69,9 +71,136 @@ def _refused(worktree, capsys):
     assert "branch" not in ledger.rows["t1"]
 
 
-def test_block_refuses_a_task_branch_never_pushed_that_holds_commits(worktree, capsys):
+@pytest.mark.feature("block-refuses-unpushed-commits")
+def test_block_refuses_a_task_branch_never_pushed_that_holds_commits(
+    worktree: tuple[Any, Path, Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
     _git(worktree[3], "commit", "--allow-empty", "-m", "Task work")
     _refused(worktree, capsys)
+
+
+def _task_commit(top: Path, name: str = "fix.txt") -> None:
+    (top / name).write_text("the ready fix\n")
+    _git(top, "add", name)
+    _git(top, "commit", "-m", f"Ready fix in {name}")
+
+
+@pytest.mark.feature("block-refuses-unpushed-commits")
+def test_block_without_panic_still_refuses_unpushed_commits(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tests.conftest import patch_swarm_store_connect
+
+    patch_swarm_store_connect(monkeypatch, env[0])
+    _task_commit(worktree[3])
+    _refused(worktree, capsys)
+    assert not list(ledger_workspace.folder("sw", "t1").glob("*.patch"))
+
+
+HELD_NOTE = (
+    "Panic held the push, so block saved the unpushed commits as a patch in the task work folder, {count} in all."
+)
+
+
+def _panic(env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import panic
+    from tests.conftest import patch_swarm_store_connect
+
+    patch_swarm_store_connect(monkeypatch, env[0])
+    panic.engage(env[0], "sw", "60 errors in the last hour", False, [], 0)
+
+
+def _held(worktree: tuple[Any, Path, Path, Path], capsys: pytest.CaptureFixture[str], base: str, commits: int) -> Path:
+    ledger, _, primary, top = worktree
+    head = _git(top, "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert block() == 0
+    patch = ledger_workspace.folder("sw", "t1") / "repo.patch"
+    assert json.loads(capsys.readouterr().out)["held_patch"] == [
+        {
+            "repository": str(primary),
+            "branch": BRANCH,
+            "head": head,
+            "base": base,
+            "commits": commits,
+            "patch": str(patch),
+        }
+    ]
+    assert ledger.rows["t1"]["state"] == "blocked"
+    note = HELD_NOTE.format(count=commits)
+    assert ("t1", note, AGENT) in ledger.comments
+    assert ledger_comments.check(note, "comment") is None
+    assert "the ready fix" in patch.read_text()
+    return patch
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_saves_the_unpushed_commit_as_a_patch_and_blocks(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, _, primary, top = worktree
+    _panic(env, monkeypatch)
+    _task_commit(top)
+    _task_commit(top, "second.txt")
+    patch = _held(worktree, capsys, "origin/dev", 2)
+    _git(primary, "apply", "--check", str(patch))
+    assert _git(primary, "ls-remote", "origin", f"refs/heads/{BRANCH}") == ""
+    assert "branch" not in worktree[0].rows["t1"]
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_saves_only_the_commits_after_the_last_push(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, _, primary, top = worktree
+    _panic(env, monkeypatch)
+    (top / "earlier.txt").write_text("pushed work\n")
+    _git(top, "add", "earlier.txt")
+    _git(top, "commit", "-m", "Task work")
+    _git(top, "push", "-u", "origin", BRANCH)
+    pushed = _git(top, "rev-parse", "HEAD")
+    _task_commit(top)
+    ledger_workspace.folder("sw", "t1").mkdir(parents=True)
+    patch = _held(worktree, capsys, pushed, 1)
+    assert _git(primary, "ls-remote", "origin", f"refs/heads/{BRANCH}") == f"{pushed}\trefs/heads/{BRANCH}"
+    assert "earlier.txt" not in patch.read_text()
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_save_patch_creates_a_missing_work_folder(worktree: tuple[Any, Path, Path, Path], tmp_path: Path) -> None:
+    _, _, primary, top = worktree
+    _task_commit(top)
+    folder = tmp_path / "missing" / "work"
+    record = publish.save_patch(top, primary, stack.Unpushed("held", BRANCH, "origin/dev"), folder)
+    assert record["patch"] == str(folder / "repo.patch")
+    assert "the ready fix" in (folder / "repo.patch").read_text()
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_still_refuses_a_registered_fix_branch(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hooks.context import blocker_window
+
+    asked: list[tuple[str, str]] = []
+    _panic(env, monkeypatch)
+    monkeypatch.setattr(blocker_window, "_registered", lambda cwd, fixes, branch: asked.append((cwd, branch)) or True)
+    _task_commit(worktree[3])
+    _refused(worktree, capsys)
+    assert asked == [(str(worktree[3]), BRANCH)]
+    assert not list(ledger_workspace.folder("sw", "t1").glob("*.patch"))
 
 
 def test_block_refuses_commits_made_after_the_last_push(worktree, capsys):
@@ -306,6 +435,30 @@ def test_block_refuses_when_a_second_task_repository_holds_unpushed_commits(work
         f"push them with git -C {other_top} push -u origin {BRANCH} before blocking\n"
     )
     assert ledger.rows["t1"]["state"] != "blocked" and "branch" not in ledger.rows["t1"]
+
+
+@pytest.mark.feature("panic-block-saves-unpushed-patch")
+def test_block_under_panic_records_a_pushed_repository_and_saves_the_held_one(
+    env: tuple[RedisStore, Any, Any],
+    worktree: tuple[Any, Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    ledger, _, primary, _ = worktree
+    _, other, other_top = _second_repository(worktree, tmp_path)
+    _panic(env, monkeypatch)
+    _task_commit(other_top)
+    comments: list[tuple[str, str, str, str]] = []
+    monkeypatch.setattr(ledger, "comment", lambda slug, task_id, text, by: comments.append((slug, task_id, text, by)))
+    capsys.readouterr()
+    assert block() == 0
+    row = ledger.rows["t1"]
+    assert (row["state"], row["branch"], row["repository_branches"]) == ("blocked", BRANCH, {str(primary): BRANCH})
+    held = json.loads(capsys.readouterr().out)["held_patch"]
+    patch = ledger_workspace.folder("sw", "t1") / "antoncore.patch"
+    assert [(saved["repository"], saved["patch"]) for saved in held] == [(str(other), str(patch))]
+    assert ("sw", "t1", HELD_NOTE.format(count=1), AGENT) in comments
 
 
 @pytest.mark.parametrize(
