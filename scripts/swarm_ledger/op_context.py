@@ -9,9 +9,10 @@ from typing import Any, Concatenate, Protocol, runtime_checkable
 
 @runtime_checkable
 class OpContext(Protocol):
-    """One sync as its ops see it: the clock, the revision being written, the stamps, the events recorded so far,
-    the refusals, the ledger's meta record and slug, and whether the document changed without an event. ``record``
-    takes who acted, the kind of the event and its target, then every further field of the event by name."""
+    """One sync as the ops of a module registered in ``ledger_core.EXTENSION_OPS`` see it: the clock, the revision
+    being written, the stamps, the events recorded so far, the refusals, the ledger's meta record and slug, and
+    whether the document changed without an event. ``record`` takes who acted, the kind of the event and its
+    target, then every further field of the event by name."""
 
     at: int
     rev: int
