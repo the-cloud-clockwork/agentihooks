@@ -40,6 +40,7 @@ def pull_request(
         "repository": {"html_url": REPO},
         "sender": {"login": sender},
         "pull_request": {
+            "number": 7,
             "head": {"sha": HEAD, "ref": "feature", "label": "acme:feature"},
             "base": {"sha": BASE, "label": "acme:dev"},
             "user": {"login": author},
@@ -69,8 +70,17 @@ def check_run(action: str = "rerequested", name: str = "lab / unit", pulls: bool
     }
 
 
-def head(event: str, actor: str, action: str, base: str = BASE, lane: str = "") -> HeadEvent:
-    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action, lane=lane)
+def head(event: str, actor: str, action: str, base: str = BASE, lane: str = "", pull_number: int = 0) -> HeadEvent:
+    return HeadEvent(
+        event=event,
+        repo=REPO,
+        head=HEAD,
+        base=base,
+        actor=actor,
+        action=action,
+        lane=lane,
+        pull_number=pull_number,
+    )
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
@@ -131,7 +141,7 @@ def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) ->
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened"])
 def test_a_pull_request_that_moves_its_head_is_a_head_event(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == [
-        head("pull_request", "agenticore-app[bot]", action, lane="feature")
+        head("pull_request", "agenticore-app[bot]", action, lane="feature", pull_number=7)
     ]
 
 
@@ -148,7 +158,9 @@ def test_a_merge_group_asking_for_checks_is_a_head_event() -> None:
 
 
 def test_a_rerequested_lab_check_is_a_head_event() -> None:
-    assert webhooks.head_events("check_run", check_run()) == [head("check_run", "nestorcolt", "rerequested")]
+    assert webhooks.head_events("check_run", check_run()) == [
+        head("check_run", "nestorcolt", "rerequested", pull_number=7)
+    ]
     assert webhooks.head_events("check_run", check_run(pulls=False)) == [
         head("check_run", "nestorcolt", "rerequested", base="")
     ]
