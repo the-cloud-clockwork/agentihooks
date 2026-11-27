@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
@@ -50,7 +51,7 @@ def _named(by) -> bool:
     return isinstance(by, str) and bool(by)
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     from scripts.swarm_ledger.ledger_tasks import rank_refusal
 
     task_id = op["item"].split("/")[1]
@@ -76,7 +77,7 @@ def apply(doc, op, ctx):
     return True
 
 
-def author(ctx, path):
+def author(ctx: OpContext, path: str) -> str | None:
     return ctx.stamps.get(path, {}).get("by")
 
 

@@ -1,5 +1,9 @@
 """The ledger title and overview: only the operator edits them from the page; the slug never changes."""
 
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
+
 OPS = ("title_set", "overview_set")
 MAX_TITLE = 200
 MAX_OVERVIEW = 20000
@@ -16,7 +20,7 @@ def check(op):
         raise ValueError(f"title_set needs a title of 1 to {MAX_TITLE} characters")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     field = "overview" if op["op"] == "overview_set" else "title"
     text = op["text"].strip()
     if text != doc.get(field):

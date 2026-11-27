@@ -8,8 +8,10 @@ comment listing every attempt, the critic resolution and the blocker reason.
 
 import hashlib
 import re
+from collections.abc import Callable
 
 from scripts.swarm_ledger import ledger_freezes, ports
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("blocker_attempt", "blocker_critic", "blocker_escalate")
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
@@ -130,12 +132,12 @@ def _priority_text(reason: str) -> str:
     return "Blocked: " + " ".join(words[:PRIORITY_WORDS]) + ("…" if len(words) > PRIORITY_WORDS else "")
 
 
-def _refuse(ctx, item, rec, why):
+def _refuse(ctx: OpContext, item: str, rec: dict, why: str) -> bool:
     ctx.refused.append(f"{why}; {step_text(ctx.slug, item, rec)}")
     return False
 
 
-def _attempt(rec, op, ctx):
+def _attempt(rec: dict, op: dict, ctx: OpContext) -> bool:
     step = next_step(rec)
     if step == CRITIC:
         return _refuse(ctx, op["item"], rec, "two attempts are recorded before the critic")
@@ -147,7 +149,7 @@ def _attempt(rec, op, ctx):
     return True
 
 
-def _critic(row, rec, op, ctx):
+def _critic(row: dict | None, rec: dict, op: dict, ctx: OpContext) -> bool:
     if next_step(rec) != CRITIC:
         return _refuse(ctx, op["item"], rec, "the critic runs once, after two attempts")
     expected = digest(blind_prompt(op["item"], subject(row), autonomy(ctx.slug), rec["attempts"]))
@@ -166,7 +168,7 @@ def _comment(rec, reason, evidence):
     return "\n\n".join([*lines, f"Blocker reason: {reason}\nEvidence: {evidence}"])
 
 
-def _escalate(doc, row, rec, op, ctx):
+def _escalate(doc: dict, row: dict, rec: dict, op: dict, ctx: OpContext) -> bool:
     tier = autonomy(ctx.slug)
     step = next_step(rec)
     if tier in GATED and step != ESCALATE:
@@ -185,7 +187,7 @@ def _escalate(doc, row, rec, op, ctx):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict, op: dict, ctx: OpContext) -> bool:
     row = find(doc, op["item"])
     if row is None:
         return False
@@ -215,7 +217,7 @@ class Gate:
     def __init__(self, slug: str, inner=None) -> None:
         self.slug, self.inner = slug, inner
 
-    def apply(self, doc: dict, op: dict, ctx, apply) -> bool:
+    def apply(self, doc: dict, op: dict, ctx: OpContext, apply: Callable[..., bool]) -> bool:
         refused = self.refusal(doc, op)
         if refused:
             ctx.refused.append(refused)

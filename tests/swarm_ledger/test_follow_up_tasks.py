@@ -1,6 +1,7 @@
 import json
 import re
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,7 @@ from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_packa
 OP = {"op": "task_add", "id": "a", "by": "master", "task": "f1", "title": "Follow up", "lane": "eng", "phase": "p1"}
 
 
-def ctx():
+def ctx() -> Any:
     return SimpleNamespace(refused=[], record=lambda *a, **k: None)
 
 
@@ -142,7 +143,7 @@ def sliced():
     }
 
 
-def update_ctx():
+def update_ctx() -> Any:
     return SimpleNamespace(refused=[], record=lambda *a, **k: None, stamp=lambda *a: None, meta={}, dirty=False)
 
 

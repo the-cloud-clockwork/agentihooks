@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -106,7 +107,7 @@ def test_phase_plan_link_check_names_the_rule():
 
 
 def test_task_add_without_phases_in_the_ledger_takes_only_its_own_link():
-    ctx = SimpleNamespace(refused=[], record=lambda *a, **k: None)
+    ctx: Any = SimpleNamespace(refused=[], record=lambda *a, **k: None)
     op = {"op": "task_add", "id": "a", "by": "swarm", "task": "t1", "title": "Build", "lane": "eng", "phase": "p1"}
     doc = {"tasks": []}
     assert ledger_tasks._add(doc, dict(op), ctx) is True
@@ -153,7 +154,7 @@ def test_plan_artifact_counts_as_requested():
     doc = {"tasks": [{"id": "plan", "lane": "plan"}], "artifacts": []}
     file = {"id": f"{'a' * 64}.md", "type": "text/markdown", "size": 4}
     op = {"op": "artifact_add", "id": "art-1", "by": "planner", "task": "plan", "title": "Plan", "file": file}
-    ctx = SimpleNamespace(meta={"members": {"planner": {}}}, refused=[], at=1, stamp=lambda *a: None)
+    ctx: Any = SimpleNamespace(meta={"members": {"planner": {}}}, refused=[], at=1, stamp=lambda *a: None)
     ctx.record = lambda *a, **k: None
     assert ledger_artifacts.apply(doc, dict(op), ctx) is False
     assert ctx.refused == [ledger_artifacts.REFUSED]
