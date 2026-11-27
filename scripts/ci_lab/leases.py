@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 
 from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.pods import PodImages, Pods, unmanaged, unread
-from scripts.ci_lab.queue import Queue
+from scripts.ci_lab.queue import RETENTION_MS, Queue
 from scripts.ci_lab.units import Unit
 
 __all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "release", "solo", "unstored"]
@@ -54,6 +54,7 @@ class Leases:
     manifests: Manifests = unstored
     image: str = ""
     images: PodImages = unread
+    retention_ms: int = RETENTION_MS
 
     def stale(self, worker: str) -> bool:
         """Whether the worker's pod runs a floating image other than the one the lab wants."""
@@ -134,7 +135,7 @@ class Leases:
         if outcome not in COMPLETED:
             return False
         record = self.queue.job(job)
-        if record is None or not self.queue.finish(record, token, outcome):
+        if record is None or not self.queue.finish(record, token, outcome, self.retention_ms):
             return False
         release(self.queue, self.pods, record.worker)
         return True
@@ -144,7 +145,7 @@ class Leases:
         reaped: list[tuple[str, str]] = []
         for job in self.queue.expired(now_ms):
             record = self.queue.job(job)
-            if record is not None and (state := self.queue.reap(record, now_ms, REQUEUES)):
+            if record is not None and (state := self.queue.reap(record, now_ms, REQUEUES, self.retention_ms)):
                 reaped.append((job, state))
                 release(self.queue, self.pods, record.worker)
         return reaped

@@ -71,8 +71,7 @@ agentihooks run-in-terminal --dir "<directory>" --title "<title>" -- <command>
 ```
 
 Omit `--dir` for `$HOME`, `--title` for the directory name, and the command
-for an interactive shell. The tab opens in herdr when herdr is installed and
-enabled (a tab in the caller's herdr workspace, else the directory's repository
+for an interactive shell. The tab opens in herdr when herdr is installed (a tab in the caller's herdr workspace, else the directory's repository
 workspace; `--workspace <label>` picks one), otherwise in a native terminal tab
 through `scripts/02_run_terminal.sh`. `--host herdr|native` overrides.
 A single argument after `--` runs as a raw shell string; several arguments are
