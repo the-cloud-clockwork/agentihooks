@@ -4266,9 +4266,19 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-        with:
+        id: checkout
+        continue-on-error: true
+        env: *low-speed
+        with: &coverage-baseline-checkout
           ref: ${{ github.sha }}
           fetch-depth: 0
+          filter: blob:none
+
+      - name: Check out the baseline commit, attempt 2
+        if: steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: *coverage-baseline-checkout
 
       - uses: actions/setup-python@v5
         with:
