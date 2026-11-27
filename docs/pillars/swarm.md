@@ -9582,7 +9582,7 @@ agentihooks msg inbox --of eng-6@<slug>
 | A requeue notice is still open as work, wakes a pane or escalates | It was sent before [pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798) reached the code the swarm runs. Pull dev into the checkout the tick and the master run from, then close the old item with `agentihooks msg close <id> done` |
 | The Doctor reports an inbox past window seat wait on a requeue notice | Same cause as above; a current notice is information only and never qualifies |
 | An owner expected a notice and got none | Check the task: no claimant, state `done`, or released to the merge watcher (`pr` awaiting `merge`) all send none by design. Check the queue journal for the entry's requeue |
-| A displaced pull request is missing from the queue | The notice does not drive the requeue. Read the `merge-priority-requeue:<url>` ledger alert and the queue journal for the reason |
+| A displaced pull request is missing from the queue | The notice does not drive the requeue. Read the `merge` ledger alert naming the pull request and the queue journal for the reason |
 
 [Pull request 4798](https://github.com/the-cloud-clockwork/agentihooks/pull/4798)
 made the requeue notice information only and skipped released and done tasks;
@@ -10113,7 +10113,7 @@ Each path runs the check against the head it is about to admit, before it enqueu
 | The merge pass requeue after a transient unmergeable exit | The `requeue` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
 | `agentihooks swarm <slug> merge priority <url>` for the pull request | The priority is refused before any entry leaves the queue. |
 | Restoring an entry that `merge priority` or the automatic priority on queue entry displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. For the automatic priority the result is `priority.errors` in the `merge queue` output, and the new entry stays queued. |
-| The requeue of an entry left out by an interrupted `merge priority` | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
+| The requeue of an entry left out by an interrupted `merge priority` | The `merge` ledger alert names the pull request and the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
 | `python -m scripts.ci_requeue` | That pull request's row reads `refused: staged compatibility: <reason>` and the sweep continues. |
 
 #### Refusals and fixes

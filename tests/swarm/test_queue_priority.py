@@ -371,9 +371,7 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head
         f"could not requeue {URL[:-1]}2 after an interrupted priority: GitHub unavailable"
     ]
     assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + "2"]
-    assert alerts == [
-        ("sw", f"merge-priority-requeue:{URL[:-1]}2", f"Could not requeue {URL[:-1]}2: GitHub unavailable")
-    ]
+    assert alerts == [("sw", queue_priority.ALERT_SOURCE, f"Could not requeue {URL[:-1]}2: GitHub unavailable")]
 
 
 @pytest.mark.feature("swarm-alert-sources-accepted")
