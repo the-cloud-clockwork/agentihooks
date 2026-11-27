@@ -6104,6 +6104,17 @@
       ]
     },
     {
+      "id": "swarm-published-status-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-server-core",
+      "behaviour": "The published swarm status keeps only the newest hundred transfers, as status already does for history, and the swarm view reads and decodes the published key once, so the ledger server's two second watch of each ledger stops fetching every handoff body ever written.",
+      "seam": "scripts.swarm.commands.publish and scripts.swarm.commands.view over lifecycle.view",
+      "tests": [
+        "tests/swarm/test_commands.py::test_publish_keeps_the_newest_hundred_transfers_and_every_other_status_key",
+        "tests/swarm/test_commands.py::test_view_reads_the_published_status_once"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
