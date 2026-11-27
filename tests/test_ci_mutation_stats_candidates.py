@@ -241,8 +241,22 @@ def test_statistics_candidates_preserve_indirect_reach_and_order(
         "class Recorder(Base):\n"
         "    def record(self):\n        from app import target\n        target(1)\n"
         "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
+        "from collections.abc import Callable as Callback\n"
+        "class Recorder:\n"
+        "    def __init__(self, callback: Callback[[int], int]):\n        self.callback = callback\n"
+        "    def pytest_runtest_logreport(self, report):\n        self.callback(1)\n"
+        "def pytest_configure(config):\n"
+        "    from app import target\n"
+        "    config.pluginmanager.register(Recorder(target))\n",
     ],
-    ids=["function-call", "assertion-pass", "bound-method", "possible-field-replacement", "inherited-hook"],
+    ids=[
+        "function-call",
+        "assertion-pass",
+        "bound-method",
+        "possible-field-replacement",
+        "inherited-hook",
+        "annotated-constructor-callback",
+    ],
 )
 def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester, hook: str) -> None:
     result = select(

@@ -236,9 +236,40 @@ class Reach:
             return self.annotation(scope, node.left) | self.annotation(scope, node.right)
         if isinstance(node, ast.Constant):
             return {EXTERNAL} if node.value is None else {UNKNOWN}
-        if isinstance(node, ast.Name) and node.id in ("Any", "object"):
+        if isinstance(node, ast.Name):
+            if node.id in ("Any", "object", "Callable"):
+                return {UNKNOWN}
+            return self.annotation_binding(self.parents.get(scope, scope), node.id)
+        if dotted(node)[-1:] and dotted(node)[-1] in ("Any", "Callable", "object"):
             return {UNKNOWN}
         return self.value(self.parents.get(scope, scope), node)
+
+    def annotation_binding(self, scope: Key, name: str) -> set[Key]:
+        token = scope, f"<annotation:{name}>"
+        if token in self.active:
+            return {UNKNOWN}
+        self.active.add(token)
+        if name in self.bindings[scope]:
+            values = self.bindings[scope][name]
+            result = set[Key]().union(
+                *({UNKNOWN} if isinstance(value, ast.ClassDef) else self.annotation(scope, value) for value in values)
+            )
+        elif name in self.aliases[scope]:
+            result: set[Key] = set()
+            for module, member in self.aliases[scope][name]:
+                path = self.module_path(module)
+                if member in ("Any", "Callable", "object"):
+                    result.add(UNKNOWN)
+                elif path is not None and member:
+                    result.update(self.annotation_binding(self.read(path), member))
+                else:
+                    result.add(EXTERNAL)
+        elif scope in self.parents:
+            result = self.annotation_binding(self.parents[scope], name)
+        else:
+            result = {EXTERNAL} if name in vars(__import__("builtins")) else {UNKNOWN}
+        self.active.remove(token)
+        return result
 
     def value(self, scope: Key, node: ast.AST) -> set[Key]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
