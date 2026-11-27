@@ -247,7 +247,7 @@ def test_main_gives_leases_the_scheduler_retention(tmp_path: Path, monkeypatch: 
     bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), lambda: frozenset[str]())
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), lambda: frozenset())
         settings = scheduler.Settings(frozenset(), retention_ms=RETENTION_MS)
         return scheduler.Scheduler(redis_client, objects, ports, settings, spending)
 
