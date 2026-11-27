@@ -436,3 +436,46 @@ def test_codex_native_default_preserves_configuration_without_matching_trust(
         assert not target.exists()
     else:
         assert target.read_bytes() == config
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "layout", ["escaped-suffix", "escaped-prefix", "interleaved", "whole-inline", "apostrophe", "newline"]
+)
+def test_codex_native_default_preserves_lexical_hook_trust(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    state_name = {"apostrophe": "state's", "newline": "state\nfolder"}.get(layout, "state")
+    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / state_name)}
+    spellings = {
+        "escaped-suffix": f'[hooks.state."{hook}:\\u0053essionStart:0:0"]\ntrusted_hash="same"\n',
+        "escaped-prefix": f'[hooks.state."{str(hook).replace("/", r"\u002f", 1)}:Stop:0:0"]\ntrusted_hash="same"\n',
+        "interleaved": (
+            f'[hooks.state."{hook}:SessionStart:0:0"]\ntrusted_hash="first"\n'
+            '[unrelated]\nvalue="untouched"\n'
+            f'[hooks.state."{hook}:Stop:0:0"]\ntrusted_hash="same"\n'
+        ),
+        "whole-inline": f'hooks = {{ state = {{ "{hook}:Stop:0:0" = {{ trusted_hash = "same" }} }} }}\n',
+        "apostrophe": f"[hooks.state.'{hook}:Stop:0:0']\ntrusted_hash='same'\n",
+        "newline": f"[hooks.state.'{hook}:Stop:0:0']\ntrusted_hash='same'\n",
+    }
+    original = spellings[layout]
+    (source / "config.toml").write_bytes(original.encode())
+    child = native_default.prepare("codex", environ)
+    home = Path(child["CODEX_HOME"])
+    if layout in ("apostrophe", "newline"):
+        expected = original.replace(f"'{hook}:Stop:0:0'", json.dumps(f"{home / 'hooks.json'}:Stop:0:0"))
+    elif layout == "escaped-prefix":
+        expected = original.replace(str(hook).replace("/", r"\u002f", 1), str(home / "hooks.json"))
+    else:
+        expected = original.replace(str(hook), str(home / "hooks.json"))
+    copied = (home / "config.toml").read_bytes()
+    assert copied == expected.encode()
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert all(name.startswith(f"{home / 'hooks.json'}:") for name in state)
+    assert all(value["trusted_hash"] in ("first", "same") for value in state.values())

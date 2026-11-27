@@ -1,10 +1,12 @@
 import json
 import os
+import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import tomlkit
+from tomlkit.container import Container
 from tomlkit.items import InlineTable, Item, SingleKey, Table
 
 from scripts.profiles import binding, homes
@@ -26,12 +28,32 @@ def _configuration(source: Path, home: Path) -> None:
             shutil.copy2(entry, target)
 
 
-def _rename_trust_key(key: SingleKey, value: Item, name: str) -> None:
+def _rename_trust_key(key: SingleKey, value: Item, source: str, target: str) -> None:
     original = key.as_string()
-    replacement = SingleKey(name, t=key.t).as_string()
-    key._original = original.replace(original.strip(), replacement, 1)
+    if key.delimiter == "'" and any(char == "'" or ord(char) < 32 for char in target):
+        replacement = original.replace(original.strip(), SingleKey(target + key.key.removeprefix(source)).as_string())
+    else:
+        encoded_source = source
+        encoded_target = target
+        if key.delimiter == '"':
+            tokens = re.findall(r"\\(?:u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)|[^\\]", original.strip()[1:-1])
+            encoded_source = "".join(tokens[: len(source)])
+            encoded_target = SingleKey(target).as_string()[1:-1]
+        replacement = original.replace(encoded_source, encoded_target, 1)
+    key._original = replacement  # pyright: ignore[reportPrivateUsage]
     if isinstance(value, Table) and value.display_name is not None:
-        value.display_name = value.display_name.replace(original.strip(), replacement)
+        value.display_name = value.display_name.replace(original.strip(), replacement.strip())
+
+
+def _trust_entries(container: Container, prefix: tuple[str, ...]) -> Iterator[tuple[SingleKey, Item]]:
+    for key, value in container.body:
+        if key is None:
+            continue
+        names = (*prefix, *(part.key for part in key))
+        if names[:-1] == ("hooks", "state") and isinstance(key, SingleKey):
+            yield key, value
+        elif isinstance(value, (Table, InlineTable)):
+            yield from _trust_entries(value.value, names)
 
 
 def _codex_trust(source: Path, home: Path) -> None:
@@ -39,24 +61,17 @@ def _codex_trust(source: Path, home: Path) -> None:
     if not config.is_file():
         return
     doc = tomlkit.parse(config.read_bytes().decode())
-    hooks = doc.get("hooks", {})
-    state = hooks.get("state")
-    if not isinstance(state, (Table, InlineTable)):
-        return
+    entries = {key.key: (key, value) for key, value in _trust_entries(doc, ())}
     source_hooks = source / "hooks.json"
     target_hooks = home / "hooks.json"
-    renamed: dict[str, str] = {}
-    for path in dict.fromkeys((source_hooks, source_hooks.resolve())):
-        renamed.update(
-            {
-                original: name
-                for name, original in rebase_state({name: name for name in state}, path, target_hooks).items()
-            }
-        )
-    for key, value in state.value.body:
-        if isinstance(key, SingleKey) and key.key in renamed:
-            _rename_trust_key(key, value, renamed[key.key])
-    if renamed:
+    rebased = [
+        (path, key, value)
+        for path in dict.fromkeys((source_hooks, source_hooks.resolve()))
+        for key, value in rebase_state(entries, path, target_hooks).values()
+    ]
+    for path, key, value in rebased:
+        _rename_trust_key(key, value, f"{path}:", f"{target_hooks}:")
+    if rebased:
         config.write_bytes(tomlkit.dumps(doc).encode())
 
 

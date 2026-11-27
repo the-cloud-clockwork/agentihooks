@@ -9,7 +9,9 @@ import hashlib
 import json
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypeVar
+
+_StateValue = TypeVar("_StateValue")
 
 EVENT_LABELS = {
     "PreToolUse": "pre_tool_use",
@@ -81,7 +83,7 @@ def trusted_state(hooks: Path, key_path: Path) -> dict[str, dict[str, str]]:
     }
 
 
-def rebase_state(state: Mapping[str, Any], source_hooks: Path, target_hooks: Path) -> dict[str, Any]:
+def rebase_state(state: Mapping[str, _StateValue], source_hooks: Path, target_hooks: Path) -> dict[str, _StateValue]:
     source = f"{source_hooks}:"
     return {
         f"{target_hooks}:{key.removeprefix(source)}": value for key, value in state.items() if key.startswith(source)
