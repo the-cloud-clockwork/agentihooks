@@ -209,6 +209,8 @@ def test_op_modules_discovers_every_handed_family_behind_the_short_name_alias_of
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in HANDED_FAMILIES:
+        importlib.import_module(f"scripts.swarm_ledger.{name}")
+    for name in HANDED_FAMILIES:
         monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.delitem(sys.modules, name)
     aliases = [ShortNameAlias(ROOT, f"scripts/swarm_ledger/{name}.py") for name in HANDED_FAMILIES]
