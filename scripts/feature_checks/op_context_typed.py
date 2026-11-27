@@ -6,7 +6,7 @@ plus the core itself. It prints one line per module and never a credential."""
 
 import ast
 import importlib
-import importlib.util
+import importlib.machinery
 import inspect
 import sys
 from collections.abc import Callable, Iterable
@@ -116,11 +116,15 @@ def _passes_ctx(call: ast.Call) -> bool:
 
 
 def _spec_origin(dotted: str) -> str | None:
-    """The source file the dotted path names, without importing it, or None when it names no real module."""
+    """The source file the import path holds for the dotted path, without importing it, or None when it holds
+    none. The path finder is asked alone, in the folders of the parent package for a dotted name: a finder ahead
+    of it may answer for the same name with a spec that names no file."""
+    parent = dotted.rpartition(".")[0]
     try:
-        found = importlib.util.find_spec(dotted)
-    except (ImportError, ValueError):
+        search = getattr(importlib.import_module(parent), "__path__", ()) if parent else None
+    except ImportError:
         return None
+    found = importlib.machinery.PathFinder.find_spec(dotted, search)
     return found.origin if found is not None else None
 
 
