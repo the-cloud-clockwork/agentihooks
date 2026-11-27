@@ -360,7 +360,7 @@ def test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "proc"
-    _proc(root, 902, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 902, "tokio-runtime-w", 1, ["/home/u/.local/bin/codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
     _proc(
         root,
         903,
