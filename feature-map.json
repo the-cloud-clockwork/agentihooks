@@ -8211,6 +8211,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-reuse-one-job",
       "behaviour": "A dev push that reuses the passed queue run of its commit runs one unit job, unit (3.12, copy), that restores every queue leg once and uploads the twenty legs of durations, coverage, flakes and executed lines in the unit job's order, while every other run still runs all twenty unit legs and every reader of a dev push's unit jobs accepts the copy job as a complete unit result.",
       "seam": "The Tests workflow unit job matrix and steps, the copy job's per leg coverage check and summary step, the shard check wait, the dispatch and coverage ratchet base lookups, the pull request test plan's dev record search and the scripts.ci_unit_copy layout and upload commands",
+      "rules": [
+        "unit-copy-coverage-copytree-without-link"
+      ],
       "tests": [
         "tests/test_ci_dev_reuse.py::test_workflow_preserves_downstream_artifacts",
         "tests/test_ci_dev_reuse.py::test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upload",
@@ -8246,7 +8249,12 @@
         "tests/test_ci_unit_copy.py::test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest",
         "tests/test_ci_unit_copy.py::test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention",
         "tests/test_ci_unit_copy.py::test_the_layout_command_reads_the_queue_leg_map",
-        "tests/test_ci_unit_copy.py::test_the_upload_command_reaches_the_results_service_with_the_runtime_token"
+        "tests/test_ci_unit_copy.py::test_the_upload_command_reaches_the_results_service_with_the_runtime_token",
+        "tests/test_ci_unit_copy.py::test_push_leg_coverage_shares_the_queue_leg_file",
+        "tests/test_ci_unit_copy.py::test_the_layout_adds_no_coverage_bytes",
+        "tests/test_ci_unit_copy.py::test_a_rewritten_duplicate_leg_durations_leaves_the_queue_leg_unchanged",
+        "tests/test_ci_unit_copy.py::test_layout_queue_and_out_share_the_runner_temp_file_system",
+        "tests/test_ci_unit_copy.py::test_the_summary_readers_leave_the_shared_coverage_database_unchanged"
       ]
     },
     {

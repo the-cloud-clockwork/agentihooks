@@ -335,6 +335,9 @@ nats:
 workers:
   replicas: 0
   maxAgents: 20
+  sandboxProfiles:
+    seccomp: ""
+    apparmor: ""
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
   rollout:
