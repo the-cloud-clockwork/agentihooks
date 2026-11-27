@@ -419,6 +419,74 @@ def test_ensure_graded_asks_the_bundler_when_the_node_mirror_lacks_the_commit(tm
     assert calls == [("job", "tok", MERGE)]
 
 
+def test_ensure_graded_writes_the_bundle_to_a_dot_bundle_suffixed_temp_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    _git(tmp_path, "init", "-q", str(source))
+    _git(source, "config", "user.email", "t@t")
+    _git(source, "config", "user.name", "t")
+    (source / "a.txt").write_text("a\n")
+    _git(source, "add", "a.txt")
+    _git(source, "commit", "-qm", "root")
+    root = _git(source, "rev-parse", "HEAD").strip()
+    bundle_path = tmp_path / "root.bundle"
+    _git(source, "bundle", "create", str(bundle_path), "HEAD")
+    bundle_bytes = bundle_path.read_bytes()
+    store = tmp_path / "store.git"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True, store=store))
+    base_pod = pod_of(tmp_path, trees)
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        return bundle_bytes
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", root)
+    names: list[str] = []
+    real_run = subprocess.run
+
+    def recording_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if "fetch" in argv and "--no-write-fetch-head" in argv:
+            names.append(argv[-2])
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(executors.subprocess, "run", recording_run)
+    executors._ensure_graded(pod, lease)
+    assert names and names[0].endswith(".bundle")
+
+
+def test_ensure_graded_raises_when_the_git_fetch_of_the_bundle_fails(tmp_path: Path) -> None:
+    store = tmp_path / "store.git"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True, store=store))
+    base_pod = pod_of(tmp_path, trees)
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        return b"not a git bundle"
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", MERGE)
+    with pytest.raises(subprocess.CalledProcessError):
+        executors._ensure_graded(pod, lease)
+
+
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_settings_wires_the_pods_bundler_to_the_scheduler_url(tmp_path: Path) -> None:
     pod, _, _ = executors.settings(environ_of(tmp_path))

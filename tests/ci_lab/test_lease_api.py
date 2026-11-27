@@ -315,6 +315,53 @@ def test_upload_url_serves_the_report(lab: leases.Leases, signer: Signer, jobs: 
     )
 
 
+def test_answer_passes_its_own_bundler_to_respond(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    import base64
+
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    _, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+    grant = body["leases"][0]
+
+    def bundler(sha: str) -> bytes | None:
+        assert sha == "m" * 40
+        return b"custom-bundle"
+
+    raw = json.dumps({"job": grant["job"], "token": grant["token"]}).encode()
+    status, body = lease_api.answer(lab, signer, "POST", "/bundle", raw, None, bundler=bundler)
+    assert status == 200
+    assert base64.b64decode(body["bundle"]) == b"custom-bundle"
+
+
+def test_serve_wires_its_bundler_into_the_bundle_route(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    import base64
+
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+
+    def bundler(sha: str) -> bytes | None:
+        assert sha == "m" * 40
+        return b"custom-bundle"
+
+    server = lease_api.serve("127.0.0.1", 0, lab, signer, bundler=bundler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        _, grant_body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+        grant = grant_body["leases"][0]
+        request = urllib.request.Request(
+            f"{base_url}/bundle",
+            data=json.dumps({"job": grant["job"], "token": grant["token"]}).encode(),
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = json.loads(response.read())
+        assert base64.b64decode(body["bundle"]) == b"custom-bundle"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+
+
 @pytest.mark.parametrize("length", ["abc", "-1", "²", str(lease_api.MAX_BODY_BYTES + 1)])
 def test_server_refuses_a_bad_content_length(lab: leases.Leases, signer: Signer, length: str) -> None:
     import http.client

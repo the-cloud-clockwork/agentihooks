@@ -61,6 +61,22 @@ def test_a_rerequested_check_run_naming_no_pull_request_keeps_no_number() -> Non
     assert event.pull_number == 0
 
 
+def test_a_rerequested_check_run_whose_pull_entry_has_no_number_defaults_to_zero() -> None:
+    payload = {
+        "action": "rerequested",
+        "repository": {"html_url": REPO},
+        "sender": {"login": ACTOR},
+        "check_run": {
+            "name": "lab / unit",
+            "head_sha": HEAD,
+            "pull_requests": [{"base": {"sha": BASE}}],
+        },
+    }
+    [event] = webhooks.head_events("check_run", payload)
+    assert isinstance(event, HeadEvent)
+    assert event.pull_number == 0
+
+
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_push_head_event_keeps_no_pull_request_number() -> None:
     payload = {

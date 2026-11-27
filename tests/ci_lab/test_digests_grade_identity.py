@@ -44,3 +44,19 @@ def test_a_grade_key_with_an_empty_graded_commit_equals_one_built_with_the_field
     explicit = GradeInputs(REPO, HEAD, BASE, "pull_request", GRADER, "")
     left_out = GradeInputs(REPO, HEAD, BASE, "pull_request", GRADER)
     assert grade_key(explicit) == grade_key(left_out)
+
+
+def test_a_grade_key_with_a_graded_commit_matches_the_key_built_from_the_graded_commit_field() -> None:
+    inputs = GradeInputs(REPO, HEAD, BASE, "pull_request", GRADER, MERGE)
+    expected = {
+        "repository": REPO,
+        "head": HEAD,
+        "base": BASE,
+        "tier": "pull_request",
+        "grader": GRADER,
+        "graded_commit": MERGE,
+    }
+    assert (
+        grade_key(inputs)
+        == f"grade-v{SCHEMAS['grade']}-{digest({'schema': SCHEMAS['grade'], 'kind': 'grade', 'inputs': expected})}"
+    )

@@ -230,6 +230,26 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     }
 
 
+def test_fetch_passes_the_same_timeout_to_the_lab_remote_fallback_fetch(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _commit(origin, "a", "a")
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
+    assert mirror.fetch(base) is False
+    calls: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        if "fetch" in argv and len(calls) == 2:
+            raise subprocess.CalledProcessError(128, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worktrees.subprocess, "run", run)
+    mirror.fetch("1" * 40, timeout=7.5)
+    assert calls[1]["timeout"] == 7.5
+    assert calls[2]["timeout"] == 7.5
+
+
 @pytest.mark.feature("lab-remote-heads")
 def test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token() -> None:
     environ = {

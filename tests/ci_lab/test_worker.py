@@ -830,6 +830,42 @@ def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: 
         server.server_close()
 
 
+def test_the_bundle_request_body_carries_exactly_job_token_and_sha() -> None:
+    seen: list[bytes] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        seen.append(raw)
+        return 200, {"bundle": ""}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.bundle("job1", "tok1", "m" * 40)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert json.loads(seen[0]) == {"job": "job1", "token": "tok1", "sha": "m" * 40}
+
+
+def test_the_client_decodes_the_bundle_route_s_base64_payload() -> None:
+    import base64
+
+    expected = b"bundle-bytes"
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        return 200, {"bundle": base64.b64encode(expected).decode()}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        assert client.bundle("job1", "tok1", "m" * 40) == expected
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
     seen: list[bytes] = []
