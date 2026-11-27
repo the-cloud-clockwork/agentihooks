@@ -185,7 +185,7 @@ def test_the_alert_waits_a_full_hour_per_gate_whatever_the_error(world: World, m
     monkeypatch.setitem(entry.GATES, "other", missing("scripts.gates.other_absent_module"))
     assert world.main("absent") == 0
     world.now = START + HOUR - 1
-    monkeypatch.setitem(entry.GATES, "absent", missing("scripts.gates.renamed_absent_module"))
+    entry.GATES["absent"] = missing("scripts.gates.renamed_absent_module")
     assert world.main("absent") == 0
     assert world.main("other") == 0
     world.now = START + HOUR

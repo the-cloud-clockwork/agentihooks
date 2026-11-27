@@ -156,7 +156,8 @@ def test_the_identity_pin_shim_is_reported_as_the_identity_gate(world: World) ->
 def test_a_module_launched_gate_is_reported_from_its_launch_traceback(world: World, tmp_path: Path) -> None:
     world.write("pre-bash-quiet_claim.sh", f"exec {sys.executable} -P -m scripts.gates quiet\n")
     result = world.run("ls")
-    assert result.decision is None and LOST in " ".join(result.contexts)
+    assert result.decision is None
+    assert "[condition pre-bash-quiet_claim.sh] failed (exit 1:" in " ".join(result.contexts)
     rows = world.rows()
     assert [(row["gate"], row["kind"]) for row in rows] == [("quiet", "fail-open")]
     assert rows[0]["reason"] == f"import failed under {sys.executable}: ModuleNotFoundError: No module named '{LOST}'"
@@ -382,6 +383,7 @@ def test_a_failure_the_child_reports_is_not_reported_again_by_the_hook(
     world: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    monkeypatch.setenv("HOME", str(Path.home()))
     sent = tmp_path / "child-sent.jsonl"
     world.write("pre-bash-absent_gate.py", CHILD.format(sent=str(sent)))
     result = world.run("ls")
