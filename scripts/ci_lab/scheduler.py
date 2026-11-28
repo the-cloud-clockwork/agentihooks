@@ -193,6 +193,7 @@ MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
+REDIS_GRACE = "CI_LAB_REDIS_GRACE_S"
 GITHUB_APP_SETTINGS = ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
 MANIFEST_DEPTH = 10
 
@@ -2545,9 +2546,12 @@ def serve(
 ) -> int:
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
     action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
-    pass runs on schedule; return 0."""
+    pass runs on schedule. Once Redis errors have failed every pass for grace_s seconds of the clock, the failing pass
+    prints one line naming the grace window and serve returns 1; a pass with no Redis error starts the window again.
+    Return 0 when the passes run out."""
     from redis import RedisError
 
+    outage = redis_grace.Outage(grace_s, clock)
     done = 0
     while passes == 0 or done < passes:
         try:
@@ -2555,7 +2559,15 @@ def serve(
                 print(action, flush=True)
             for action in relaying.tick():
                 print(action, flush=True)
+            outage.ended()
         except RedisError as error:
+            if not outage.tolerated():
+                print(
+                    f"pass {done + 1} ends the scheduler: Redis failed every pass for the {grace_s:g}s grace window, "
+                    f"last on {type(error).__name__}: {error}",
+                    flush=True,
+                )
+                return 1
             print(f"pass {done + 1} skipped on {type(error).__name__}: {error}", flush=True)
         done += 1
         sleep(interval_s)
@@ -2673,7 +2685,8 @@ def _run_service(environ: Mapping[str, str], interval_s: float, passes: int) -> 
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):
         Thread(target=server.serve_forever, daemon=True).start()
-    return serve(scheduler, relaying, interval_s, passes, time.time, time.sleep)
+    grace_s = float(environ.get(REDIS_GRACE) or redis_grace.DEFAULT_GRACE_S)
+    return serve(scheduler, relaying, interval_s, passes, time.time, time.sleep, grace_s=grace_s)
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
