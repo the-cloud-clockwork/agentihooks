@@ -18,6 +18,7 @@
     "tests/swarm/test_gitlab_pull.py::test_the_intent_head_read_answers_the_gitlab_merge_request_head",
     "tests/swarm/test_gitlab_pull.py::test_the_intent_head_read_of_a_missing_merge_request_is_none",
     "tests/swarm/test_gitlab_pull.py::test_the_intent_merged_read_is_true_only_for_a_merged_gitlab_merge_request",
+    "tests/swarm/test_gitlab_pull.py::test_the_adapter_reads_through_the_token_and_transport_it_is_given",
     "tests/swarm/test_ready.py::test_ready_carries_a_gitlab_merge_request_with_its_head",
     "tests/swarm/test_ready.py::test_ready_refuses_a_gitlab_draft_with_the_gitlab_hint",
     "tests/swarm/test_cli_done_read.py::test_done_closes_a_task_on_its_merged_gitlab_merge_request",

@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 
 from scripts.gates.intent import pr_head, pr_merged
+from scripts.swarm import gitlab_pull
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_view
 from scripts.tick.deadline import Deadline
@@ -138,3 +139,12 @@ def test_the_intent_merged_read_is_true_only_for_a_merged_gitlab_merge_request(
 ) -> None:
     sent(monkeypatch, Sent(answer("merged", "success"), answer(), answer("closed", "canceled")))
     assert [pr_merged(LINK), pr_merged(LINK), pr_merged(LINK)] == [True, False, False]
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_the_adapter_reads_through_the_token_and_transport_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent(monkeypatch, Sent())
+    env, pulled, headed = {"GITLAB_TOKEN": "fake-token"}, Sent(answer()), Sent(answer())
+    assert gitlab_pull.pull(LINK, env, pulled) == PullRequest("OPEN", None, None, False, head=HEAD, body=DESCRIPTION)
+    assert gitlab_pull.head(LINK, env, headed) == HEAD
+    assert pulled.calls == headed.calls == [("GET", f"{API}/12", HEADERS, None)]
