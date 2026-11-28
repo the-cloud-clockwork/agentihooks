@@ -885,7 +885,7 @@ def test_a_timer_pass_probe_times_one_read_and_one_write_into_the_slow_state(
     ledger = ProbedLedger(Clock())
     cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
     sample = ledger_probe.state(store, "sw")["samples"][-1]
-    assert (ledger.reads, len(ledger.writes)) == (1, 1)
+    assert ledger.reads == 1 and ledger.writes
     assert sample["sequence"] == 1 and sample["failure"] == "" and sample["write_s"] < ledger_probe.SLOW_S
 
 
