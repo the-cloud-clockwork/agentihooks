@@ -171,27 +171,43 @@ def test_bundle_raises_when_marking_the_commit_for_the_bundle_fails(
     assert _git(store, "for-each-ref", "refs/lab-bundle/").strip() == ""
 
 
-def test_bundle_names_its_temporary_file_with_the_bundle_suffix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.feature("lab-serves-a-bundle-with-no-temp-folder")
+def test_the_bundle_route_answers_the_bundle_of_a_real_store_with_no_usable_temp_folder_in_the_process(
+    tmp_path: Path, lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "stores"
     store = _store(tmp_path, root, "only-store")
-    sha = _commit(store, {"a.txt": "1\n"})
-    expander = _expander(tmp_path, root)
-    seen: list[str | None] = []
-    real_tempfile = tempfile.NamedTemporaryFile
+    parent = _commit(store, {"a.txt": "1\n"})
+    sha = _commit(store, {"a.txt": "2\n"})
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=parent, graded_commit=sha)})
+    run.engine.ports = replace(
+        run.engine.ports, merges=Mock(return_value=(sha, parent)), bundle=_expander(tmp_path, root).bundle
+    )
+    _pr(run, HEAD_A, 41, HEAD_A)
+    run.tick(1000)
+    spending = budget.Budget(run.lab.client, lambda: 1000, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api = f"http://127.0.0.1:{servers[0].server_address[1]}"
+    try:
+        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+        leased = json.loads(_read(f"{api}/lease", body))["leases"]
+        job, token = leased[0]["job"], leased[0]["token"]
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "no-temp-folder"))
+        reply = json.loads(_read(f"{api}/bundle", json.dumps({"job": job, "token": token}).encode()))
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+    bundle_file = tmp_path / "found.bundle"
+    bundle_file.write_bytes(base64.b64decode(reply["bundle"]))
+    assert _git(store, "bundle", "list-heads", str(bundle_file)).split()[0] == sha
 
-    def spy(*args: Any, **kwargs: Any) -> Any:
-        seen.append(kwargs.get("suffix"))
-        return real_tempfile(*args, **kwargs)
 
-    monkeypatch.setattr(scheduler.tempfile, "NamedTemporaryFile", spy)
-
-    assert expander.bundle(sha) is not None
-    assert seen == [".bundle"]
-
-
-def test_bundle_raises_when_creating_the_bundle_file_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bundle_raises_when_git_cannot_write_the_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "stores"
     store = _store(tmp_path, root, "only-store")
     sha = _commit(store, {"a.txt": "1\n"})
