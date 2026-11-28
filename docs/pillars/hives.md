@@ -2114,7 +2114,7 @@ offered task right after the claims stopped check:
 | The task | `GET tasks/<task id>` | The task row, or none when the task is gone | `row` |
 | The rows it names | `GET tasks?ids=<ids>` | Every task the row names in `depends_on`, `parked_on` or `group_members`, and its `enhances` and `merged_into` targets. Skipped when it names none. | `rows` |
 | The running rows | `GET tasks?states=claimed,pr` | Every task claimed or in a pull request, which the claim reads for the task's overlaps | `rows` |
-| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim passes to the hive to choose the agent's profile. A `plan` task reads the whole document instead; see below. | `parts` |
+| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim passes to the hive to choose the agent's profile. A `plan` task also reads its steering rows; see below. | `parts` |
 | The claim gate verdict | `GET focus/tasks/<task id>` | The verdict the ledger judges for the task over its whole stored state | inside `withdrawal` |
 
 From these rows the view builds a readiness snapshot with no phases and no freezes, and judges the offer in two
@@ -2135,9 +2135,20 @@ A withdrawn offer is refused with
 `hub: events admission swarm=<slug> task=<task id> hive=<hive> refused: the offer is withdrawn, <reason>`, unless the
 asking hive's own earlier admission of the offer is kept, which it receives again.
 
-A task of kind `plan` still reads the whole ledger document through `readiness.Source.state`, because its claim
-seeds carry the steering evidence of the whole ledger. That read is fetched again only when the revision moved, so a
-plan task admission can still take seconds on a large ledger.
+A task of kind `plan` carries steering evidence in its claim seeds (`plan_evidence.evidence`), and builds the
+document that evidence reads from narrow reads too, inside the `parts` mark:
+
+| Read | Ledger request | What it returns |
+|---|---|---|
+| Each phase it depends on | `GET phases/<phase>` | Every phase the task's phase depends on, walked breadth first in `depends_on` order with each phase read once, the order the evidence walks them. The walk ends at a phase the ledger does not hold, where the evidence also stops. |
+| Their comments | `GET phases/<phase>/comments` | Each dependency phase's whole comment thread, page by page, since an item read carries only `comments_count` and the evidence prints the last five comments |
+| Their tasks | `GET tasks?phases=<phases>&fields=phase,pr_url,proof,state,title` | The tasks of those phases in stored order, laid over the rows the view already holds so an enhancement target keeps its territory and description. Skipped when the phase depends on none. |
+| The artifacts | `GET artifacts` | The artifact rows, read only when the task's phase holds a published plan, which the evidence checks before it reads the plan's lines |
+
+The steering text equals the one built from the whole export. A task of kind `plan` with no phase, or a phase the
+ledger does not hold, reads nothing more and gets only the project intent, as before. Before pull request #14194 a
+plan task read the whole export here, and the 24 November live proof measured its `parts` step at 14.0 and 21.8
+seconds.
 
 #### The root slot count and the continuation
 
@@ -2165,7 +2176,12 @@ database, so the read reaches no separate server. The same read is open to any l
 | `states` | Task states, comma separated, at most 200 characters | Its `state` is listed |
 | `pinned` | `1`, the only value accepted | It names a `hive` or sets `workstation` |
 | `branches` | Branch names, comma separated, at most 8,000 characters | Its `branch` is listed |
+| `phases` | Phase ids, comma separated, at most 8,000 characters | Its `phase` is listed |
 | `fields` | Field names, comma separated, at most 500 characters | Not a filter: each kept row carries only its `id` and the named fields it has |
+
+`LedgerClient.tasks_in_phases` sends the `phases` selection. A ledger server older than that filter answers
+`400 schema_invalid`; only then the client reads the whole tasks collection and selects from it with the server's own
+selection code, until that server is redeployed.
 
 A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
 except its comments and answers, which come back as `comments_count` and `answers_count`. The reply is one page,
@@ -2177,12 +2193,13 @@ GET /api/v1/ledgers/<slug>/tasks?ids=t2,t3
 GET /api/v1/ledgers/<slug>/tasks?states=claimed,pr
 GET /api/v1/ledgers/<slug>/tasks?states=open&pinned=1
 GET /api/v1/ledgers/<slug>/tasks?branches=engineer-1&fields=branch,branch_repo,pr_url
+GET /api/v1/ledgers/<slug>/tasks?phases=p1,p2&fields=phase,title,state
 ```
 
 The ledger refuses a selection anywhere else with `400 schema_invalid`,
-`Only a plain tasks read takes a selection, and it names ids, states, pinned or branches`: on any path other than
-`tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`,
-`states`, `pinned` or `branches`, so `fields` alone is refused. A `state`, `offset` or `q` on a path that is not a
+`Only a plain tasks read takes a selection, and it names ids, states, pinned, branches or phases`: on any path other
+than `tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`,
+`states`, `pinned`, `branches` or `phases`, so `fields` alone is refused. A `state`, `offset` or `q` on a path that is not a
 ledger collection is refused before that check, with `400 schema_invalid`,
 `State and offset read the done rows of a collection`.
 
@@ -2239,19 +2256,25 @@ kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'refused: th
 ```
 
 A `late:` line with a large `row`, `rows` or `parts` points at the ledger database. A large `parts` on a `plan` task
-is its whole document read. A large `turn` on the root hive is the root slot count across every `events` swarm.
+is its dependency phases' reads, most often a long comment thread. A large `turn` on the root hive is the root slot count across every `events` swarm.
 
 #### Narrow read guards
 
 - Feature `hub-admission-narrow-read` in `feature-map.json`. Its tests in `tests/hub/test_admission_gates.py` run two
   admissions on a ledger whose revision moves and count its export reads at zero, refuse a frozen, unfocused, phased,
   waiting or thin task without claiming it, and claim a task once its dependency is done.
-  `tests/swarm/test_admission_view.py` covers the view's reads, a gone task, the plan task's whole document, the
+  `tests/swarm/test_admission_view.py` covers the view's reads, a gone task, a plan task's phase read, the
   verdict asked only after the local checks, the claimed count, the root slot count and the branch read.
   `tests/swarm_ledger/test_task_list_selecting.py` covers the selection's filters, its field cut, the client query
   and the refusal.
-- Semgrep incident rule `hub-admission-reads-full-export`, scoped to `scripts/hub/admission.py`: any `.snapshot(...)`
-  or `.state(...)` call there is an error. Run it by hand with:
+- Feature `plan-lane-admission-narrow-read`. `tests/swarm/test_admission_view.py` holds the steering built through
+  the view equal to the steering built from the whole export, for a plan task with transitive and cyclic
+  dependencies, comments, a sent back review, a published plan and an enhancement target, and counts its reads: each
+  dependency phase and thread once, no export. `tests/swarm/test_ledger_client_task.py` and
+  `tests/swarm_ledger/test_task_list_selecting.py` cover the phase selection, its fallback on an older ledger server,
+  and the thread and artifact reads.
+- Semgrep incident rule `hub-admission-reads-full-export`, scoped to `scripts/hub/admission.py` and
+  `scripts/swarm/admission_view.py`: any `.snapshot(...)` or `.state(...)` call there is an error. Run it by hand with:
 
 ```bash
 semgrep scan --config .semgrep-incidents/hub-admission-reads-full-export.yml scripts/hub/
@@ -2277,9 +2300,9 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 | Symptom | Cause | Fix |
 |---|---|---|
 | `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
-| `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
+| `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads each dependency phase's comment thread page by page | Expected when a dependency phase holds hundreds of comments. |
 | An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
-| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside `cursor`, `limit`, `offset`, `q`, `state` or `targets` on a `tasks` read, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside `cursor`, `limit`, `offset`, `q`, `state` or `targets` on a `tasks` read, or with only `fields` | Send `ids`, `states`, `pinned`, `branches` or `phases` on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `State and offset read the done rows of a collection` | It sent `state`, `offset` or `q` on a path that is not a ledger collection | Drop that parameter, and send the selection on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | `pinned` carries a value other than `1`, a list passes its length limit, or the ledger server runs a release before #13245 | Send `pinned=1` and split a long list over several reads; otherwise roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 

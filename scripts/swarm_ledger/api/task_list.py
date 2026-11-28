@@ -8,9 +8,9 @@ from . import resources
 PAGES_KEPT = 32
 ENCODER = json.JSONEncoder(ensure_ascii=False)
 LEDGERS_KEPT = 4
-SELECTORS = ("ids", "states", "pinned", "branches")
+SELECTORS = ("ids", "states", "pinned", "branches", "phases")
 SELECTION = (*SELECTORS, "fields")
-SELECTION_ONLY = "Only a plain tasks read takes a selection, and it names ids, states, pinned or branches"
+SELECTION_ONLY = "Only a plain tasks read takes a selection, and it names ids, states, pinned, branches or phases"
 
 
 class Page(dict):
@@ -97,10 +97,10 @@ def targeting(rows: list[Any], url: str) -> dict[str, Any]:
 
 
 def selecting(rows: Sequence[Mapping[str, Any]], query: dict[str, Any]) -> dict[str, Any]:
-    """The task rows matching every filter the query names: ids, states, a hive or workstation pin and branch names,
-    each without its threads or cut to the named fields beside its id, in one reply."""
+    """The task rows matching every filter the query names: ids, states, a hive or workstation pin, branch names and
+    phases, each without its threads or cut to the named fields beside its id, in one reply."""
     ids, states, fields = _listed(query.get("ids")), _listed(query.get("states")), _listed(query.get("fields"))
-    branches = _listed(query.get("branches"))
+    branches, phases = _listed(query.get("branches")), _listed(query.get("phases"))
     found = [
         row
         for row in rows
@@ -109,6 +109,7 @@ def selecting(rows: Sequence[Mapping[str, Any]], query: dict[str, Any]) -> dict[
         and (not states or row.get("state") in states)
         and ("pinned" not in query or bool(row.get("hive") or row.get("workstation")))
         and (not branches or row.get("branch") in branches)
+        and (not phases or row.get("phase") in phases)
     ]
     reply = {"data": [_shown(row, fields) for row in found], "revision": resources.revision(found), "next_cursor": None}
     return resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]

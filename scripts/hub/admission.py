@@ -90,7 +90,7 @@ class Admission:
     ) -> None:
         self._store, self.ledger, self.clock = store, ledger or LedgerClient(service=True), clock
         self.source = source or readiness.Source(store, self.ledger)
-        self.view = admission_view.Narrow(lambda: self.store, self.ledger, self.source)
+        self.view = admission_view.Narrow(lambda: self.store, self.ledger)
 
     @property
     def store(self) -> RedisStore:

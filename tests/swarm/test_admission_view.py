@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import admission_view, claim_hold, lab_capacity, readiness
+from scripts.swarm import admission_view, claim_hold, lab_capacity
 from scripts.swarm.health import focus_check
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.api import resources
@@ -160,7 +160,7 @@ def narrow() -> Iterator[SimpleNamespace]:
         ]
     )
     ledger: Any = Recording(found)
-    view = admission_view.Narrow(lambda: store, ledger, readiness.Source(store, ledger))
+    view = admission_view.Narrow(lambda: store, ledger)
     yield SimpleNamespace(store=store, ledger=ledger, found=found, view=view)
     store.redis.close()
 
@@ -401,6 +401,18 @@ def test_a_plan_task_without_a_phase_gets_only_the_project_intent_without_the_ex
     assert ledger_workspace.steering(row, view.doc) == ledger_workspace.steering(row, narrow.found)
 
 
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phase(narrow: SimpleNamespace) -> None:
+    planned(narrow.found)
+    narrow.found["tasks"].append(task("e4", phase="p4", kind="ops"))
+
+    view = narrow.view.task(SLUG, "e4", marks()[1])
+
+    assert narrow.ledger.reads == ["phases/p4"]
+    assert [phase["id"] for phase in view.doc["phases"]] == ["p4"]
+    assert "artifacts" not in view.doc
+
+
 @pytest.mark.feature("hub-admission-narrow-read")
 def test_the_withdrawal_asks_the_ledger_claim_gate_once_the_local_checks_pass(narrow: SimpleNamespace) -> None:
     narrow.found["freezes"] = [{"verb": "focus", "target": "tasks/t4"}]
@@ -537,9 +549,7 @@ def test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase
         judged.append((slug, sorted(rows)))
         return lambda task: True
 
-    view = admission_view.Narrow(
-        lambda: narrow.store, narrow.ledger, readiness.Source(narrow.store, narrow.ledger), admitting=admitting
-    ).task(SLUG, "t1", marks()[1])
+    view = admission_view.Narrow(lambda: narrow.store, narrow.ledger, admitting=admitting).task(SLUG, "t1", marks()[1])
 
     assert view.snapshot.slug == SLUG
     assert view.snapshot.fix == ""

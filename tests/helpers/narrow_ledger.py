@@ -97,7 +97,6 @@ def viewed(admitter: Any) -> Any:
     admitter.view = admission_view.Narrow(
         lambda: admitter.store,
         reads,
-        cast(Any, reads),
         claims=lambda _store, slug: admitter.source.snapshot(slug).claimed,
         admitting=lambda _store, slug, _config, _rows: admitter.source.snapshot(slug).admits,
     )

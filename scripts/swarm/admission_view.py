@@ -1,6 +1,7 @@
 """A hub admission's own view of one swarm, read row by row instead of through the whole ledger export: the task, the
-rows it names, the running rows, its overview and phase, and the claim gate verdict the ledger judges over its stored
-state, so no gate is judged on a partial document."""
+rows it names, the running rows, its overview and phase, a plan task's dependency phases with their comments, tasks
+and artifacts, and the claim gate verdict the ledger judges over its stored state, so no gate is judged on a partial
+document."""
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -42,6 +43,7 @@ WAITING_FIELDS = (
     "workstation",
 )
 RELATED_FIELDS = tuple(sorted({*RUNNING_FIELDS, *WAITING_FIELDS, "title", "description"}))
+EVIDENCE_FIELDS = ("phase", "title", "state", "pr_url", "proof")
 GONE = "the task is gone"
 DONE = "it is done"
 Mark = Callable[[str], None]
@@ -103,18 +105,17 @@ def named(rows: list[dict[str, Any]]) -> set[str]:
 
 
 class Narrow:
-    """Builds an admission's view of one swarm from narrow ledger reads, the whole document kept only for the steering
-    evidence of a plan task."""
+    """Builds an admission's view of one swarm from narrow ledger reads, the steering evidence of a plan task
+    included."""
 
     def __init__(
         self,
         store: Callable[[], RedisStore],
         ledger: Any,
-        full: readiness.Source,
         claims: Claims = claimed,
         admitting: Admitting = admits,
     ) -> None:
-        self._store, self._ledger, self._full, self._claims = store, ledger, full, claims
+        self._store, self._ledger, self._claims = store, ledger, claims
         self._admitting = admitting
 
     def task(self, slug: str, task_id: str, mark: Mark) -> View:
@@ -162,11 +163,42 @@ class Narrow:
         return {row["id"]: row for row in rows}
 
     def _doc(self, slug: str, row: dict[str, Any] | None, rows: dict[str, Any]) -> dict[str, Any]:
-        if row is not None and row.get("kind") == "plan":
-            return self._full.state(slug)
         phase = self._ledger.item(slug, f"phases/{row['phase']}") if row and row.get("phase") else None
         overview = self._ledger.metadata(slug).get("overview", "")
+        if row is not None and phase is not None and row.get("kind") == "plan":
+            return self._steering(slug, overview, phase, rows)
         return {"overview": overview, "tasks": list(rows.values()), "phases": [phase] if phase else []}
+
+    def _steering(self, slug: str, overview: str, phase: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
+        """A plan task's steering document: its phase, every phase it depends on with its comments, the tasks of those
+        phases laid over the rows the view already holds, and the artifact rows when its phase holds a published
+        plan."""
+        depending = self._dependencies(slug, phase)
+        listed: list[dict[str, Any]] = (
+            self._ledger.tasks_in_phases(slug, [each["id"] for each in depending], EVIDENCE_FIELDS) if depending else []
+        )
+        merged = {each["id"]: {**rows.get(each["id"], {}), **each} for each in listed}
+        tasks = [*merged.values(), *(each for key, each in rows.items() if key not in merged)]
+        doc = {"overview": overview, "tasks": tasks, "phases": [phase, *depending]}
+        return doc | ({"artifacts": self._ledger.artifacts(slug)} if phase.get("plan_ref") else {})
+
+    def _dependencies(self, slug: str, phase: dict[str, Any]) -> list[dict[str, Any]]:
+        """The phases one phase depends on, walked breadth first as the plan evidence walks them, each with its
+        comment thread; the walk ends at a phase the ledger does not hold, where the evidence also stops."""
+        pending: list[str] = list(phase.get("depends_on", []))
+        seen: set[str] = {phase["id"]}
+        found: list[dict[str, Any]] = []
+        while pending:
+            phase_id = pending.pop(0)
+            if phase_id in seen:
+                continue
+            seen.add(phase_id)
+            row: dict[str, Any] | None = self._ledger.item(slug, f"phases/{phase_id}")
+            if row is None:
+                return found
+            found.append({**row, "comments": self._ledger.thread(slug, f"phases/{phase_id}", "comments")})
+            pending.extend(row.get("depends_on", []))
+        return found
 
     def _snapshot(self, slug: str, rows: dict[str, Any]) -> readiness.Snapshot:
         store = self._store()

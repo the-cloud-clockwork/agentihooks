@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -35,7 +35,7 @@ def rig():
         snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)]),
     )
     admitter = admission.Admission(store, ledger, source, clock=lambda: 7_000)
-    admitter.view = admission_view.Narrow(lambda: store, ledger, cast(Any, source), claims=claimant_only)
+    admitter.view = admission_view.Narrow(lambda: store, ledger, claims=claimant_only)
     yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter, found=found)
     store.redis.close()
 

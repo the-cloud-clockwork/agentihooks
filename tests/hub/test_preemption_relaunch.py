@@ -41,7 +41,7 @@ def episode(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     now = SimpleNamespace(ms=1)
     admitter = admission.Admission(store, ledger, source, clock=lambda: now.ms)
     admitter.view = admission_view.Narrow(
-        lambda: store, ledger, source, claims=lambda store, slug: lambda key: store.claimant(slug, key) is not None
+        lambda: store, ledger, claims=lambda store, slug: lambda key: store.claimant(slug, key) is not None
     )
     rig = SimpleNamespace(store=store, found=found, rows=rows, ledger=ledger, admitter=admitter, now=now, names=[])
     _hold(rig, "lower", 2)

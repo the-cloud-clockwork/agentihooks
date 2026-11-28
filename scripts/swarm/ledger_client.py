@@ -247,16 +247,38 @@ class LedgerClient:
         return rows
 
     def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
-        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection."""
-        return []
+        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection.
+
+        A ledger server older than the phases selection refuses it as schema_invalid; only then is the whole tasks
+        collection read and selected here by the server's own selection code, until that server is redeployed.
+        """
+        from scripts.swarm_ledger.api import task_list
+
+        query = where_query(phases=phases, fields=fields)
+        try:
+            rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
+            return rows
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 400 or error.get("code") != "schema_invalid":
+                raise replay from None
+        selected: list[dict[str, Any]] = task_list.selecting(self.tasks(slug), query)["data"]
+        return selected
 
     def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
         """Every entry of one record's thread, such as a phase's comments, read page by page without the record."""
-        return []
+        collection, _, item_id = record.partition("/")
+        entries: list[dict[str, Any]] = self._resource(
+            slug, f"{collection}/{quote(item_id, safe='')}/{name}", collection=True
+        )
+        return entries
 
     def artifacts(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's artifact rows, read without the rest of the ledger."""
-        return []
+        rows: list[dict[str, Any]] = self._resource(slug, "artifacts", collection=True)
+        return rows
 
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
@@ -558,6 +580,7 @@ def where_query(
         "pinned": "1" if pinned else "",
         "branches": ",".join(branches),
         "fields": ",".join(fields),
+        "phases": ",".join(phases),
     }
     return {key: value for key, value in query.items() if value}
 

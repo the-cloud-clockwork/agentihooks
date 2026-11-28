@@ -78,6 +78,7 @@ PAGINATION = {
         "states": {"type": "string", "maxLength": 200},
         "pinned": {"enum": ["1"]},
         "branches": {"type": "string", "maxLength": 8000},
+        "phases": {"type": "string", "maxLength": 8000},
         "fields": {"type": "string", "maxLength": 500},
     },
 }
