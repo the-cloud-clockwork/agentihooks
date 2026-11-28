@@ -80,11 +80,12 @@ def test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps(
     monkeypatch.setattr(incidents, "host_pressure", lambda *args, **kwargs: called.append("host pressure") or [])
     monkeypatch.setattr(prompt_backlog, "observe", lambda *args, **kwargs: called.append("prompt backlog") or [])
     monkeypatch.setattr(sweep, "sweep", lambda *args, **kwargs: called.append("hive sweep") or [])
+    monkeypatch.setattr(sweep, "indexed", lambda *args, **kwargs: called.append("hive drain notice") or [])
     monkeypatch.setattr(delivery, "migrate_outbox", lambda *args, **kwargs: called.append("outbox migration") or 0)
     monkeypatch.setattr(ledger_watchdog, "watch", lambda *args, **kwargs: called.append("ledger watchdog") or [])
     monkeypatch.setattr(command_runner, "consume", lambda *args, **kwargs: called.append("command runner") or [])
     assert cli.run_tick(store, "sw", LedgerClient(), FakeRuntime()) == ["Ledger health probe failed"]
-    assert sorted(called) == ["hive sweep", "host pressure", "outbox migration", "prompt backlog"]
+    assert sorted(called) == ["hive drain notice", "hive sweep", "host pressure", "outbox migration", "prompt backlog"]
 
 
 @pytest.mark.feature("swarm-tick-redis-only-steps")
