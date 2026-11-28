@@ -160,8 +160,9 @@ def test_an_admission_hands_the_continuation_the_rows_on_its_task_branch(
 def test_a_plan_task_admission_never_reads_the_full_export_when_the_revision_moves(
     gates: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    earlier = next(phase for phase in gates.found["phases"] if phase["id"] == "p1")
-    earlier.update(done=True, comments=[{"id": "c1", "by": "engineer@h-1", "at": 1, "text": "built it"}])
+    phases = {phase["id"]: phase for phase in gates.found["phases"]}
+    phases["p1"].update(done=True, comments=[{"id": "c1", "by": "engineer@h-1", "at": 1, "text": "built it"}])
+    phases["p2"]["planning"] = "auto"
     gates.found["tasks"].append(task("plan-p2", phase="p2", kind="plan", lane="plan"))
 
     admitted = gates.admitter.admit(SLUG, ask(task="plan-p2", lane="plan"))
