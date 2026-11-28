@@ -9,6 +9,7 @@
     "tests/swarm_ledger/test_enhance_publish.py::test_an_enhancement_publish_into_a_phase_without_a_plan_still_links_the_phase",
     "tests/swarm_ledger/test_enhance_publish.py::test_only_the_claimant_of_an_enhancement_plan_task_publishes_for_its_target",
     "tests/swarm_ledger/test_plan_ranges.py::test_a_planned_phase_grades_an_enhanced_task_by_the_plan_published_for_it",
-    "tests/swarm_ledger/test_plan_ranges.py::test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_same_phase_lines"
+    "tests/swarm_ledger/test_plan_ranges.py::test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_same_phase_lines",
+    "tests/swarm_ledger/test_plan_ranges.py::test_a_slice_lookup_naming_no_task_reads_the_phase_plan_past_a_plan_recorded_for_a_task"
   ]
 }

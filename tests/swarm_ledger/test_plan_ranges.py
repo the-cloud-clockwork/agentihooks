@@ -543,6 +543,18 @@ def test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_
     assert (plan_read.sharers(doc, target), plan_read.sharers(doc, sibling)) == ([], [])
 
 
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_a_slice_lookup_naming_no_task_reads_the_phase_plan_past_a_plan_recorded_for_a_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_plans)
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": OWN_URL, "task": "XXXX"}
+    doc = {"phases": [PLANNED], "plans": [plan], "artifacts": STORED, "tasks": []}
+    assert plan_ranges.task_slice(doc, PLANNED, "one", OWN_URL) == "2-3"
+
+
 MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
 
 
