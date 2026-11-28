@@ -2128,6 +2128,7 @@ class MirrorExpander:
         self.manifests = manifests
         self.verdicts = verdicts
         self.lab = lab
+        self.served: tuple[str, ...] = ()
 
     def _environment(self, repo: str) -> dict[str, str] | None:
         if self.auth is None or not repo.startswith(git_auth.GITHUB):
@@ -2143,6 +2144,10 @@ class MirrorExpander:
     def mirror(self, repo: str) -> Mirror:
         """Return the repository's git mirror, the public port a merge resolver reads it through."""
         return self._mirror(repo)
+
+    def serve(self, repos: Iterable[str]) -> None:
+        """Name the repositories whose remotes bundle asks, in this order, for a commit no store holds."""
+        self.served = tuple(repos)
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
