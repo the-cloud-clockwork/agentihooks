@@ -9396,6 +9396,146 @@ Redis holds the swarm's runtime state, and the swarm refuses to run without it:
 The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to use another. Task content
 (title, lane, state, links) lives in the ledger, not in Redis.
 
+### Controller through a Redis outage
+
+`agentihooks controller run` keeps running through a Redis outage shorter than its grace window. A pass that meets
+a Redis error ends early, the next pass starts one tick later, and the controller exits only once Redis has refused
+it for the whole window. Every wait the controller makes between passes finishes on the local clock when Redis
+refuses the scheduler timer, so the grace window, and never a wait, decides when an outage ends the controller.
+
+#### Settings
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` | `120` | Seconds of Redis refusal the controller rides out. An empty value keeps the default; a value that is not a number ends the controller at startup with a `ValueError`. |
+| `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` | `60` | The tick: passes start one tick apart, and a failed pass or startup connection waits one tick before the next try. |
+
+Set both in the controller's environment. In the `agentihooks-swarm` chart they go under `controller.env`:
+
+```yaml
+controller:
+  env:
+    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "180"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "60"
+```
+
+The window opens at the first Redis error of an outage, measured on the process's monotonic clock, and closes at
+the first startup connection or pass that succeeds. The next error after that opens a new window.
+
+#### What the controller does
+
+| Redis fails during | The controller | Line on stderr |
+|---|---|---|
+| The startup connection | Waits one tick and connects again | `controller: Redis is unreachable (<error>); the swarm refuses to run without it; retrying after one tick inside the Redis grace window` |
+| A pass | Ends the pass, waits one tick and starts the next | `controller: pass ended inside the Redis grace window, next pass after one tick: <error>` |
+| A wait between passes or between connection attempts | Finishes the wait on the local clock | `controller: the scheduled wait failed, waiting on the local clock: <error>` |
+| A pass, past the window | Exits 1 | `controller: Redis is unreachable past the 120s grace window (<error>)` |
+| The startup connection, past the window | Exits with the `Unreachable` traceback | `scripts.swarm.store.Unreachable: Redis is unreachable (<error>); the swarm refuses to run without it` |
+
+Each pass also ends with one journal line on stdout. A pass ended inside the grace window reads:
+
+```text
+{"event": "controller_pass_end", "pass": 7, "outcome": "redis_grace"}
+```
+
+The other outcomes are `ok` and `ledger_unreachable`. A pass ended by an unreachable ledger waits one tick and
+neither opens nor closes the Redis window. With `--once` the controller exits 1 after a pass that ended
+inside the window or on an unreachable ledger.
+
+#### Waits on the local clock
+
+The controller waits on the scheduler process timer. Its state lives in Redis unless
+`AGENTIHOOKS_SCHEDULER_STATE_BACKEND` (the chart's `controller.schedulerState`) or `AGENTIHOOKS_STATE_BACKEND` names
+the bus, so by default the timer itself fails while Redis is down. Every controller wait goes through
+`controller._tick_wait`:
+
+- the cadence wait after a pass that succeeded, for the rest of the tick counted from the pass start;
+- the one tick wait after a pass that ended inside the Redis grace window or on an unreachable ledger;
+- the one tick wait between startup connection attempts;
+- the poll of a standby replica waiting behind the replica that leads, added by
+  [pull request 11631](https://github.com/the-cloud-clockwork/agentihooks/pull/11631).
+
+When the timer raises a Redis error, `_tick_wait` prints its line and sleeps the same number of seconds on the
+local clock. The wait starts over in full, so a pass during an outage can start up to one tick late; every pass
+fails until Redis answers, so no work is lost to the delay.
+
+Before [pull request 11616](https://github.com/the-cloud-clockwork/agentihooks/pull/11616) these waits called the
+timer directly. The pass loop applies the grace window only to errors raised inside a pass, so the timer's error
+escaped it, and the first wait of any outage ended the controller about 0.2 seconds in, whatever the window.
+
+#### Limits
+
+- **The liveness probe without the control API has no grace.** `agentihooks controller live` passes while an
+  outage is inside the window: it keeps the time of the outage's first failed probe in
+  `$AGENTIHOOKS_HOME/controller/redis-outage`, prints
+  `controller: <error>; live inside the 120s Redis grace window, down <n>s`, and the file is removed by the next
+  live probe that reaches Redis or the next pass that succeeds. The chart's exec liveness probe for a controller with `controller.api.enabled`
+  off reads Redis directly instead, so each probe during the outage fails and
+  `controller.livenessProbe.failureThreshold` failures in a row restart the container. The container's startup step,
+  `agentihooks hive controller`, also reaches Redis with no grace.
+- **The replica lock fence ends the leader 16 to 26 seconds into an outage.** The chart starts every controller with
+  `AGENTIHOOKS_CONTROLLER_REPLICA` set to its pod name, so the controller leads its passes under a replica lock that
+  lasts 30 seconds and is renewed every 10 seconds. A renewal that cannot reach Redis prints
+  `controller: renewing the replica lock failed: <error>` and keeps the lead only while the last successful
+  renewal is under 20 seconds old. Past that the controller prints
+  `controller: another replica took the lead; exiting` and exits 75. With the 3 second Redis connect timeout that
+  happens 16 to 26 seconds into an outage, depending on when in the 10 second beat it started, so a grace window
+  longer than that does not keep a replica controller alive to its end.
+- **A refused lock release leaves the lock to lapse.** On exit the controller releases its replica lock. When Redis
+  refuses the release it prints `controller: releasing the replica lock failed, it lapses on its own: <error>`, and
+  the lock expires within its 30 seconds; a standby takes the lead as it lapses
+  ([pull request 11607](https://github.com/the-cloud-clockwork/agentihooks/pull/11607)).
+
+#### The kind readiness outage
+
+The Helm kind chart proof replaces the Redis pod with a planted 15 second startup delay while the controller runs
+(see [Redis readiness outage](../ci-timing.md#redis-readiness-outage)). Those outages measured 16.0 to 18.1 seconds.
+Before pull request 11616 the controller died 0.2 seconds into each one in its cadence wait, its exit path then
+failed to release the replica lock, and the process exited 1 with the lock still in Redis. The rollout's replacement
+stood behind that lock until its liveness probe killed it, and the promotion run
+[43913675090](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43913675090) failed with
+`the controller restarted 1 times`. Issue [11615](https://github.com/the-cloud-clockwork/agentihooks/issues/11615)
+records the traceback runs.
+
+With the fix, an 18.0 second outage in kind left the controller with zero restarts and one failed liveness probe
+([run 43943147925](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43943147925)). A 28 second planted
+outage ([run 43946924247](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43946924247)) showed the
+limits above: the controller rode out the first 20 seconds on the local clock, the liveness probe killed it at about
+21 seconds, and the replica lock fence ended it with exit 75 at 24 seconds. The first dev push after the merge,
+[run 43954436350](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43954436350), passed
+`helm-kind / kind` and promoted.
+
+#### Regression guards
+
+| Guard | Holds |
+|---|---|
+| `tests/test_swarm_redis_grace.py::test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes` | With the timer refusing every wait, the pass loop runs a good pass, a pass ended by a Redis error and a third pass, sleeping on the local clock after each of the first two. |
+| `tests/test_swarm_redis_grace.py::test_startup_rides_out_redis_refusing_its_retry_wait` | With the timer refusing, a startup that first meets an unreachable Redis waits one tick on the local clock and connects on the second try. |
+| Feature map entry `controller-waits-ride-out-redis-outage` | Both tests stay mapped to the behaviour; see [Feature map](../reference/feature-map.md). |
+| Semgrep incident rule `controller-tick-wait-outside-redis-grace` | Refuses any `scheduled_wait(...)` call in `scripts/swarm/controller.py` outside `_tick_wait`. |
+
+Both tests failed on the old code with the Redis `ConnectionError` escaping the wait
+([run 43941626223](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43941626223)).
+
+#### Troubleshooting
+
+Read the ended container before a rollout replaces its pod; the pod's last state keeps the exit code:
+
+```bash
+kubectl -n <namespace> get pod <controller pod> \
+  -o jsonpath='{.status.containerStatuses[0].lastState.terminated.exitCode}{"\n"}'
+kubectl -n <namespace> logs <controller pod> --previous \
+  | grep -E 'grace window|local clock|replica lock|took the lead'
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The controller exits 1 within a second of a Redis outage, with a traceback through `process_timer.wait` | The image predates pull request 11616 | Roll the controller onto a release that carries it |
+| `controller: Redis is unreachable past the <n>s grace window` and exit 1 | The outage outlasted `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` | Restore Redis; raise the window only for outages you expect to last longer |
+| `renewing the replica lock failed` lines, then `another replica took the lead; exiting` and exit 75 | The replica lock fence, 16 to 26 seconds into the outage | Expected; the restarted container or a standby takes the lock once Redis answers |
+| The container restarts during an outage with no controller error in its log | The exec liveness probe of a controller without the control API has no grace | Expected for an outage longer than the probe's failure threshold allows |
+| Repeated `waiting on the local clock` lines while passes keep ending | The scheduler timer cannot reach Redis; passes still start one tick apart | Restore Redis; the lines stop with the first pass that succeeds |
+
 ## Talking to the swarm
 
 - Operator: the chat on the ledger page, or `agentihooks swarm <id> send-message "<text>"` for every live agent's

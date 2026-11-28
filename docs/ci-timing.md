@@ -41,6 +41,38 @@ Probe results print in startup, liveness, readiness order after all commands
 finish. Printed order is not execution order. A passed readiness command alone
 does not establish the subsequent Ready assertion or completion of the proof.
 
+### Redis readiness outage
+
+Right after the release installs and its chart tests pass, and before the
+registration that starts the measured interval,
+`deploy/helm/agentihooks-swarm/ci/redis-readiness-proof.sh` takes Redis away
+from a running controller:
+
+1. Patch the Redis StatefulSet with a `startup-delay` init container that
+   sleeps 15 seconds, and wait up to 60 seconds for the Redis pod to be
+   replaced.
+2. From the ledger Pod, ping Redis once a second with one second timeouts until
+   it answers. Fail when Redis stays down for 60 seconds, or when no ping
+   failed, because then the plant never took Redis away.
+3. Print `Redis readiness waited through the planted delay: <n> failed pings,
+   <s>s` and wait up to one minute for the StatefulSet rollout.
+
+Natural runs measured outages of 16.0 to 18.1 seconds. The controller runs with
+the control API off at this point, so its liveness probe is the chart's exec
+probe, which has no Redis grace. The controller itself rides the outage out
+inside its Redis grace window and finishes its waits on the local clock; see
+[Controller through a Redis outage](pillars/swarm.md#controller-through-a-redis-outage).
+Before [pull request 11616](https://github.com/the-cloud-clockwork/agentihooks/pull/11616)
+the controller died 0.2 seconds into this outage and left its replica lock in
+Redis.
+
+The `controller restarts: 0` check after the lease wait reads the pod created
+by the controller restart in step 1 of the sequence above, not the controller
+that lived through the outage. Before pull request 11616 that replacement stood
+behind the stale replica lock until its liveness probe killed it, and the check
+failed with `the controller restarted 1 times`. The original controller's
+survival is held by the regression tests named on the swarm page.
+
 ### Kind configuration
 
 The checked in `deploy/helm/agentihooks-swarm/ci/kind-values.yaml` supplies this
@@ -111,6 +143,7 @@ different intervals.
 | Failure | Inspection |
 |---|---|
 | Lease acquisition or renewal times out | Read the last lease diagnostic, compare owner with `SWARM_HIVE_ID` and check whether expiry advanced. |
+| `the controller restarted <n> times` after the Redis readiness step | Read the previous controller logs from failure cleanup for `grace window`, `local clock` and `replica lock` lines, and the ended container's exit code: 1 is a controller error, 75 the replica lock fence. |
 | Frozen controller does not restart exactly once | Inspect liveness settings, restart count and previous controller logs from failure cleanup. |
 | Setup objects were not created | Inspect the earlier background setup command error; upgrade is refused on setup failure. |
 | Runtime build log is absent | Inspect controller startup and worker settings after upgrade; rollout alone does not establish runtime construction. |
