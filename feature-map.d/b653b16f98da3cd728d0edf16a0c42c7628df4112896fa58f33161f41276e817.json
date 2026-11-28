@@ -16,7 +16,12 @@
     "tests/test_lab_authority_check.py::test_a_job_whose_whole_condition_is_the_skip_clause_holds_it",
     "tests/test_lab_authority_check.py::test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delivery_fault",
     "tests/test_lab_authority_check.py::test_a_checkout_with_a_malformed_wiring_file_raises_and_is_never_reported_as_a_delivery_fault",
-    "tests/test_lab_authority_check.py::test_a_step_reading_an_earlier_steps_output_shaped_like_a_commit_id_holds_the_part"
+    "tests/test_lab_authority_check.py::test_a_step_reading_an_earlier_steps_output_shaped_like_a_commit_id_holds_the_part",
+    "tests/test_lab_authority_check.py::test_a_step_reading_a_context_name_that_is_not_a_commit_id_holds_the_part",
+    "tests/test_lab_authority_check.py::test_a_checkout_with_no_registry_file_holds_the_commit_id_part",
+    "tests/test_lab_authority_check.py::test_a_checkout_with_a_malformed_registry_file_raises_and_is_never_reported_as_a_delivery_fault",
+    "tests/test_lab_authority_check.py::test_a_step_whose_run_text_reads_github_sha_in_the_shell_fails_the_part",
+    "tests/test_lab_authority_check.py::test_an_earlier_steps_run_text_that_writes_git_rev_parse_to_its_output_fails_the_part"
   ],
   "live_check": [
     "python",

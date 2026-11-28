@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts.ci_lab import delivery, static_exclusions
+from scripts.ci_lab import delivery, static_exclusions, static_gates
 from scripts.feature_checks import lab_authority as check
 
 pytestmark = pytest.mark.unit
@@ -184,3 +184,68 @@ def test_a_step_reading_an_earlier_steps_output_shaped_like_a_commit_id_holds_th
     )
     assert check.main(copy) == 0
     assert capsys.readouterr().out.splitlines() == HELD
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_step_reading_a_context_name_that_is_not_a_commit_id_holds_the_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _edit(
+        copy / check.WORKFLOW,
+        lambda document: _trust_step(document).setdefault("env", {}).update({"OTHER": "${{ github.event.number }}"}),
+    )
+    assert check.main(copy) == 0
+    assert capsys.readouterr().out.splitlines() == HELD
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_checkout_with_no_registry_file_holds_the_commit_id_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert not (copy / static_gates.REGISTRY).exists()
+    assert check.main(copy) == 0
+    assert capsys.readouterr().out.splitlines() == HELD
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_checkout_with_a_malformed_registry_file_raises_and_is_never_reported_as_a_delivery_fault(
+    copy: Path,
+) -> None:
+    (copy / static_gates.REGISTRY).write_text("{")
+    with pytest.raises(json.JSONDecodeError):
+        check.main(copy)
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_step_whose_run_text_reads_github_sha_in_the_shell_fails_the_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def plant(document: Any) -> None:
+        step = _trust_step(document)
+        step["run"] = step["run"] + '\necho "$GITHUB_SHA"\n'
+
+    _edit(copy / check.WORKFLOW, plant)
+    assert check.main(copy) == 1
+    assert capsys.readouterr().out.splitlines() == _lacking({10})
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_an_earlier_steps_run_text_that_writes_git_rev_parse_to_its_output_fails_the_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def plant(document: Any) -> None:
+        steps = document["jobs"]["lint"]["steps"]
+        trust = _trust_step(document)
+        steps.insert(
+            steps.index(trust),
+            {
+                "name": "Record the head sha",
+                "id": "record",
+                "run": 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"',
+            },
+        )
+        trust.setdefault("env", {})["OTHER"] = "${{ steps.record.outputs.sha }}"
+
+    _edit(copy / check.WORKFLOW, plant)
+    assert check.main(copy) == 1
+    assert capsys.readouterr().out.splitlines() == _lacking({10})
