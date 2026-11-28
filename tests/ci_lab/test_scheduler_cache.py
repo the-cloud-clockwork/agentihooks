@@ -993,7 +993,9 @@ def test_a_lock_without_write_access_refuses_before_consumers(policy: dict[str, 
 
 @pytest.mark.feature("lab-scheduler-cache-policy")
 def test_allocated_bytes_refuses_a_fifo_without_waiting_for_a_writer(tmp_path: Path) -> None:
-    assert cache.allocated_bytes(tmp_path) == tmp_path.stat().st_blocks * 512
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert cache.allocated_bytes(empty) == empty.stat().st_blocks * 512
     fifo = tmp_path / "fifo"
     cache.os.mkfifo(fifo)
 
