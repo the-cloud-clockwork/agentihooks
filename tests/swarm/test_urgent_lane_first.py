@@ -67,11 +67,18 @@ def test_urgent_work_in_two_lanes_shares_the_seats_by_fewest_effective_agents() 
 
 
 @pytest.mark.feature("swarm-urgent-lane-first")
-def test_scarce_seats_without_urgent_work_keep_the_fewest_effective_pick_after_each_placement() -> None:
+@pytest.mark.parametrize(
+    ("engineers", "seats", "expected"),
+    [(2, 4, {"eng": 1, "ci": 3}), (3, 3, {"eng": 0, "ci": 3})],
+    ids=["ties go to eng", "ci fills first"],
+)
+def test_scarce_seats_without_urgent_work_keep_the_fewest_effective_pick_after_each_placement(
+    engineers: int, seats: int, expected: dict[str, int]
+) -> None:
     config = SwarmConfig("sw", "/repo", max_eng=6, max_ci=5, max_plan=0)
     work = {"eng": 4, "ci": 4, "plan": 0, "review": 0}
-    decision = capacity.calculate(config, [account(cap=6, sessions=2)], live(eng=2), work)
-    assert placed(decision) == {"eng": 1, "ci": 3, "plan": 0, "review": 0}
+    decision = capacity.calculate(config, [account(cap=6, sessions=6 - seats)], live(eng=engineers), work)
+    assert placed(decision) == {**expected, "plan": 0, "review": 0}
 
 
 @pytest.mark.feature("swarm-urgent-lane-first")
@@ -98,7 +105,7 @@ def test_a_demand_without_urgent_work_places_exactly_as_its_plain_counts(
 @pytest.mark.feature("swarm-urgent-lane-first")
 def test_urgent_engineer_work_takes_the_scarce_ceiling_room_before_ci_and_plan() -> None:
     work = demand({"plan": 1, "ci": 1, "eng": 3}, {"eng": 2})
-    assert ceilings({"plan": 0, "ci": 0, "eng": 1}, 2, work) == {"plan": 0, "ci": 0, "eng": 3}
+    assert ceilings({"eng": 1}, 2, work) == {"plan": 0, "ci": 0, "eng": 3}
 
 
 @pytest.mark.feature("swarm-urgent-lane-first")
@@ -162,10 +169,21 @@ def test_the_plan_floor_cuts_neither_lane_when_both_hold_urgent_work() -> None:
 
 
 @pytest.mark.feature("swarm-urgent-lane-first")
-def test_the_plan_floor_without_urgent_work_takes_from_the_larger_lane_as_before() -> None:
-    caps = {"plan": 0, "ci": 1, "eng": 3}
-    work = {"plan": 1, "ci": 1, "eng": 3}
-    assert plan_cap_floor.ceilings(caps, demand(work, {})) == plan_cap_floor.ceilings(caps, work)
+@pytest.mark.parametrize("urgent", [None, {}], ids=["plain counts", "no urgent work"])
+@pytest.mark.parametrize(
+    ("caps", "expected"),
+    [
+        ({"plan": 0, "ci": 1, "eng": 3}, {"plan": 1, "ci": 1, "eng": 2}),
+        ({"plan": 0, "ci": 3, "eng": 1}, {"plan": 1, "ci": 2, "eng": 1}),
+    ],
+    ids=["eng larger", "ci larger"],
+)
+def test_the_plan_floor_without_urgent_work_takes_from_the_larger_lane_as_before(
+    caps: dict[str, int], expected: dict[str, int], urgent: dict[str, int] | None
+) -> None:
+    counts = {"plan": 1, "ci": 1, "eng": 3}
+    work = counts if urgent is None else demand(counts, urgent)
+    assert plan_cap_floor.ceilings(caps, work) == expected
 
 
 @pytest.mark.feature("swarm-urgent-lane-first")

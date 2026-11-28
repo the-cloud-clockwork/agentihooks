@@ -57,19 +57,8 @@ def _held(
     return Held(min(total, limit, wanted), limit)
 
 
-def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: Held | None = None) -> dict[str, int]:
-    ceilings: dict[str, int] = {}
-    room = total - (held.seats if held else 0)
-    for lane in ("plan", "ci", "eng"):
-        ceilings[lane] = min(room, live.get(lane, 0))
-        room -= ceilings[lane]
-    for lane in ("plan", "ci", "eng"):
-        added = min(room, bool(demand.get(lane)))
-        ceilings[lane] += added
-        room -= added
-    wants = {lane: live.get(lane, 0) + demand.get(lane, 0) for lane in ceilings}
-    if held is not None:
-        ceilings[REVIEW], wants[REVIEW] = held.seats, held.limit
+def _fill(ceilings: dict[str, int], wants: dict[str, int], room: int) -> int:
+    """Gives the room one seat at a time to the lowest ceiling still below its wanted seats; returns the room left."""
     while room:
         ready = [lane for lane in ceilings if ceilings[lane] < wants[lane]]
         if not ready:
@@ -77,6 +66,25 @@ def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: He
         lane = min(ready, key=ceilings.get)
         ceilings[lane] += 1
         room -= 1
+    return room
+
+
+def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: Held | None = None) -> dict[str, int]:
+    ceilings: dict[str, int] = {}
+    urgent = urgent_counts(demand)
+    room = total - (held.seats if held else 0)
+    for lane in ("plan", "ci", "eng"):
+        ceilings[lane] = min(room, live.get(lane, 0))
+        room -= ceilings[lane]
+    room = _fill(ceilings, {lane: live.get(lane, 0) + urgent.get(lane, 0) for lane in ceilings}, room)
+    for lane in ("plan", "ci", "eng"):
+        added = min(room, bool(demand.get(lane)) and not urgent.get(lane))
+        ceilings[lane] += added
+        room -= added
+    wants = {lane: live.get(lane, 0) + demand.get(lane, 0) for lane in ceilings}
+    if held is not None:
+        ceilings[REVIEW], wants[REVIEW] = held.seats, held.limit
+    _fill(ceilings, wants, room)
     return ceilings
 
 

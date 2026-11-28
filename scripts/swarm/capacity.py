@@ -417,16 +417,25 @@ def _share(lane: str, free: list[str], eligible: list[str], shared: dict[str, in
     return ["codex"] if lane in SHARED_LANES and "codex" in free and short else free or eligible
 
 
+@dataclass(frozen=True)
+class LaneCounts:
+    """The agents each lane holds, the most it may hold this pass, and its ready urgent tasks, seated first."""
+
+    effective: dict[str, int]
+    limits: dict[str, int]
+    urgent: dict[str, int]
+
+
 def _allocate(
     config: SwarmConfig | None,
-    effective: dict,
-    limits: dict,
+    lanes: LaneCounts,
     open_seats: list,
     requirements: dict | None,
     accounts: dict | None = None,
     *,
     shared: dict[str, int],
 ) -> tuple:
+    effective, limits = lanes.effective, lanes.limits
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
     options = (
@@ -449,7 +458,7 @@ def _allocate(
         ready = _ready_indices(effective, limits, options, cursors, room)
         if not ready:
             return allocation, placements
-        lane = min(ready, key=lambda name: effective[name])
+        lane = min(ready, key=lambda name: (len(placements[name]) >= lanes.urgent.get(name, 0), effective[name]))
         index = ready[lane]
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
@@ -557,7 +566,7 @@ def autoscaled(
         "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = {lane: demand.get(lane, 0) for lane in LANES}
+    demand = autoscale.Demand({lane: demand.get(lane, 0) for lane in LANES}, autoscale.urgent_counts(demand))
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
         _busy(inputs.agents),
@@ -602,7 +611,7 @@ def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, st
     observations = accounts(environ, now_ms / 1000, refresh=False)
     warned = warned_accounts(observations, environ)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
-    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    demand = ready_demand(ready)
     spent = spawn_counter(store, now_ms)
     host = host_budget.read_host
     if host_budget.deployed(environ):
@@ -704,8 +713,7 @@ def calculate(
     placeable = _placeable(open_rows)
     allocation, placements = _allocate(
         config,
-        effective,
-        limits,
+        LaneCounts(effective, limits, autoscale.urgent_counts(demand)),
         _worker_seats(config, observations, agents, warned),
         requirements,
         accounts,
@@ -814,7 +822,7 @@ def apply(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms:
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     ready, skipped = placement_ready(store, slug, ready, now_ms)
-    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    demand = ready_demand(ready)
     requirements = None
     if hasattr(runtime, "quota_requirements"):
         prepared = {lane: [_prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}

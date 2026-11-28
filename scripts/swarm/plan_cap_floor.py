@@ -3,15 +3,20 @@
 from dataclasses import replace
 from typing import Any
 
-from scripts.swarm import templates
+from scripts.swarm import autoscale, templates
 from scripts.swarm.store import RedisStore, SwarmConfig
 
 
 def ceilings(caps: dict[str, int], demand: dict[str, int]) -> dict[str, int]:
-    """One plan seat while plan work is ready, taken from the larger of the eng and ci ceilings."""
+    """One plan seat while plan work is ready, taken from the larger of the eng and ci ceilings that hold no urgent
+    ready work, and from neither when both hold urgent work."""
     if caps["plan"] or not demand.get("plan"):
         return caps
-    donor = max(("eng", "ci"), key=lambda lane: caps[lane])
+    urgent = autoscale.urgent_counts(demand)
+    donors = [lane for lane in ("eng", "ci") if not urgent.get(lane)]
+    if not donors:
+        return {**caps, "plan": 1}
+    donor = max(donors, key=lambda lane: caps[lane])
     return {**caps, donor: max(0, caps[donor] - 1), "plan": 1}
 
 

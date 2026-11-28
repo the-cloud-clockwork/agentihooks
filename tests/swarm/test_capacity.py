@@ -1593,8 +1593,9 @@ def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_c
     seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
     allocation, placements = capacity._allocate(
         None,
-        {"eng": 0, "ci": 0, "plan": 0, "review": 0},
-        {"eng": 1, "ci": 1, "plan": 0, "review": 0},
+        capacity.LaneCounts(
+            {"eng": 0, "ci": 0, "plan": 0, "review": 0}, {"eng": 1, "ci": 1, "plan": 0, "review": 0}, {}
+        ),
         seats,
         {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
         {"eng": {0: {("claude", "a")}}},
