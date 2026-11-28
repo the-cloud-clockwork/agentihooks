@@ -1,4 +1,5 @@
 import math
+from collections.abc import Mapping
 from typing import NamedTuple, NotRequired, TypedDict
 
 from scripts.swarm import elapsed
@@ -27,6 +28,19 @@ class Decision(TypedDict):
     ceilings: dict[str, int]
     pending_raise: PendingRaise
     reason: str
+
+
+class Demand(dict[str, int]):
+    """Each lane's ready task count, carrying how many of those ready tasks are urgent in each lane."""
+
+    def __init__(self, counts: Mapping[str, int], urgent: Mapping[str, int]) -> None:
+        super().__init__(counts)
+        self.urgent = dict(urgent)
+
+
+def urgent_counts(demand: Mapping[str, int] | None) -> dict[str, int]:
+    """The ready urgent tasks per lane that a demand carries; a plain count carries none."""
+    return demand.urgent if isinstance(demand, Demand) else {}
 
 
 def _held(

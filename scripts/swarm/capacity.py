@@ -585,6 +585,14 @@ def ready_work(
     return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)  # pyright: ignore[reportUnknownArgumentType]
 
 
+def ready_demand(ready: dict[str, list[dict[str, Any]]]) -> autoscale.Demand:
+    """Each lane's ready task count, carrying how many of those ready tasks are urgent."""
+    return autoscale.Demand(
+        {lane: len(tasks) for lane, tasks in ready.items()},
+        {lane: sum(task.get("rank") == "urgent" for task in tasks) for lane, tasks in ready.items()},
+    )
+
+
 def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:
     """The tick's own scale inputs: ready work less fresh placement refusals, quota without a refresh, live agents."""
     from scripts.swarm.tick import _ended
