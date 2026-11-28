@@ -30,6 +30,14 @@ if [[ "$1" == manifest ]]; then
   exit 0
 fi
 if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == wait ]]; then
+  printf '1\\n'
+  exit 0
+fi
+if [[ "$1" == inspect && "${2:-}" == --format && "${3:-}" == '{{.State.Running}}' ]]; then
+  printf 'false\\n'
+  exit 0
+fi
 if [[ "$1" == pull ]]; then
   if [[ "$2" != *@sha256:runtime ]]; then
     echo 'application/vnd.in-toto+json: not found' >&2
