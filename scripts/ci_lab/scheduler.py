@@ -2635,25 +2635,17 @@ def storage(environ: Mapping[str, str]) -> S3Objects:
     return S3Objects(s3, environ[MINIO_BUCKET], "")
 
 
-def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
-    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
+def _run_service(environ: Mapping[str, str], interval_s: float, passes: int) -> int:
+    from typing import cast
+
     import redis
 
     from scripts.ci_lab import relay
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
-    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab scheduler")
-    parser.add_argument("--interval", type=float, default=INTERVAL_S)
-    parser.add_argument("--passes", type=int, default=0)
-    arguments = parser.parse_args(argv)
-    missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
-    if missing:
-        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
-        return 1
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
-    client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
+    client: Any = cast(Any, redis.Redis).from_url(environ[contract.REDIS_URL], decode_responses=True)
     objects = storage(environ)
     heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
@@ -2679,4 +2671,29 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):
         Thread(target=server.serve_forever, daemon=True).start()
-    return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
+    return serve(scheduler, relaying, interval_s, passes, time.time, time.sleep)
+
+
+def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
+    """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
+    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
+    from scripts.ci_lab import cache
+
+    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab scheduler")
+    parser.add_argument("--interval", type=float, default=INTERVAL_S)
+    parser.add_argument("--passes", type=int, default=0)
+    parser.add_argument("--require-cache-policy", action="store_true")
+    arguments = parser.parse_args(argv)
+    missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
+    if missing:
+        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
+        return 1
+    try:
+        return cache.run(
+            partial(_run_service, interval_s=arguments.interval, passes=arguments.passes),
+            environ,
+            required=arguments.require_cache_policy,
+        )
+    except cache.PolicyError as exc:
+        print(f"ci-lab scheduler refuses cache policy: {exc}", file=sys.stderr)
+        return 1
