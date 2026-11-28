@@ -12,7 +12,7 @@ from scripts import ci_wiring, size_limits, type_gate
 from scripts.ci_lab import expand_tests
 from scripts.ci_lab.static_gates import STATIC_JOBS
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.timeout(180)]
 ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 WIRING_PLANT = "lint.check-every-pull-request-job-is-a-need-of-gate-required"
