@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_client.py:scripts.swarm.ledger_client.xǁLedgerClientǁthread:e440596231aba424d1bf09c37d3b2ff86ed71502ff2d8eb361d66f819e5ec3fb": {
+    "reader": "master@323133-1151",
+    "reason": "Cleared, equivalent. quote always leaves ASCII letters unquoted, so adding X to the empty safe set changes nothing; every Unicode code point outside the surrogates quotes the same."
+  }
+}
