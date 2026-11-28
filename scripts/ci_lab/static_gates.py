@@ -299,7 +299,8 @@ def discover(
 def commit_ids(graded_commit: str, head: str, base: str) -> dict[str, str]:
     """Return the value of each name of COMMIT_ID_FIELDS for a grade: the graded commit when one is named, else
     head, for github.sha; head for the pull request head sha; base for the pull request base sha."""
-    return dict(zip(COMMIT_ID_FIELDS, (graded_commit or head, head, base), strict=True))
+    sha, head_sha, base_sha = COMMIT_ID_FIELDS
+    return {sha: graded_commit or head, head_sha: head, base_sha: base}
 
 
 def gate_commit_ids(gate: StaticGate, graded_commit: str, head: str, base: str) -> dict[str, str]:
