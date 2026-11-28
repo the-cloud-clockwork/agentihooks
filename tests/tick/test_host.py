@@ -113,10 +113,10 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("launch slots", "wrapper probes"),
         ("outage probes", "wrapper probes"),
         ("hive ledger", "wrapper probes"),
-        ("ledger health", "wrapper probes"),
+        ("ledger health", "before"),
         ("host pressure", "wrapper health"),
-        ("ledger watchdog", "wrapper health"),
-        ("ledger probe", "wrapper health"),
+        ("ledger watchdog", "before"),
+        ("ledger probe", "before"),
         ("prompt backlog", "wrapper health"),
         ("command runner", "wrapper commands"),
         ("urgent hold", "wrapper phases"),
@@ -133,9 +133,15 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        slow = {"hive ledger", "host pressure", "ledger watchdog", "ledger probe", "prompt backlog"}
+        slow = {"hive ledger", "host pressure", "prompt backlog"}
         lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
+    needs = {step.name: step.needs for step in host.STEPS if step.group == "before"}
+    assert needs == {
+        "ledger health": frozenset(),
+        "ledger watchdog": frozenset({"ledger health"}),
+        "ledger probe": frozenset({"ledger watchdog"}),
+    }
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,17 +156,32 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
     ]
 
 
-def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_health_steps_return_pressure_and_backlog_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3", "ran 5"]
+    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 3"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
-        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
-        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
         ("call", sweep.notify_drains, STORE),
     ]
+
+
+def test_the_before_group_returns_watchdog_then_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("before", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
+    assert calls == [
+        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
+        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
+    ]
+
+
+def test_the_before_group_runs_no_watchdog_or_probe_after_a_ledger_health_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("before", calls, _pass({"stop": ["Ledger health probe failed"]}), monkeypatch) == []
+    assert calls == []
 
 
 def test_the_prompt_backlog_observes_at_whole_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +215,7 @@ def _health(monkeypatch: pytest.MonkeyPatch, healthy: bool, metadata: object) ->
 
     monkeypatch.setattr(outage, "ledger_health", ledger_health)
     box: dict[str, Any] = {}
-    _run("wrapper probes", [], _pass(box, ledger=_Client(metadata)), monkeypatch)
+    _run("before", [], _pass(box, ledger=_Client(metadata)), monkeypatch)
     return box, seen
 
 
@@ -213,7 +234,7 @@ def test_a_healthy_ledger_leaves_the_tick_running(monkeypatch: pytest.MonkeyPatc
 def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(outage, "ledger_health", lambda *args: pytest.fail("probed"))
     box: dict[str, Any] = {}
-    _run("wrapper probes", [], _pass(box), monkeypatch)
+    _run("before", [], _pass(box), monkeypatch)
     assert box == {}
 
 
@@ -323,11 +344,9 @@ def test_a_raising_step_is_held_and_the_rest_of_its_site_runs(monkeypatch: pytes
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     state = _pass(box, raises=incidents.host_pressure)
-    assert _run("wrapper health", calls, state, monkeypatch) == ["ran 2", "ran 3", "ran 5"]
+    assert _run("wrapper health", calls, state, monkeypatch) == ["ran 3"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
-        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
-        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
         ("call", sweep.notify_drains, STORE),

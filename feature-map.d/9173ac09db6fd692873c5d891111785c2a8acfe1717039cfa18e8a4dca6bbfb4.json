@@ -1,0 +1,12 @@
+{
+  "id": "tick-ledger-probe-alone",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-write-path",
+  "behaviour": "Each timer pass that runs the ledger probe times one ledger read and one ledger write and stores the sample in the swarm's ledger slow state; in every pass of a swarm that is not stopped, the ledger health probe, then the ledger watchdog, then the ledger probe run in the before group, after the pass state is built and before any step of the pass graph starts, so in a parallel pass the probe's write timing never includes time spent waiting for other pass steps on the same interpreter; when the ledger health probe stops the pass the watchdog and probe do not run, and a stopped swarm's pass runs no probe.",
+  "seam": "scripts.swarm.cli.run_tick calling scripts.swarm.tick.run_group (scripts.tick.steps.masters._run_group over scripts.tick.engine.run_group) for the before group with the pass state, and the ledger health, ledger watchdog and ledger probe steps of scripts.tick.steps.host declared in that group on the tick lane, each needing the one before it, the watchdog and probe skipped on a ledger health stop",
+  "tests": [
+    "tests/swarm/test_ledger_probe.py::test_a_timer_pass_probe_times_one_read_and_one_write_into_the_slow_state",
+    "tests/swarm/test_ledger_probe.py::test_a_parallel_timer_pass_runs_the_probe_alone_before_the_pass_graph",
+    "tests/swarm/test_ledger_probe.py::test_a_stopped_swarm_pass_runs_no_ledger_probe"
+  ]
+}

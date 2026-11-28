@@ -1,4 +1,8 @@
+import json
+import time
+from collections.abc import Callable
 from http.client import IncompleteRead
+from typing import Any, cast
 from urllib.error import HTTPError
 
 import pytest
@@ -852,3 +856,87 @@ def test_a_database_connection_closed_during_a_write_keeps_the_tick_running(
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert "raised the ledger slow alert" in actions
     assert any("gave no answer" in text for text in master_mail(store))
+
+
+class PacedLedger(ProbedLedger):
+    def time_left(self, slug: str, slots: object, ci_minutes: object) -> None:
+        time.sleep(self.write_s)
+        super().time_left(slug, slots, ci_minutes)
+
+
+def graph_steps(store: RedisStore) -> list[dict[str, object]]:
+    from scripts.swarm import cli
+    from scripts.tick import registry
+
+    names = {step.name for step in registry.steps() if step.group in cli.PASS_SITES}
+    names -= {"ledger probe", "ledger watchdog"}
+    records = [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key("sw", "tick:steps"))]
+    return [record for record in records if record.get("phase") == "finished" and record["step"] in names]
+
+
+@pytest.mark.feature("tick-ledger-probe-alone")
+def test_a_timer_pass_probe_times_one_read_and_one_write_into_the_slow_state(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import cli, ledger_host
+    from tests.swarm.test_delivery import FakeHerdr
+
+    monkeypatch.setattr(ledger_host, "facts", lambda: FACTS)
+    ledger = ProbedLedger(Clock())
+    counted: list[tuple[int, int]] = []
+    real = ledger_probe.observe
+
+    def observe(*args: Any, **kwargs: Any) -> list[str]:
+        reads, writes = ledger.reads, len(ledger.writes)
+        try:
+            return real(*args, **kwargs)
+        finally:
+            counted.append((ledger.reads - reads, len(ledger.writes) - writes))
+
+    monkeypatch.setattr(ledger_probe, "observe", observe)
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    sample = ledger_probe.state(store, "sw")["samples"][-1]
+    assert counted == [(1, 1)]
+    assert sample["sequence"] == 1 and sample["failure"] == "" and sample["write_s"] < ledger_probe.SLOW_S
+
+
+@pytest.mark.feature("tick-ledger-probe-alone")
+def test_a_parallel_timer_pass_runs_the_probe_alone_before_the_pass_graph(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import cli, ledger_host, ledger_watchdog
+    from scripts.tick import pool
+    from tests.swarm.test_delivery import FakeHerdr
+
+    monkeypatch.setattr(ledger_host, "facts", lambda: FACTS)
+    store.update("sw", tick_mode=pool.PARALLEL)
+    spans: dict[str, tuple[float, float]] = {}
+
+    def spanned(name: str, call: Callable[..., Any]) -> Callable[..., Any]:
+        def run(*args: Any, **kwargs: Any) -> Any:
+            started = time.monotonic()
+            try:
+                return call(*args, **kwargs)
+            finally:
+                spans[name] = (started, time.monotonic())
+
+        return run
+
+    monkeypatch.setattr(ledger_watchdog, "watch", spanned("watchdog", ledger_watchdog.watch))
+    monkeypatch.setattr(ledger_probe, "observe", spanned("probe", ledger_probe.observe))
+    cli.run_tick(store, "sw", PacedLedger(Clock(), write_s=0.3), FakeRuntime(), FakeHerdr({}))
+    graph = graph_steps(store)
+    assert graph and spans["watchdog"][1] <= spans["probe"][0]
+    assert [r["step"] for r in graph if float(cast(float, r["started"])) < spans["probe"][1]] == []
+
+
+@pytest.mark.feature("tick-ledger-probe-alone")
+def test_a_stopped_swarm_pass_runs_no_ledger_probe(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import cli, ledger_host
+    from tests.swarm.test_delivery import FakeHerdr
+
+    monkeypatch.setattr(ledger_host, "facts", lambda: FACTS)
+    store.update("sw", state="stopped")
+    ledger = ProbedLedger(Clock())
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    assert (ledger.reads, ledger.writes) == (0, []) and ledger_probe.state(store, "sw") == {}

@@ -31,6 +31,7 @@ from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
+BEFORE = "before"
 REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "hive drain notice", "outbox migration"})
 VIEW_RESERVE_S = 20.0
 PENDING_VIEW = object()
@@ -145,6 +146,16 @@ def _ledger_health(cli: Any, get: Get) -> None:
         and ledger_view.stored(slug) is None
     ):
         get("box")["stop"] = ["Ledger health probe failed"]
+
+
+def _past_health(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
+    """Run ``call`` only when this pass's ledger health probe did not stop the pass, as the pass graph shuts every
+    ledger step past the probes."""
+
+    def run(cli: Any, get: Get) -> Any:
+        return [] if "stop" in get("box") else call(cli, get)
+
+    return run
 
 
 def _host_pressure(cli: Any, get: Get) -> Any:
@@ -276,10 +287,24 @@ STEPS = (
     CallStep("launch slots", "wrapper probes", held(_launch_slots)),
     CallStep("outage probes", "wrapper probes", held(_outage_probes)),
     CallStep("hive ledger", "wrapper probes", held(_hive_ledger), lane=SLOW),
-    CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
+    CallStep("ledger health", BEFORE, held(_ledger_health), writes=pass_domains("stop"), lane=Lane("tick")),
     CallStep("host pressure", "wrapper health", held(_host_pressure), lane=SLOW),
-    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog), lane=SLOW),
-    CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
+    CallStep(
+        "ledger watchdog",
+        BEFORE,
+        held(_past_health(_ledger_watchdog)),
+        needs=frozenset({"ledger health"}),
+        reads=pass_domains("stop"),
+        lane=Lane("tick"),
+    ),
+    CallStep(
+        "ledger probe",
+        BEFORE,
+        held(_past_health(_ledger_probe)),
+        needs=frozenset({"ledger watchdog"}),
+        reads=pass_domains("stop"),
+        lane=Lane("tick"),
+    ),
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold), reads=hook_domains("doc")),
