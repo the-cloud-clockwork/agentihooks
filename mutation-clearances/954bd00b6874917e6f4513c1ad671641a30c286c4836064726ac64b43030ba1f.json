@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__configuration:adfa4ab1805c62b0b526e9faddc06ea739d9d279fce5f57cce8bc94c728e9f41": {
+    "reader": "standards_reader",
+    "reason": "The altered else value is dominated by the final guard: when safe is false startup refuses regardless of empty; when owned is true owned-or-empty already succeeds. The only case where empty decides acceptance still executes the unchanged expression."
+  }
+}

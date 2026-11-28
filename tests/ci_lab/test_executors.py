@@ -113,11 +113,18 @@ jobs:
 
 
 class FakeWorktrees:
-    def __init__(self, trees: dict[str, Path], broken: str = "", fetched: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self,
+        trees: dict[str, Path],
+        broken: str = "",
+        fetched: frozenset[str] = frozenset(),
+        mirror: Any = None,
+    ) -> None:
         self.trees = trees
         self.broken = broken
         self.fetched = fetched
         self.calls: list[tuple[object, ...]] = []
+        self.mirror = mirror
 
     def lease(self, head: str) -> tuple[Path, bool]:
         if head == self.broken:

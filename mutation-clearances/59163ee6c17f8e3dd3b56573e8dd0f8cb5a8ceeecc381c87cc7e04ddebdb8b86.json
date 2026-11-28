@@ -1,0 +1,6 @@
+{
+  "scripts/gates/import_failure.py:scripts.gates.import_failure.x__read:8f35d4a5079018bbb854cd7141483a174982db3c0adc7b3635b63655676feb7c": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its second argument unchanged without inspecting its type argument. Replacing that argument with None preserves held.items(), filtering, returned timestamps, rate limiting and reporting."
+  }
+}

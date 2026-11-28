@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x_allocated_bytes:f4851f85d749336213b6261f0193f96ede05d6b36fdf0c55f22fc4c1cebeea66": {
+    "reader": "standards_reader",
+    "reason": "os.fwalk defaults top to the literal dot. Omitting that positional argument uses exactly the same root-relative traversal, dir_fd and onerror callback."
+  }
+}

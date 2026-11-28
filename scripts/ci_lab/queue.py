@@ -44,6 +44,7 @@ class Job:
     grader: str = ""
     leased_ms: int = 0
     rank: int = UNRANKED
+    graded_commit: str = ""
 
 
 SCORE = f"""
@@ -208,6 +209,7 @@ def _decode(job: str, record: Mapping[str, str]) -> Job | None:
         grader=record["grader"],
         leased_ms=int(record.get("leased_ms", 0)),
         rank=int(record.get("rank", UNRANKED)),
+        graded_commit=record.get("graded_commit", ""),
     )
 
 
@@ -235,6 +237,7 @@ class Queue:
         base: str = "",
         grader: str = "",
         rank: int = UNRANKED,
+        graded_commit: str = "",
     ) -> list[str]:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
         job is already known. The pending order is the rank first, the most urgent class lowest, then the order of
@@ -261,6 +264,7 @@ class Queue:
                 "worker": "",
                 "outcome": "",
                 "rank": rank,
+                "graded_commit": graded_commit,
             }
             fields = [item for pair in record.items() for item in pair]
             keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending"), _head(head, "done")]

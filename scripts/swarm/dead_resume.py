@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
-from scripts.swarm import expert_launch, expert_lineage, outage
+from scripts.swarm import expert_launch, expert_lineage, outage, spawn_counts
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 if TYPE_CHECKING:
@@ -177,7 +177,8 @@ def reopen(
             if not _owns(store, slug, agent, ledger):
                 runtime.retire(replace(agent, pane_id=placed.pane_id))
                 return False
-            store.put_agent(
+            spawn_counts.placed(
+                store,
                 slug,
                 replace(
                     agent,
@@ -197,6 +198,7 @@ def reopen(
                     profile_decision={**agent.profile_decision, **placed.profile_decision},
                     launch_timings=placed.launch_timings,
                 ),
+                runtime,
             )
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")

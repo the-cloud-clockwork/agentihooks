@@ -5,8 +5,12 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 ROOT = Path(__file__).resolve().parents[2]
 CHILD = (sys.executable, "-m", "scripts.swarm_ledger.ledger_duplicates")
@@ -44,7 +48,7 @@ class Gate:
     screen: Screen
     inner: object
 
-    def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
+    def apply(self, doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, apply_op: object) -> bool:
         if op["op"] == "phase_append":
             return self.append(doc, op, ctx, apply_op)
         reason = self.screen.refused.get(op["id"]) or self.landed_repeat(doc, op)
@@ -53,7 +57,7 @@ class Gate:
             self.flag(doc, [op])
         return accepted
 
-    def append(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
+    def append(self, doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, apply_op: object) -> bool:
         items = _items(op)
         reasons = [self.screen.refused.get(item["id"]) or self.landed_repeat(doc, item) for item in items]
         refused = [reason for reason in reasons if reason]
@@ -211,8 +215,8 @@ def _plain(title):
     return title.casefold().split()
 
 
-def _refuse(*reasons):
-    def refuse(doc, op, ctx):
+def _refuse(*reasons: str) -> Callable[[dict[str, Any], dict[str, Any], OpContext], bool]:
+    def refuse(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
         ctx.refused.extend(reasons)
         return False
 

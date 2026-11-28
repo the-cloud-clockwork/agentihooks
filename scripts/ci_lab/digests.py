@@ -99,13 +99,14 @@ class MutantInputs:
 
 @dataclass(frozen=True)
 class GradeInputs:
-    """The identity of one grade."""
+    """The identity of one grade, keyed on the test merge GitHub built for a pull request once one is resolved."""
 
     repository: str
     head: str
     base: str
     tier: str
     grader: str
+    graded_commit: str = ""
 
 
 def digest(record: dict[str, object]) -> str:
@@ -199,14 +200,15 @@ def mutant_key(inputs: MutantInputs) -> str:
 
 
 def grade_key(inputs: GradeInputs) -> str:
-    """Return the key of one grade."""
-    return _key(
-        "grade",
-        {
-            "repository": inputs.repository,
-            "head": inputs.head,
-            "base": inputs.base,
-            "tier": inputs.tier,
-            "grader": inputs.grader,
-        },
-    )
+    """Return the key of one grade, the test merge GitHub built for a pull request included once resolved, so a
+    rerequest after dev moved and a newer merge resolved grades under a new key."""
+    data: dict[str, object] = {
+        "repository": inputs.repository,
+        "head": inputs.head,
+        "base": inputs.base,
+        "tier": inputs.tier,
+        "grader": inputs.grader,
+    }
+    if inputs.graded_commit:
+        data["graded_commit"] = inputs.graded_commit
+    return _key("grade", data)

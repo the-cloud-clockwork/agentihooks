@@ -38,6 +38,7 @@ WORKER_KEYS = (
     "swarm:*:codex-openings",
     "swarm:*:codex-viewers",
     "swarm:*:launch-endings",
+    "swarm:*:spawned",
     "swarm:*:identity-conflicts",
     "swarm:*:desired-routes",
     "swarm:*:state-since",

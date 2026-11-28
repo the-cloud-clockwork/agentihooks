@@ -1,0 +1,10 @@
+rules:
+  - id: incident-expert-stale-pending-transfer
+    languages: [python]
+    severity: ERROR
+    message: Select the newest transfer for the expert lineage seat before checking whether it waits for a successor.
+    paths:
+      include:
+        - /scripts/swarm/expert_seat.py
+        - expert-stale-pending-transfer.py
+    pattern: any($ROW["task"] == $LINEAGE.id and not $ROW["successor"] for $ROW in $ROWS)

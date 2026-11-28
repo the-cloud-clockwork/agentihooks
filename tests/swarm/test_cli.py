@@ -2188,7 +2188,7 @@ def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
     assert [a.state for a in store.agents("sw")] == ["finished"]
 
 
-def test_master_prompt_runs_the_swarm_and_never_codes():
+def test_master_prompt_runs_the_swarm_and_never_codes() -> None:
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master", "handoff": "caps go to four"})
@@ -2207,7 +2207,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "agentihooks swarm sw --as master@a1b2c3-0002 stop",
         "agentihooks swarm sw --as master@a1b2c3-0002 handoff",
         "browser_close",
-        "caps go to four",
+        prompt.SEAT_BRIEF,
     ):
         assert needle in text, needle
     assert (
@@ -2216,6 +2216,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
     ) in text
     assert "wt.sh new" not in text and "done --pr" not in text and "say --to operator" not in text
+    assert "caps go to four" not in text
 
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):

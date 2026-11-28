@@ -20,6 +20,7 @@ from scripts.swarm import (
     model_pick,
     seat_heads,
     seat_spawn,
+    spawn_counts,
     take_master,
 )
 from scripts.swarm.resume import blocker
@@ -154,9 +155,10 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             profile=placed.profile or agent.profile,
             model=placed.model or agent.model,
             effort=placed.effort or agent.effort,
-            launched_at=at,
+            launched_at=placed.launched_at or at,
             idle_ticks=0,
         )
+        spawn_counts.record(store, slug, record.harness, record.name, record.launched_at)
         store.revive_agent(slug, record)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
@@ -223,6 +225,7 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     occupant = store.execution_occupants(slug).get(record.seat)
     record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
+    spawn_counts.completed(store, slug, record, runtime)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)
     if reported:

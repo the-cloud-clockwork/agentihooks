@@ -183,14 +183,19 @@ def test_untargeted_cli_retains_the_original_write(monkeypatch, command):
 @pytest.mark.parametrize("hive", ["anton", "a.B_1-2", "a" * 128])
 def test_valid_hive_target_is_checked_and_persisted(hive):
     from types import SimpleNamespace
+    from typing import cast
 
     from scripts.swarm_ledger import ledger_agent_ops
+    from scripts.swarm_ledger.op_context import OpContext
 
     recorded = []
     op = {"op": "add_item", "id": "q", "by": cases.ENGINEER, "list": "questions", "text": "Capacity", "hive": hive}
     ledger_agent_ops.check(op)
     doc = {}
-    ctx = SimpleNamespace(meta={"members": {}}, at=1000, record=lambda *args, **kwargs: recorded.append((args, kwargs)))
+    stand_in = SimpleNamespace(
+        meta={"members": {}}, at=1000, record=lambda *args, **kwargs: recorded.append((args, kwargs))
+    )
+    ctx = cast(OpContext, stand_in)
     assert ledger_agent_ops.apply(doc, op, ctx)
     assert doc == {"questions": [{"id": "q", "text": "Capacity", "comments": [], "answers": [], "hive": hive}]}
     assert recorded == [((cases.ENGINEER, "added", "questions/q"), {"text": "Capacity"})]

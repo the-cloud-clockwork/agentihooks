@@ -145,7 +145,9 @@ def test_a_push_mode_codex_master_prompt_drops_the_wait_inbox_loop():
     assert codex_master.waiting("sw", push=True) in text
     assert "When writing a handoff, make its Next action read agentihooks msg inbox." in text.splitlines()
     assert "and use agentihooks swarm sw wait --inbox when no work remains" not in text
-    assert "## Next\nRead agentihooks msg inbox\n" in text
+    assert "## Next" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
+    assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.mark.parametrize("transport", [LEGACY_TRANSPORT, ""])
@@ -155,13 +157,17 @@ def test_a_legacy_codex_master_prompt_keeps_the_wait_inbox_loop(transport):
     assert (
         f"When writing a handoff, make its Next action read agentihooks msg inbox and use {WAIT} when no work remains."
     ) in text
-    assert f"## Next\nRead agentihooks msg inbox and run {WAIT}\n" in text
+    assert "## Next" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
+    assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
 
 
 def test_a_claude_master_prompt_carries_no_codex_waiting_line():
     text = _master("", harness="claude")
     assert "wait --inbox" not in text
-    assert "## Next\nRe-arm the Monitor\n" in text
+    assert "## Next" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
+    assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.fixture

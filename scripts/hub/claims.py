@@ -4,6 +4,7 @@ from typing import Any
 
 from scripts.events.envelope import Envelope
 from scripts.hub.registry import Reactor
+from scripts.swarm import spawn_counts
 from scripts.swarm.store import RedisStore, connect
 
 _COUNT = """
@@ -34,6 +35,7 @@ class Claims:
         self.store = self.store or connect()
         task: str = data["task"]
         name: str = data["name"]
+        spawn_counts.record(self.store, event.swarm, data.get("harness"), name, data.get("launched_at") or event.time)
         legacy = self.store.redis.hget(self.store.key(event.swarm, "launches"), name)
         if legacy and json.loads(legacy)["state"] == "started":
             return

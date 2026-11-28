@@ -800,6 +800,72 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert found(jobs, lease.job).outcome == "passed"
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none(scheduler: str, jobs: queue.Queue) -> None:
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    client = worker.Client(scheduler)
+    [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+    assert client.bundle(lease.job, "wrong", "m" * 40) is None
+    assert client.bundle(lease.job, lease.token, "m" * 40) is None
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_lets_a_bundle_routes_server_error_raise(lab: Counted, sink: Sink, jobs: queue.Queue) -> None:
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        if (method, target) == lease_api.BUNDLE_ROUTE:
+            return 500, {"error": "boom"}
+        return lease_api.answer(lab, Signer(sink.url), method, target, raw, authorization)
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+        with pytest.raises(urllib.error.HTTPError) as error:
+            client.bundle(lease.job, lease.token, "m" * 40)
+        assert error.value.code == 500
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_bundle_request_body_carries_exactly_job_token_and_sha() -> None:
+    seen: list[bytes] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        seen.append(raw)
+        return 200, {"bundle": ""}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.bundle("job1", "tok1", "m" * 40)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert json.loads(seen[0]) == {"job": "job1", "token": "tok1", "sha": "m" * 40}
+
+
+def test_the_client_decodes_the_bundle_route_s_base64_payload() -> None:
+    import base64
+
+    expected = b"bundle-bytes"
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
+        return 200, {"bundle": base64.b64encode(expected).decode()}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        assert client.bundle("job1", "tok1", "m" * 40) == expected
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
     seen: list[bytes] = []

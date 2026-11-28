@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__owned:fdd68dd839c0f4020df3f4b3dda698e2121c4d00d0cefaf6cd8c12ea16ae3ed5": {
+    "reader": "standards_reader",
+    "reason": "Capitalization preserves the same ownership-conflict reason and PolicyError refusal before consumers. No parser or byte-for-byte message contract is introduced."
+  }
+}

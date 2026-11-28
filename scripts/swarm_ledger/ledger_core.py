@@ -15,7 +15,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import ledger_alerts
 import ledger_answer
@@ -50,6 +50,7 @@ from scripts.swarm_ledger import (
     ports,
 )
 from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.page_assets import (  # noqa: F401
     HOME,
     MODULES,
@@ -372,7 +373,7 @@ def set_state(item, field, value):
         item[other] = False
 
 
-def apply_changes(doc, changes, ctx):
+def apply_changes(doc: dict[str, Any], changes: list[dict[str, Any]], ctx: OpContext) -> list[str]:
     """Checkbox changes: `base` is the value the page started from; a stale base loses."""
     rejected = []
     for change in changes:
@@ -398,7 +399,7 @@ def apply_changes(doc, changes, ctx):
     return rejected
 
 
-def clear_chat(thread, op, target, ctx):
+def clear_chat(thread: list[dict[str, Any]], op: dict[str, Any], target: str, ctx: OpContext) -> bool:
     if target != "chat":
         return False
     if thread:
@@ -417,7 +418,7 @@ def new_entry(op, by, at, text):
     return entry
 
 
-def record_sync(doc, op, ctx):
+def record_sync(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     """An operator sync order; each kind rests SYNC_COOLDOWN_MS after it was last sent."""
     import ledger_gate
     import ledger_stats
@@ -435,7 +436,7 @@ def record_sync(doc, op, ctx):
     return True
 
 
-def apply_op(doc, op, ctx):
+def apply_op(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if "by" in op:
         op = {**op, "by": ctx.author(op["by"])}
     if op["op"] in AGENT_OPS:
@@ -584,7 +585,7 @@ def load_state(json_path, seed):
     return read_state(json_path, seed, sys.modules[__name__])
 
 
-def gated(gate, doc, op, ctx):
+def gated(gate: Any, doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     return gate.apply(doc, op, ctx, apply_op) if gate else apply_op(doc, op, ctx)
 
 
