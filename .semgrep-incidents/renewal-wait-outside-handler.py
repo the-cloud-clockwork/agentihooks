@@ -30,6 +30,17 @@ def renew_on_the_module_timer_with_no_handler(credential: str) -> None:
         keep(credential)
 
 
+def renew_until_the_wait_fails(credential: str) -> None:
+    while True:
+        try:
+            # ruleid: renewal-wait-outside-handler
+            scheduled_wait(KEEP_S)
+        except Exception:
+            print("renewal wait failed", file=sys.stderr)
+            return
+        keep(credential)
+
+
 def renew_past_a_failed_wait(credential: str) -> None:
     while True:
         try:
