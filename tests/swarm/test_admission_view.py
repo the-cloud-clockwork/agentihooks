@@ -425,16 +425,29 @@ def test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phas
 
 
 @pytest.mark.feature("plan-lane-admission-narrow-read")
-def test_a_plan_task_whose_phase_names_no_dependency_list_reads_only_its_phase(narrow: SimpleNamespace) -> None:
+@pytest.mark.parametrize(
+    ("planned_task", "reads"),
+    [
+        ("plan-p6", ["phases/p6"]),
+        ("plan-p7", ["phases/p7", "phases/p6", "phases/p6/comments", "tasks of p6"]),
+    ],
+    ids=["own-phase", "dependency"],
+)
+def test_a_phase_that_names_no_dependency_list_ends_the_walk_there(
+    narrow: SimpleNamespace, planned_task: str, reads: list[str]
+) -> None:
     from scripts.swarm_ledger import ledger_workspace
 
-    narrow.found["phases"].append({"id": "p6", "title": "alone"})
-    narrow.found["tasks"].append(task("plan-p6", phase="p6", kind="plan", lane="plan"))
+    narrow.found["phases"] += [{"id": "p6", "title": "alone"}, {"id": "p7", "title": "after", "depends_on": ["p6"]}]
+    narrow.found["tasks"] += [
+        task("plan-p6", phase="p6", kind="plan", lane="plan"),
+        task("plan-p7", phase="p7", kind="plan", lane="plan"),
+    ]
 
-    view = narrow.view.task(SLUG, "plan-p6", marks()[1])
-    row = view.rows["plan-p6"]
+    view = narrow.view.task(SLUG, planned_task, marks()[1])
+    row = view.rows[planned_task]
 
-    assert narrow.ledger.reads == ["phases/p6"]
+    assert narrow.ledger.reads == reads
     assert ledger_workspace.steering(row, view.doc) == ledger_workspace.steering(row, narrow.found)
 
 

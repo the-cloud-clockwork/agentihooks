@@ -2155,7 +2155,7 @@
         "tests/swarm/test_admission_view.py::test_a_dependency_phase_the_ledger_no_longer_holds_ends_the_walk_as_the_evidence_does",
         "tests/swarm/test_admission_view.py::test_a_plan_task_without_a_phase_gets_only_the_project_intent_without_the_export",
         "tests/swarm/test_admission_view.py::test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phase",
-        "tests/swarm/test_admission_view.py::test_a_plan_task_whose_phase_names_no_dependency_list_reads_only_its_phase",
+        "tests/swarm/test_admission_view.py::test_a_phase_that_names_no_dependency_list_ends_the_walk_there",
         "tests/swarm_ledger/test_task_list_selecting.py::test_a_phase_selection_returns_the_rows_of_those_phases_in_stored_order",
         "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_the_phases_it_selects",
         "tests/swarm/test_ledger_client_task.py::test_a_phase_read_asks_the_ledger_for_the_tasks_of_those_phases_cut_to_their_fields",
