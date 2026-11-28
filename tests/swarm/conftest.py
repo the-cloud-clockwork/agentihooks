@@ -101,3 +101,10 @@ def bounded_fencing_retry(monkeypatch: pytest.MonkeyPatch) -> None:
         return original(low, high)
 
     monkeypatch.setattr(fencing, "uniform", bounded_uniform)
+
+
+@pytest.fixture(autouse=True)
+def ungraded_thin_tasks() -> None:
+    from scripts.swarm import thin_task
+
+    thin_task._graded.cache_clear()  # pyright: ignore[reportPrivateUsage]

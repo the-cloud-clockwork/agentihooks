@@ -2,6 +2,7 @@
 enhancement plan section a planner writes for a thin task. Pure functions over task records and plan text."""
 
 import argparse
+import functools
 import json
 import re
 import time
@@ -19,6 +20,7 @@ BACKFILL_PAUSE = 1.0
 BACKFILL_MAX_WRITE = 2.0
 
 THIN_WORDS = 40
+GRADED = 4096
 ENHANCE = "enhance-{}"
 EXEMPT = ("planned", "skipped")
 NAMED = re.compile(
@@ -52,26 +54,34 @@ def thin(task: dict[str, Any]) -> list[str]:
     if exempt(task):
         return []
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
-    tid, description = task["id"], task["description"]
+    return list(_graded(task["id"], task["description"], bool(task.get("territory")), kind))
+
+
+def _grade(tid: str, description: str, territory: bool, kind: str) -> tuple[str, ...]:
     problems: list[str] = []
     if short(description, THIN_WORDS):
         problems.append(f"Task {tid} has a description under {THIN_WORDS} words.")
     if not done_when(description):
         problems.append(f"Task {tid} has no done when sentence.")
-    if not task.get("territory"):
+    if not territory:
         problems.append(f"Task {tid} names no territory.")
     if kind in CODE_KINDS and not _named_seam(description):
         problems.append(f"Task {tid} is {kind} work that names no seam.")
-    return problems
+    return tuple(problems)
+
+
+_graded = functools.lru_cache(maxsize=GRADED)(_grade)
 
 
 def _named_seam(text: str) -> bool:
     parts = re.split(r"(?<=[.!?])\s+|\n(?=\s*(?:[-*+]|\d+[.)]|#{1,6})\s)|\n\s*\n", text)
+    return any(map(_part_seam, parts))
+
+
+def _part_seam(part: str) -> bool:
+    observed = [match.span() for match in OBSERVED.finditer(part)]
     return any(
-        boundary.end() < observation.start() or observation.end() < boundary.start()
-        for part in parts
-        for boundary in NAMED.finditer(part)
-        for observation in OBSERVED.finditer(part)
+        boundary.end() < start or end < boundary.start() for boundary in NAMED.finditer(part) for start, end in observed
     )
 
 
