@@ -186,6 +186,18 @@ def test_a_plain_demand_carries_no_urgent_counts(plain: dict[str, int] | None) -
     assert autoscale.urgent_counts(plain) == {}
 
 
+class OneSeat(FakeRuntime):
+    def quota_capacity(
+        self,
+        config: SwarmConfig,
+        agents: list[AgentRecord],
+        now: float,
+        demand: dict[str, int] | None,
+        requirements: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return capacity.calculate(config, [account(cap=3, sessions=2)], agents, demand)
+
+
 def _ledger(rows: list[dict[str, Any]]) -> FakeLedger:
     ledger = FakeLedger(rows)
     ledger.state = lambda slug: {"tasks": list(ledger.rows.values())}
@@ -200,11 +212,7 @@ def test_the_capacity_pass_seats_an_urgent_engineer_task_ahead_of_ready_ci_work(
     store.create(config)
     store.put_agent("sw", AgentRecord("engineer@x-0001", "eng", "held", state="working"))
     ledger = _ledger([{"id": "held"}, {"id": "fix", "rank": "urgent"}, {"id": "check", "lane": "ci"}])
-    runtime = FakeRuntime()
-    runtime.quota_capacity = lambda cfg, agents, now, work, requirements: capacity.calculate(
-        cfg, [account(cap=3, sessions=2)], agents, work
-    )
-    capacity.apply("sw", config, store, ledger, runtime, 1000)
+    capacity.apply("sw", config, store, ledger, OneSeat(), 1000)
     assert capacity.read(store, "sw")["tasks"] == {"fix": "claude"}
 
 
