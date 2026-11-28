@@ -2608,7 +2608,7 @@ and passed after it
 ## First read before seated work
 
 The `first-read` gate applies to swarm members and quick seats on Claude Code
-and Codex. It defaults to `observe`, recording a would-be denial until the
+and Codex. It defaults to `enforce`, refusing ordinary calls until the
 session runs `agentihooks seat brief`. The successful command sets a local
 session marker; compaction clears it. Standalone sessions are outside the gate.
 Seat brief, the profile canary, the opening prompt Read, ToolSearch and condition

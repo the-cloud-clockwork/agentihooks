@@ -169,8 +169,8 @@ def test_registry_default_and_swarm_key() -> None:
     from scripts.gates import catalog
     from scripts.swarm.cli import GATE_KEYS
 
-    assert entry.GATES["first-read"].default_mode == "observe"
-    assert catalog.defaults()["first-read"] == "observe"
+    assert entry.GATES["first-read"].default_mode == "enforce"
+    assert catalog.defaults()["first-read"] == "enforce"
     assert GATE_KEYS["first-read-gate"] == "first-read"
 
 
