@@ -98,7 +98,8 @@ def test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_no
     assert not needs["quota notice"] & {"dispatcher group", "size pass", "grouping release", "run window"}
     assert not needs["merge pass"] & {"settle", "close space", "rank pass", "quota notice"}
     assert "page relay" in needs["tick view"] and "intent check" in needs["page relay"]
-    assert "ledger health" in needs["command runner"] and "stopped branch" in needs["quota notice"]
+    assert "stopped branch" in needs["quota notice"] and "ledger health" not in needs
+    assert next(step for step in registry.steps() if step.name == "ledger health").group == "before"
 
 
 @pytest.mark.feature("swarm-tick-value-edges")

@@ -113,7 +113,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("launch slots", "wrapper probes"),
         ("outage probes", "wrapper probes"),
         ("hive ledger", "wrapper probes"),
-        ("ledger health", "wrapper probes"),
+        ("ledger health", "before"),
         ("host pressure", "wrapper health"),
         ("ledger watchdog", "before"),
         ("ledger probe", "before"),
@@ -136,8 +136,12 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         slow = {"hive ledger", "host pressure", "prompt backlog"}
         lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
-    probe = next(step for step in host.STEPS if step.name == "ledger probe")
-    assert probe.needs == frozenset({"ledger watchdog"})
+    needs = {step.name: step.needs for step in host.STEPS if step.group == "before"}
+    assert needs == {
+        "ledger health": frozenset(),
+        "ledger watchdog": frozenset({"ledger health"}),
+        "ledger probe": frozenset({"ledger watchdog"}),
+    }
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,6 +174,14 @@ def test_the_before_group_returns_watchdog_then_probe_actions(monkeypatch: pytes
         ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
     ]
+
+
+def test_the_before_group_runs_no_watchdog_or_probe_after_a_ledger_health_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("before", calls, _pass({"stop": ["Ledger health probe failed"]}), monkeypatch) == []
+    assert calls == []
 
 
 def test_the_prompt_backlog_observes_at_whole_seconds(monkeypatch: pytest.MonkeyPatch) -> None:

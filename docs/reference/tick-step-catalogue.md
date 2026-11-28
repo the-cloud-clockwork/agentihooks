@@ -17,8 +17,9 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | reap | agents | tick | 22 | 60 | automated cleanup, ledger state, stopped branch | inbox, ledger, runtime | swarm-tick-agents-reap |
 | recover outages | agents | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | strays | agents | slow | 2 | 120 | drained resume | none | none |
+| ledger health | before | tick | 2 | 60 | none | none | none |
 | ledger probe | before | tick | 7 | 120 | ledger watchdog | none | none |
-| ledger watchdog | before | tick | 2 | 120 | none | none | none |
+| ledger watchdog | before | tick | 2 | 120 | ledger health | none | none |
 | close space | close | tick | 2 | 60 | drained resume | none | none |
 | conversations | close | slow | 2 | 120 | none | none | none |
 | handoff transfers | close | tick | 2 | 60 | none | none | none |
@@ -113,7 +114,6 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | hive ledger | wrapper probes | slow | 2 | 120 | none | none | none |
 | inbox relay | wrapper probes | tick | 2 | 60 | none | none | none |
 | launch slots | wrapper probes | tick | 2 | 60 | none | none | none |
-| ledger health | wrapper probes | tick | 2 | 60 | none | none | none |
 | outage probes | wrapper probes | tick | 2 | 60 | none | none | none |
 | reboot pass | wrapper reboot | tick | 2 | 60 | none | none | none |
 | refresh job | wrapper refresh | tick | 2 | 600 | none | none | none |
