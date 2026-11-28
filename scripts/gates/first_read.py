@@ -10,6 +10,8 @@ from scripts.gates.base import Call, Decision, Gate, Who
 
 REASON = "Run agentihooks seat brief before using other tools in this seated session."
 SESSION = re.compile(r"[A-Za-z0-9_-]+")
+CODEX_TRUNCATION = re.compile(r"\AWarning: truncated output \(original token count: \d+\)\nTotal output lines: \d+\n\n")
+BRIEF_HEADER = re.compile(r"Seat \S+\.")
 CONDITION = re.compile(
     r"(?:mcp__agentihooks(?:__|\.)|mcp_agentihooks_|)(?:condition_list|condition_show|condition_set|condition_clear)"
 )
@@ -135,12 +137,21 @@ def _opening(call: Call, who: Who) -> bool:
     )
 
 
+def _brief_output(response: str) -> bool:
+    from scripts.seat_brief import NO_SEAT
+
+    first = CODEX_TRUNCATION.sub("", response).partition("\n")[0]
+    return BRIEF_HEADER.fullmatch(first) is not None or first == NO_SEAT
+
+
 def _text_succeeded(response: str) -> bool:
     try:
         decoded: object = json.loads(response)
     except ValueError:
         if response.startswith("Script completed") and "\nOutput:\n" in response:
             return _succeeded(response.partition("\nOutput:\n")[2].strip())
+        if _brief_output(response):
+            return True
         header = response.partition("\nFinal output:")[0]
         status = re.search(r"^Process exited with code (-?\d+)$", header, re.MULTILINE)
         return status is not None and status.group(1) == "0"
@@ -193,7 +204,7 @@ def reset(payload: dict[str, Any]) -> None:
 
 class FirstRead(Gate):
     name = "first-read"
-    default_mode = "observe"
+    default_mode = "enforce"
 
     def matches(self, call: Call) -> bool:
         if not _member() or not call.session:
