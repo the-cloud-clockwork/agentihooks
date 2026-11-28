@@ -101,7 +101,7 @@ The five artefacts:
 | Index row | `"<name>": ["<scenario>"]` under `scenarios` in `tests/swarm/tick_scenarios/steps.json` |
 | Feature entry | The test node id added to the feature's `tests` list: in its record under `feature-map.d/` when the map sets `"fragments": true` and the root `features` list has no entry for the id, otherwise in `feature-map.json` |
 
-`python -m scripts.feature_map --record <feature id>` prints a feature's
+`python -m scripts.feature_map --record FEATURE_ID` prints a feature's
 record path without writing it. An entry already in the root `features` list
 stays there, and a map without `"fragments": true` keeps every entry in
 `feature-map.json`.
@@ -230,9 +230,11 @@ Feature map: 126 features, all rule, test and live check links exist
 
 The floor row written: `"eval_probe": Timing(LIGHT_S, CRITICAL_S),`. The
 offence count is the allowlist total on that commit; a step the scaffold
-writes adds none. The run's feature, `swarm-tick-characterisation`, has its
-entry in the root `features` list, so the scaffold printed `feature-map.json`;
-a new feature id prints its record path under `feature-map.d/` instead.
+writes adds none. The recorded run predates feature records, so its map had
+no `fragments` key. Its feature, `swarm-tick-characterisation`, still has its
+entry in the root `features` list, so a run for it still prints
+`feature-map.json`; a new feature id prints its record path under
+`feature-map.d/` instead.
 
 ## Writing a tick task spec
 
@@ -283,7 +285,7 @@ agentihooks api --slug <slug> --as <name> task add <id> "Reap stale waits" --lan
 | Symptom | Check |
 | --- | --- |
 | `<name> already has ...` from the scaffold | The step exists; edit its artefacts and run `--check` |
-| `--check` reports `feature entry: false` | The feature's record, whose path `python -m scripts.feature_map --record <feature id>` prints, or its entry in `feature-map.json` lacks the test node `tests/tick/steps/test_<name>.py::test_<name>`, often after a test rename |
+| `--check` reports `feature entry: false` | The feature's record, whose path `python -m scripts.feature_map --record FEATURE_ID` prints, or its entry in `feature-map.json` lacks the test node `tests/tick/steps/test_<name>.py::test_<name>`, often after a test rename |
 | `--check` reports `index row: false` | Add the name under `scenarios` in `steps.json` with at least one golden scenario |
 | `python -m scripts.tick_pattern --base origin/dev` fails to read the base | `--base` takes a checkout path; create one with `wt.sh tmp --from origin/dev` |
 | `UndeclaredEffect` in a step test | The body writes through a port missing from `effects`; add it in the registration and the scaffolded test's expected set |

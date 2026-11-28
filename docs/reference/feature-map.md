@@ -24,12 +24,13 @@ python -m scripts.feature_map --record FEATURE_ID
 ```
 
 It prints the path relative to the working folder, `feature-map.d/` followed by
-the SHA256 of the id and `.json`, and writes nothing. Write the entry object
-alone, without a `features` list around it, to a new file at that path, and
-leave `feature-map.json` unchanged. An entry that already sits in the root
-`features` list stays there and is edited in place. The
-[tick step scaffold](tick-step-scaffold.md) writes a new feature's record
-itself.
+the SHA256 of the id and `.json`, and writes nothing. It prints a path for any
+id without reading the map, so first check that the root `features` list has
+no entry for the id: an entry that already sits there stays there and is
+edited in place. The [tick step scaffold](tick-step-scaffold.md) writes a new
+tick feature's record itself. For any other new feature, write the entry
+object alone, without a `features` list around it, to a new file at that
+path, and leave `feature-map.json` unchanged.
 
 ## Origins
 

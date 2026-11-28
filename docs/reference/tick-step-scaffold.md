@@ -24,7 +24,7 @@ a step already has. The scaffold shipped in
 | Index row | `scenarios` in `tests/swarm/tick_scenarios/steps.json` | `"<name>": ["<scenario>"]`, the scenarios sorted by step name |
 | Feature entry | The feature's record under `feature-map.d/`, or `feature-map.json` | With `"fragments": true` and no entry for the feature id in the root `features` list, the feature's record: a new `inventory` entry, or the existing record with the test node id added. Otherwise the test node id added to the entry in `feature-map.json`, or a new `inventory` entry there when no entry has that id |
 
-`python -m scripts.feature_map --record <feature id>`, run from the repository
+`python -m scripts.feature_map --record FEATURE_ID`, run from the repository
 root, prints a feature's record path without writing it; see
 [Feature map](feature-map.md). Root metadata stays in `feature-map.json`.
 
@@ -95,6 +95,8 @@ wrote a record, and `feature-map.json` when it edited the root map.
 python -m scripts.tick.new_step "probe widgets" --group widgets --lane tick \
   --interval 120 --effects ledger,inbox --feature tick-step-widgets --module widgets
 ```
+
+It prints, with the record's file name shown as `<record>`:
 
 ```
 scripts/tick/steps/widgets.py
@@ -304,5 +306,5 @@ identifier; and a budgets module without its `FLOORS` table is refused.
 | `No module named ruff` or a `CalledProcessError` naming ruff | Run the scaffold with the workspace venv Python, which has ruff installed |
 | The new step is missing from `registry.steps()` | `scripts.tick.steps.MODULES` must list its module; a module created outside the scaffold is added there by hand |
 | The catalogue check reports `Step <name>: no scenario lists it` | The index row was lost, often in a merge of `tests/swarm/tick_scenarios/steps.json`; run `--check` and add the row back |
-| The feature map validation reports a missing behaviour test | The test file was renamed or removed; its node id must match the feature entry, in its record (`python -m scripts.feature_map --record <feature id>` prints the path) or in `feature-map.json` |
+| The feature map validation reports a missing behaviour test | The test file was renamed or removed; its node id must match the feature entry, in its record (`python -m scripts.feature_map --record FEATURE_ID` prints the path) or in `feature-map.json` |
 | The tick pattern gate refuses the new step | Run `--check`; a step written or edited by hand may have dropped a field or the budget row |

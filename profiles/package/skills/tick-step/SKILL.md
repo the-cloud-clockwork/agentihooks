@@ -28,7 +28,7 @@ python -m scripts.tick.new_step --check <name>
 - The feature entry goes to the feature's record under `feature-map.d/` when
   `feature-map.json` sets `"fragments": true` and its root `features` list has
   no entry for the id; otherwise the entry in `feature-map.json` gains the
-  test. `python -m scripts.feature_map --record <feature id>` prints the
+  test. `python -m scripts.feature_map --record FEATURE_ID` prints the
   record path and writes nothing. Commit the record with the other printed files.
 - The command refuses a name any artefact already holds. A changed step keeps
   its artefacts: edit them, then run `--check`.
