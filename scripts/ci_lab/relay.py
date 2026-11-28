@@ -4,17 +4,16 @@
 `refs/grade/*` head that names a `branch=<name>` push option outside the protected branches pending in Redis, per
 head and branch, until a grade of that head closes. A green grade pushes the sha, fetched from the lab remote when
 GitHub lacks it, to `origin refs/heads/<branch>` with an App token holding contents and workflows write, never forced,
-posts the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and verdicts,
-once across restarts by keeping each check run's id on the grade's state, and opens the branch's draft pull request
+dispatches the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and
+verdicts, to the Lab check workflow, which posts it with the workflow token, once across restarts by keeping a mark for
+each check run on the grade's state, and opens the branch's draft pull request
 into dev with a token holding pull requests write, or names the open one the push updated. A red grade relays nothing
 and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub refuses is named
 and dropped. A relay whose App token GitHub refuses is named held, stays pending and holds every relay of its
 repository for the scheduler's post hold.
 """
 
-import base64
 import json
-import os
 import subprocess
 import time
 from collections import defaultdict
@@ -27,8 +26,8 @@ from urllib.parse import urlsplit
 
 import requests
 
-from scripts.ci_lab import contract, evidence, worktrees
-from scripts.ci_lab.checks import API, HEADERS, Checks, Key, Output, PostRefused, Token, name
+from scripts.ci_lab import contract, evidence, git_auth, worktrees
+from scripts.ci_lab.checks import API, HEADERS, Dispatches, Key, Output, PostRefused, Token, name
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
@@ -106,8 +105,8 @@ class Pulls(Protocol):
 
 
 class CheckRuns(Protocol):
-    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted or was seeded
-    with."""
+    """Where relayed check runs go: `Dispatches`, which remembers the last status of each run it dispatched or was
+    seeded with."""
 
     def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
         """Remember a check run posted before this poster existed, so it is not created again."""
@@ -174,9 +173,9 @@ def output(state: State, check: str, lab: str) -> Output:
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
     already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. Each
-    check run the relay posts is saved on the grade's state under its check run name as GitHub answers, and seeds the
-    poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the ids
-    the scheduler stores under gate names for its own posts never seed it."""
+    check run the relay posts is saved on the grade's state under its check run name as its poster answers, and seeds
+    the poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the
+    ids the scheduler stores under gate names for its own posts never seed it."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
@@ -286,14 +285,7 @@ class GitPusher:
         """Make the sha present in the mirror's store and push it to the branch, never forced, with the token passed
         through git's environment config; raise RelayRefused with git's reason on a refusal."""
         self.mirror.fetch(sha)
-        secret = base64.b64encode(f"x-access-token:{self.auth.get_token()}".encode()).decode()
-        environ = {
-            **os.environ,
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": f"http.{GITHUB}.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
-            "GIT_TERMINAL_PROMPT": "0",
-        }
+        environ = git_auth.environ(self.auth)
         argv = ["git", "-C", str(self.mirror.store), "push", f"{GITHUB}{self.slug}.git", f"{sha}:refs/heads/{branch}"]
         done = subprocess.run(argv, env=environ, capture_output=True, text=True, check=False)
         if done.returncode != 0:
@@ -354,7 +346,7 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
 
     def checks(slug: str) -> CheckRuns:
         if slug not in posters:
-            posters[slug] = Checks(slug, registry=scheduler.registry)
+            posters[slug] = Dispatches(slug, registry=scheduler.registry)
         return posters[slug]
 
     ports = Ports(pusher, checks, PullRequests, scheduler.save)

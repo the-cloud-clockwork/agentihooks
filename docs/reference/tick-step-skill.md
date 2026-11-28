@@ -50,7 +50,10 @@ task loads `tick-step` first, and that a tick step is:
    `budgets.FLOORS` at an interval of 60, 120 or 600 seconds.
 2. A body declaring what it reads and writes, reaching other systems only
    through the ports in `effects`, with no new function in
-   `scripts/swarm/tick.py`.
+   `scripts/swarm/tick.py`. One exception: a health check keeps its own value
+   between passes through `scripts/swarm/health/kept.py`, read and written by
+   that check's module alone and undeclared; a value another module reads is
+   a declared domain through a port.
 3. A scenario row in `tests/swarm/tick_scenarios/steps.json`, a feature test
    in `tests/tick/steps/` and a `feature-map.json` entry.
 4. A catalogue entry: `python -m scripts.tick.catalogue check` holds the
@@ -61,12 +64,15 @@ task loads `tick-step` first, and that a tick step is:
 The rule changes no gate. Points 1 and 2 are what the
 [tick pattern gate](tick-pattern-gate.md) grades; points 3 and 4 are what the
 catalogue check grades; point 5 is review practice the skill asks for in the
-pull request body.
+pull request body. Point 3's feature map entry lives in the feature's own
+record under `feature-map.d/` when the map sets `"fragments": true`, as this
+repository does; see [Feature map](feature-map.md).
 
 ## The scaffold
 
 `python -m scripts.tick.new_step` writes the five artefacts of one step from
-the repository root and prints each file it wrote:
+the repository root and prints each file it wrote, a feature record as its
+path under `feature-map.d/`:
 
 ```bash
 python -m scripts.tick.new_step <name> --group <group> --lane tick|slow \
@@ -80,7 +86,7 @@ python -m scripts.tick.new_step <name> --group <group> --lane tick|slow \
 | `--lane` | Yes | `tick` or `slow` |
 | `--interval` | Yes | `60`, `120` or `600`, written as `CRITICAL_S`, `WIDE_S` or `SLOW_S` |
 | `--effects` | No | Comma separated field names of `scripts.tick.ports.tools.Tools`: `ledger`, `coordination`, `source_control`, `runtime`, `processes`, `inbox`, `llm`, `metrics`, `host`. Empty by default |
-| `--feature` | Yes | A feature map id; a new id adds an `inventory` entry |
+| `--feature` | Yes | A feature map id; a new id adds an `inventory` entry, as its own record under `feature-map.d/` when the map sets `"fragments": true` |
 | `--module` | Yes | A steps module name such as `observe`; never `budgets` |
 | `--scenario` | No | The tick scenario the index row lists, default `running`; it must be a golden scenario |
 | `--root` | No | The tree to write, default the working folder |
@@ -93,7 +99,12 @@ The five artefacts:
 | Budget row | `"<name>": Timing(LIGHT_S, <interval name>),` at the end of `FLOORS` in `scripts/tick/steps/budgets.py`; `LIGHT_S` is a two second floor |
 | Feature test | `tests/tick/steps/test_<name>.py`, marked `@pytest.mark.feature("<feature>")`, asserting the step's group, lane, feature and effects |
 | Index row | `"<name>": ["<scenario>"]` under `scenarios` in `tests/swarm/tick_scenarios/steps.json` |
-| Feature entry | The test node id added to the feature's `tests` list in `feature-map.json` |
+| Feature entry | The test node id added to the feature's `tests` list: in its record under `feature-map.d/` when the map sets `"fragments": true` and the root `features` list has no entry for the id, otherwise in `feature-map.json` |
+
+`python -m scripts.feature_map --record FEATURE_ID` prints a feature's
+record path without writing it. An entry already in the root `features` list
+stays there, and a map without `"fragments": true` keeps every entry in
+`feature-map.json`.
 
 A module the steps package does not hold is created with a one line
 docstring and appended to `MODULES` in `scripts/tick/steps/__init__.py`. Every
@@ -143,6 +154,16 @@ Changing only an interval means editing the floor row in `FLOORS`.
 - The stub is a `CallStep`: a function of the tick module and a pass state
   reader, `(tick, get)`, returning the step's action lines. Fill `needs`,
   `reads` and `writes` with what the body uses.
+- A health check may keep its own value between passes, only through
+  `scripts/swarm/health/kept.py` and under a key named for that check. Only
+  the check's own module reads and writes it: its observe half writes it in
+  the check's step and its findings half reads it in the health findings
+  step, so it is not declared in `writes`; the focus unclaimed and order
+  waiting steps register no write for theirs. A value any other module reads
+  is a declared domain written through a port. Two Semgrep feature rules hold
+  this: one refuses a health check that gets or sets a key of the swarm on
+  its own, the other refuses a module that calls the helper with a key that
+  is not its own or names another check's key.
 - A step written as a `WriteStep` or a `Step` dataclass acts only through
   `ctx.tools`, the view of the ports declared in `effects`, reads the pass view
   with `ctx.view.read(domain, key)` (never `ledger.state`), finishes under
@@ -152,8 +173,8 @@ Changing only an interval means editing the floor row in `FLOORS`.
 - Add no function to `scripts/swarm/tick.py`. A body that needs one of its
   functions moves that function into the step module in the same pull
   request.
-- Fill the scaffolded test with the behaviour the feature entry names and
-  keep its `@pytest.mark.feature` marker.
+- Fill the scaffolded test with the behaviour the feature entry names, in its
+  record or in `feature-map.json`, and keep its `@pytest.mark.feature` marker.
 
 ### 3. Check locally
 
@@ -209,7 +230,11 @@ Feature map: 126 features, all rule, test and live check links exist
 
 The floor row written: `"eval_probe": Timing(LIGHT_S, CRITICAL_S),`. The
 offence count is the allowlist total on that commit; a step the scaffold
-writes adds none.
+writes adds none. The recorded run predates feature records, so its map had
+no `fragments` key. Its feature, `swarm-tick-characterisation`, still has its
+entry in the root `features` list, so a run for it still prints
+`feature-map.json`; a new feature id prints its record path under
+`feature-map.d/` instead.
 
 ## Writing a tick task spec
 
@@ -260,7 +285,7 @@ agentihooks api --slug <slug> --as <name> task add <id> "Reap stale waits" --lan
 | Symptom | Check |
 | --- | --- |
 | `<name> already has ...` from the scaffold | The step exists; edit its artefacts and run `--check` |
-| `--check` reports `feature entry: false` | The feature map entry lacks the test node `tests/tick/steps/test_<name>.py::test_<name>`, often after a test rename |
+| `--check` reports `feature entry: false` | The feature's record, whose path `python -m scripts.feature_map --record FEATURE_ID` prints, or its entry in `feature-map.json` lacks the test node `tests/tick/steps/test_<name>.py::test_<name>`, often after a test rename |
 | `--check` reports `index row: false` | Add the name under `scenarios` in `steps.json` with at least one golden scenario |
 | `python -m scripts.tick_pattern --base origin/dev` fails to read the base | `--base` takes a checkout path; create one with `wt.sh tmp --from origin/dev` |
 | `UndeclaredEffect` in a step test | The body writes through a port missing from `effects`; add it in the registration and the scaffolded test's expected set |

@@ -19,7 +19,9 @@ WATCHED = "watched_focus"
 UNCACHED = object()
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any = UNCACHED) -> bool:
+def held(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str, admitted_queue: Any = UNCACHED
+) -> bool:
     """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task.
 
     admitted_queue carries a result of ``admitted(doc, graph)`` a caller already computed for this doc and
@@ -30,6 +32,7 @@ def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
     return (
         frozen(task, records, chain)
+        or _enhancement_frozen(task, doc, graph)
         or unfocused(task, doc, graph, fix_phase, admitted_queue)
         or outside_watched(task, doc, fix_phase)
     )
@@ -70,6 +73,7 @@ def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], cha
 
 
 _TARGETS: list[Any] = []
+_TASK_ROWS: list[Any] = []
 
 
 def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]]:
@@ -89,6 +93,16 @@ def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], t
 def _selects(target: str) -> bool:
     selector, _, value = target.partition(":")
     return selector in SELECTORS and bool(value)
+
+
+def _enhancement_frozen(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any]) -> bool:
+    if task.get("lane") != "plan" or not task.get("enhances"):
+        return False
+    tasks = doc.get("tasks") or ()
+    if not _TASK_ROWS or _TASK_ROWS[0] is not tasks or _TASK_ROWS[1] != len(tasks):
+        _TASK_ROWS[:] = [tasks, len(tasks), {row["id"]: row for row in tasks}]
+    target = _TASK_ROWS[2].get(task["enhances"])
+    return target is not None and frozen(target, doc.get("freezes") or [], ancestry(target, graph))
 
 
 def unfocused(
@@ -236,13 +250,14 @@ def marks(doc: dict, graph: dict, fix: str, watched: bool) -> dict:
     focus = [r["target"] for r in records if r["verb"] == "focus"]
     tasks = {f"tasks/{t.get('id')}": t for t in doc.get("tasks") or [] if isinstance(t, dict)}
     chains = {node: _chain(node, graph, tasks) for node in graph}
-    found, focused = {"frozen": [], "held": []}, admitted(doc, graph) is not None
+    queue = admitted(doc, graph)
+    found, focused = {"frozen": [], "held": []}, queue is not None
     for node, chain in chains.items():
         task = tasks.get(node)
         if task is not None:
             cold = frozen(task, records, chain)
             hold = task.get("state") == "open" and (
-                unfocused(task, doc, graph, fix) or watched and not exempt(task, fix)
+                unfocused(task, doc, graph, fix, queue) or watched and not exempt(task, fix)
             )
         else:
             cold = any(r["verb"] == "freeze" and r["target"] in chain for r in records)

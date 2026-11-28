@@ -37,11 +37,12 @@ import time
 from types import SimpleNamespace
 
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.hub import exits
-from scripts.swarm import freeze, readiness
+from scripts.swarm import capacity, freeze, readiness
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
@@ -70,6 +71,7 @@ offered = readiness.publish(bus, view, int(time.time() * 1000))
 assert offered == [f"ready:{slug}:t1:0"], offered
 print(f"offered on NATS: {offered}", flush=True, file=sys.stderr)
 admitted = {}
+reported = []
 
 
 class Tasks:
@@ -88,6 +90,9 @@ class Tasks:
     def reopen(self, event):
         return None
 
+    def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
+        reported.append([event.key, placed.harness])
+
 
 class StandIn:
     def spawn(self, request):
@@ -99,8 +104,12 @@ class StandIn:
         return Outcome("spawn", Status.OK, "compose-task", SimpleNamespace(pane_id="stand-in", harness="claude", account="", launched_at=0))
 
 
+def free_seat(environ: dict[str, str], now: float, refresh: bool = False, redis: object = None) -> list[capacity.Account]:
+    return [capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6)]
+
+
 stand_in = {"cpus": 1, "load5": 0.0}
-spoke = Spoke(SpokeConfig(config, "eng", hive), bus, StandIn(), Tasks(), measure=lambda: stand_in)
+spoke = Spoke(SpokeConfig(config, "eng", hive, accounts=free_seat), bus, StandIn(), Tasks(), measure=lambda: stand_in)
 outcomes = []
 for _ in range(30):
     outcomes.append(spoke.poll(1_000))
@@ -109,6 +118,8 @@ for _ in range(30):
     time.sleep(1)
 assert outcomes[-1] == "started", f"the spoke never started the task: {outcomes}"
 print(f"spoke took the offer from NATS: {outcomes}", file=sys.stderr)
+assert reported == [["t1", "claude"]], f"the spoke reported {reported} for its one launch"
+print(f"spoke reported its launch: {reported}", file=sys.stderr)
 report = {
     "observed_at": int(time.time() * 1000),
     "executions": {admitted["execution"]: {"slug": slug, "name": admitted["name"],

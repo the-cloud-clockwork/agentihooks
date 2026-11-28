@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_claim:234cfb468fb271fb74b68cc4e074106ec8a852beda4e557664041f2af3d24586": {
+    "reader": "standards_reader",
+    "reason": "typing.cast is an identity function at runtime; shaped = cast(Doc, op) and shaped = cast(None, op) both bind shaped to op unchanged."
+  }
+}

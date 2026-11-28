@@ -1,10 +1,10 @@
-import fcntl
 import json
 import subprocess
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Callable
 
+from hooks.compat import fcntl
 from hooks.lifecycle.act import ActionError, Journal, apply, finish_pending
 from hooks.lifecycle.codex_homes import sweep_codex_homes
 from hooks.lifecycle.config import load_roots

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__owned:c65298fa41429ecd8888060300f0070f5fc328590cc446144ce9fdde5b39680a": {
+    "reader": "standards_reader",
+    "reason": "XX padding preserves the unsafe-lock reason and PolicyError with unchanged validation and refusal. No exact-output parser or contract is introduced."
+  }
+}

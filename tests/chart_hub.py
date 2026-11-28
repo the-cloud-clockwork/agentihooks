@@ -25,6 +25,12 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append(f"the hub runs {deployment['spec'].get('replicas')} replicas, expected 2")
     spec = deployment["spec"]["template"]["spec"]
     container = spec["containers"][0]
+    volumes = {row["name"]: row for row in spec.get("volumes", [])}
+    mounts = {row["name"]: row.get("mountPath") for row in container.get("volumeMounts", [])}
+    if volumes.get("cache", {}).get("emptyDir") != {"medium": "Memory", "sizeLimit": "512Mi"}:
+        found.append("the hub ledger caches are not on a bounded memory volume")
+    if mounts.get("cache") != "/home/swarm/.agentihooks":
+        found.append("the hub ledger cache volume does not cover its export and entry copy folders")
     if container.get("command") != ["agentihooks", "hub", "run"]:
         found.append(f"the hub container runs {container.get('command')}, expected agentihooks hub run")
     env = {row["name"]: row.get("value") for row in container.get("env", [])}
@@ -64,6 +70,22 @@ def scope_problems(chart: str) -> list[str]:
             found.append(f"hub scope {setting} renders {env.get('AGENTIHOOKS_BUS_SCOPED')}, expected {expected}")
         if "AGENTIHOOKS_BUS_BIND" in env:
             found.append("the hub binds streams instead of provisioning scoped resources")
+    return found
+
+
+def receiver_scope_problems(chart: str) -> list[str]:
+    found = []
+    for setting, expected in ((None, "1"), ("false", None), ("true", "1")):
+        options = [] if setting is None else ["--set", f"hub.bus.scoped={setting}"]
+        result = render(chart, *ENABLED, *RECEIVER, *RELEASE, *options)
+        if result.returncode:
+            found.append(f"receiver scope {setting} fails to render: {result.stderr.strip()}")
+            continue
+        deployment = next(d for d in receivers(result.stdout) if d["kind"] == "Deployment")
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        env = {row["name"]: row.get("value") for row in container.get("env", [])}
+        if env.get("AGENTIHOOKS_BUS_SCOPED") != expected:
+            found.append(f"receiver scope {setting} renders {env.get('AGENTIHOOKS_BUS_SCOPED')}, expected {expected}")
     return found
 
 
@@ -141,7 +163,13 @@ def problems(chart: str) -> list[str]:
         found.append("a hub.env entry for AGENTIHOOKS_HUB_SERVING_FILE moves the hub off the file its probe reads")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
-    return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
+    return (
+        found
+        + scope_problems(chart)
+        + receiver_scope_problems(chart)
+        + secret_env_problems(chart)
+        + receiver_release_problems(chart)
+    )
 
 
 def secret_env_problems(chart: str) -> list[str]:

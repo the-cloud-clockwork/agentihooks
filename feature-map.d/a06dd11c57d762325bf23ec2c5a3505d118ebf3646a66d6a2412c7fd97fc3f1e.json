@@ -1,0 +1,15 @@
+{
+  "id": "panic-block-saves-unpushed-patch",
+  "origin": "regression",
+  "ordered_at": "2026-11-27",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-block-unpushed-commit",
+  "behaviour": "While panic holds the swarm and its push check refuses the task worktree's branch, swarm block saves the commits origin lacks, from the pushed branch head or else origin dev, as a patch named by repository in the task work folder, blocks the task, comments that panic held the push and prints the saved patch records, and pushes nothing. A registered fix branch under panic still refuses, so the seat pushes its fix.",
+  "seam": "the swarm block command through scripts.swarm.publish.block_branches, scripts.swarm.stack.pushed and hooks.context.blocker_window.held_push",
+  "tests": [
+    "tests/swarm/test_block_push.py::test_block_under_panic_saves_the_unpushed_commit_as_a_patch_and_blocks",
+    "tests/swarm/test_block_push.py::test_block_under_panic_saves_only_the_commits_after_the_last_push",
+    "tests/swarm/test_block_push.py::test_save_patch_creates_a_missing_work_folder",
+    "tests/swarm/test_block_push.py::test_block_under_panic_still_refuses_a_registered_fix_branch",
+    "tests/swarm/test_block_push.py::test_block_under_panic_records_a_pushed_repository_and_saves_the_held_one"
+  ]
+}

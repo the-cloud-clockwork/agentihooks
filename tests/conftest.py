@@ -631,6 +631,23 @@ def _workstation_headroom_is_roomy(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _event_offers_read_free_account_seats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Event offer seat checks read one free Claude and one free Codex seat instead of the runner's empty quota; the
+    offer quota tests import the real reader at collection, before this stub applies, and set their own rows."""
+    from scripts.swarm import capacity, offer_quota
+
+    rows = (
+        capacity.Account("claude", "claude-free", "OPEN", 0, None, 90, 6),
+        capacity.Account("codex", "codex-free", "OPEN", 0, None, 90, 6),
+    )
+
+    def free(environ: dict[str, str], now: float, refresh: bool = False, redis: Any = None) -> list[capacity.Account]:
+        return list(rows)
+
+    monkeypatch.setattr(offer_quota, "accounts", free)
+
+
+@pytest.fixture(autouse=True)
 def _codex_resumes_find_their_rollout(request, monkeypatch):
     """A fake Codex resume finds its rollout unless the test is marked codex_rollouts."""
     if request.node.get_closest_marker("codex_rollouts"):
@@ -772,6 +789,14 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _first_read_gate_offline(
+    _isolate_real_user_paths: None, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if request.path.parent == Path(__file__).parent / "gates":
+        monkeypatch.setenv("AGENTIHOOKS_GATE_FIRST_READ", "off")
 
 
 @pytest.fixture(autouse=True)

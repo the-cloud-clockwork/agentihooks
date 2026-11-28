@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 from scripts.swarm_ledger import request_metrics
@@ -461,7 +461,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 connection.execute(GUARD_TRIGGER)
             self._ready.add(address)
 
-    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+    def admit(self, connection: sqlite3.Connection, state: dict[str, Any]) -> None:
         stored = connection.execute(FLOOR).fetchone()
         required = REQUIRED if stored is None else stored[0]
         if required > VERSION:
@@ -472,10 +472,14 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             from scripts.swarm_ledger import ledger_alerts
 
             before = [alert["text"] for alert in state.setdefault("alerts", [])]
-            raised = SimpleNamespace(rev=state["_meta"]["rev"], at=self.domain.now_ms())
+            rev: int = state["_meta"]["rev"]
+            at: int = self.domain.now_ms()
             for address, version, floor in refused:
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
-                ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
+                ledger_alerts.warning_raised(state, rev, at, (ledger_alerts.WRITER, text), before)
+
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        self.admit(connection, state)
         return super()._write(connection, slug, entry, state, events)
 
     @contextmanager

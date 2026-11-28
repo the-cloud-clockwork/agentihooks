@@ -3,25 +3,25 @@
   "orders past the limit": [
     413,
     "resource_too_large",
-    "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
+    "The open orders pass the reply limit: read the tasks of one order with agentihooks api --slug orders-read get focus/<item>/tasks"
   ],
   "focus": "{\"data\": [{\"target\": \"phases/p1\", \"claimable\": 1, \"done\": [\"t5\"], \"tasks\": [{\"id\": \"t1\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"claimable\"}, {\"id\": \"t2\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"it waits on task t9\"}, {\"id\": \"t3\", \"lane\": \"eng\", \"state\": \"claimed\", \"verdict\": \"it is claimed by engineer@one\"}, {\"id\": \"t4\", \"lane\": \"eng\", \"state\": \"pr\", \"verdict\": \"it is in a pull request\"}], \"by\": \"operator\", \"at\": 1, \"reason\": \"\", \"unclaimed_minutes\": null}, {\"target\": \"tasks/t9\", \"claimable\": 1, \"done\": [], \"tasks\": [{\"id\": \"t9\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"claimable\"}], \"by\": \"operator\", \"at\": 1, \"reason\": \"\", \"unclaimed_minutes\": 9}], \"revision\": \"b329bf49cd8e1dfb17f2ba06109ba253f4abe28dc4679b79f586b99e43391768\", \"next_cursor\": null}",
   "focus past the limit": [
     413,
     "resource_too_large",
-    "Use the explicit export operation for this resource"
+    "The focus records pass the reply limit: list them with agentihooks api --slug orders-read get freezes and read the tasks of one with agentihooks api --slug orders-read get focus/<target>/tasks"
   ],
   "focus/phases/p1": "{\"data\": {\"target\": \"phases/p1\", \"claimable\": 1, \"done\": [\"t5\"], \"tasks\": [{\"id\": \"t1\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"claimable\"}, {\"id\": \"t2\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"it waits on task t9\"}, {\"id\": \"t3\", \"lane\": \"eng\", \"state\": \"claimed\", \"verdict\": \"it is claimed by engineer@one\"}, {\"id\": \"t4\", \"lane\": \"eng\", \"state\": \"pr\", \"verdict\": \"it is in a pull request\"}]}, \"revision\": \"401295d56714053f485fd85a7c289d1d0f4b9246fa0053686731db96abeea282\"}",
   "focus/phases/p1 past the limit": [
     413,
     "resource_too_large",
-    "Use the explicit export operation for this resource"
+    "The tasks under phases/p1 pass the reply limit: read them with agentihooks api --slug orders-read get focus/phases/p1/tasks"
   ],
   "focus/tasks/t2": "{\"data\": {\"target\": \"tasks/t2\", \"claimable\": 0, \"done\": [], \"tasks\": [{\"id\": \"t2\", \"lane\": \"eng\", \"state\": \"open\", \"verdict\": \"it waits on task t9\"}]}, \"revision\": \"f3f51d58d13f9f14eb20c7522ffb19c86625cf93e58144dfee2c61baf8d9419a\"}",
   "focus/tasks/t2 past the limit": [
     413,
     "resource_too_large",
-    "Use the explicit export operation for this resource"
+    "The tasks under tasks/t2 pass the reply limit: read them with agentihooks api --slug orders-read get focus/tasks/t2/tasks"
   ],
   "focus/tasks/none": [
     404,

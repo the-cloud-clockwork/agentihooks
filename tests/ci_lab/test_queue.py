@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.ci_lab import queue
@@ -74,6 +76,59 @@ def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
     assert found(jobs, "h1:test:a").state == "leased"
 
 
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+def test_enqueue_starts_a_lost_job_again_as_a_fresh_pending_job(jobs: queue.Queue, client: Any) -> None:
+    record = f"{queue.PREFIX}job:h1:test:a"
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a", expires_ms=100)
+    assert jobs.reap(found(jobs, "h1:test:a"), 100, 0) == "lost"
+    assert jobs.tally(found(jobs, "h1:test:a")) is True
+    assert client.pttl(record) > 0
+
+    assert jobs.enqueue([unit("a")], "h1", {}, base="b2", grader="g2", rank=1) == ["h1:test:a"]
+
+    job = found(jobs, "h1:test:a")
+    assert (job.state, job.attempts, job.outcome, job.worker) == ("pending", 0, "", "")
+    assert (job.base, job.grader, job.rank) == ("b2", "g2", 1)
+    assert jobs.pending() == ["h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a"}
+    assert jobs.members("h1", "done") == set()
+    assert client.pttl(record) == -1
+    assert jobs.tally(job) is True
+
+
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+@pytest.mark.parametrize("outcome", ["crash", "cannot_run"])
+def test_enqueue_starts_a_job_its_worker_ended_without_a_verdict_again(
+    jobs: queue.Queue, client: Any, outcome: str
+) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", outcome)
+
+    assert jobs.enqueue([unit("a")], "h1", {}) == ["h1:test:a"]
+
+    job = found(jobs, "h1:test:a")
+    assert (job.state, job.attempts, job.outcome) == ("pending", 0, "")
+    assert jobs.pending() == ["h1:test:a"]
+    assert jobs.members("h1", "done") == set()
+    assert client.pttl(f"{queue.PREFIX}job:h1:test:a") == -1
+
+
+@pytest.mark.parametrize("outcome", ["passed", "failed", "gate_failed", "survived"])
+def test_enqueue_leaves_a_job_that_ended_with_a_verdict_as_it_is(jobs: queue.Queue, outcome: str) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", outcome)
+    before = found(jobs, "h1:test:a")
+
+    assert jobs.enqueue([unit("a")], "h1", {}, rank=0) == []
+
+    assert found(jobs, "h1:test:a") == before
+    assert jobs.pending() == []
+    assert jobs.members("h1", "done") == {"h1:test:a"}
+
+
 def test_same_unit_on_two_heads_is_two_jobs(jobs: queue.Queue) -> None:
     assert jobs.enqueue([unit("a")], "h1", {}) == ["h1:test:a"]
     assert jobs.enqueue([unit("a")], "h2", {}) == ["h2:test:a"]
@@ -148,6 +203,16 @@ def test_claim_records_when_the_lease_started_and_an_older_lease_reads_zero(jobs
     assert take(jobs, "h1:test:b", expires_ms=1100, leased_ms=1000)
     client.hdel("agentihooks-ci:queue:job:h1:test:b", "leased_ms")
     assert found(jobs, "h1:test:b").leased_ms == 0
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_job_enqueued_with_a_graded_commit_decodes_it_and_a_record_written_before_it_existed_decodes_none(
+    jobs: queue.Queue, client
+) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    assert found(jobs, "h1:test:a").graded_commit == "m" * 40
+    client.hdel("agentihooks-ci:queue:job:h1:test:b", "graded_commit")
+    assert found(jobs, "h1:test:b").graded_commit == ""
 
 
 @pytest.mark.feature("lab-scheduler-metrics")
@@ -232,7 +297,6 @@ def test_reap_requeues_while_attempts_remain_then_marks_lost(jobs: queue.Queue) 
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.token("h1:test:a") == ""
     assert jobs.members("h1", "done") == {"h1:test:a"}
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
     assert jobs.members("h1", "leased") == set()
     assert jobs.pending() == ["h1:test:b"]
 
@@ -264,7 +328,6 @@ def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: 
     assert jobs.pending() == ["h1:test:b", "h1:test:a"]
     assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
     assert jobs.members("h1", "done") == set()
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
     assert jobs.retry(record) is False
 
     assert take(jobs, "h1:test:a", "w2", "t2")
@@ -369,7 +432,7 @@ def test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one(jobs:
 def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {}, rank=3)
     assert take(jobs, "h1:test:a")
-    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "failed")
 
     assert jobs.enqueue([unit("a")], "h1", {}, rank=1) == []
 
@@ -411,13 +474,11 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     assert keys == {
         "agentihooks-ci:queue:seq",
         "agentihooks-ci:queue:pending",
-        "agentihooks-ci:queue:done",
         "agentihooks-ci:queue:head:h1:pending",
         "agentihooks-ci:queue:head:h1:done",
         "agentihooks-ci:queue:job:h1:test:a",
         "agentihooks-ci:queue:job:h1:test:b",
     }
-    assert client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
 
 
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
@@ -448,3 +509,24 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w3", 5, 1300)
     assert jobs.prune(1201) == 1
     assert jobs.offers(0) == {"w3": (5, 1300)}
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_states_reads_each_job_state_in_order_through_plain_pipelines_and_a_missing_job_reads_none(
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.claim(found(jobs, ids[1]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t2", 900, 0)
+    assert jobs.finish(found(jobs, ids[2]), "t2", "passed")
+    opened: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    pipeline = jobs.client.pipeline
+
+    def piped(*args: object, **options: object) -> object:
+        opened.append((args, options))
+        return pipeline(*args, **options)
+
+    monkeypatch.setattr(jobs.client, "pipeline", piped)
+    assert jobs.states([ids[2], "h1:test:none", ids[0], ids[1]]) == ["done", None, "pending", "leased"]
+    assert jobs.states([]) == []
+    assert opened == [((), {"transaction": False})] * 2

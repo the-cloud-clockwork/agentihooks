@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm.ledger_client import LedgerClient
@@ -23,7 +25,7 @@ def close_op(item, op_id="c"):
 
 def apply(doc, op, ctx=None):
     ledger_alerts.check(op)
-    return ledger_alerts.apply(doc, op, ctx or Ctx())
+    return ledger_alerts.apply(doc, op, cast(Any, ctx or Ctx()))
 
 
 def test_an_inbox_alert_is_raised_once_per_item_and_carries_the_item():

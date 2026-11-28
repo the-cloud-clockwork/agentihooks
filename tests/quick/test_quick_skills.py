@@ -11,7 +11,11 @@ from scripts.quick import cli
 pytestmark = pytest.mark.unit
 
 SKILLS = Path(__file__).parents[2] / "profiles/package/skills"
-TRIGGERS = {"quick-swarm-init": "start a quick swarm", "quick-swarm-handoff": "hand off this quick seat"}
+TRIGGERS = {
+    "quick-swarm-init": "start a quick swarm",
+    "quick-swarm-handoff": "hand off this quick seat",
+    "quick-swarm-master": "how does the quick swarm work",
+}
 
 
 @pytest.mark.feature("quick-swarm")

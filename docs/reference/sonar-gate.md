@@ -12,7 +12,7 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
-When the gate fails, the `SonarQube Quality Gate` step prints its error line and then the unresolved new bugs and vulnerabilities of the branch or pull request it graded, one line each: component, line, rule and message. It prints the first 100 and then how many more there are. Read a red gate's bugs there; the dashboard address in the error line exists only inside the job. The read is best effort: when it is refused, fails or finds nothing, or the server still does not answer once the retry waits reach 30 seconds, the step prints the error line alone.
+When the gate fails, the `SonarQube Quality Gate` step prints its error line, then every page of unresolved new bugs and vulnerabilities and new security hotspots still to review for the branch or pull request it graded. Each finding occupies one line with component, line or zero, rule and message. The searches use the existing read token through the job's Access proxy; task and gate polling keep the scan token. Both lists and all retries share one thirty second timeout. A refused or empty later page leaves earlier findings visible and reports the remaining count when known. A timeout can end the read before that count prints. Diagnostic failures preserve the original error and failed exit.
 
 The job's `Hold the Delivery L2 conditions` step runs after the quality gate step and fails when:
 
@@ -128,8 +128,10 @@ scan database for that build would lose those associations.
 
 ### Taking coverage as shards land
 
-The `sonar` job needs only `select`, `reuse`, `admission` and `lab-verdict`, so it
-starts beside the unit shards on a standard runner. Its runner wait, checkout
+The `sonar` job needs only `select`, `reuse`, `admission`, `lab-verdict` and
+`collect`, so it starts beside the unit shards on a standard runner, after
+`collect` has uploaded both reused test plan artifacts that its pattern
+download fetches by one listing of the run. Its runner wait, checkout
 and carried coverage finish while the shards run. The job holds that runner
 while it waits, because a light runner requests a quarter CPU and ran the scan
 three to four times slower. `Take each shard's coverage as it lands` runs
@@ -140,6 +142,15 @@ with the job's runtime token. It holds no GitHub token, so it spends no REST
 quota. It downloads each shard's coverage artifact into
 `.coverage-shards/<artifact name>` when the artifact is listed. While shards
 still run, it flattens each database it holds into `flat-<name>` beside it.
+
+A push to `dev` runs the analysis in `sonar-after-unit`, which also needs
+`unit` and shows as `sonar` on that push. It runs the same steps once every unit
+leg has finished, so the coverage wait lists all twenty legs on its first poll
+and the analysis never holds a runner while the legs wait for one. The `sonar`
+job still runs on that push as `sonar hand off`: it skips its checkout and
+evidence upload, marks the run test only and ends in seconds. Promotion reads
+the analysis of `sonar-after-unit`. Pull requests and dispatches keep the
+`sonar` job starting beside the unit shards.
 
 A shard ends when its coverage is taken, or when its flake report is listed with
 no coverage of it beside. `unit` and `unit-selected` upload the flake report after

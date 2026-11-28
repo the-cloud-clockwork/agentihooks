@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from scripts.events.bus import Bus, StateConflict, StateStore
 from scripts.events.envelope import Envelope
@@ -19,6 +19,9 @@ from scripts.swarm.store import SwarmError
 BUCKET = "hub-github"
 OPEN = "open"
 POLLED = "polled"
+SWEEP = "sweep"
+HEALTH = "health"
+SLICE_MS = 10_000
 INTERVAL_MS = 300_000
 FLUSH_AFTER_MS = 60_000
 FETCH_ERRORS = (SwarmError, KeyError, TypeError)
@@ -53,14 +56,50 @@ def key(url: str) -> str:
 
 
 def repository_key(repository: str) -> str:
-    """Return the state key of the swarms tracking a pull request in ``repository``."""
+    """Return the state key of the swarms with an open or unreleased tracked pull request in ``repository``."""
     return "repo." + hashlib.sha256(repository.lower().encode()).hexdigest()
 
 
-def _joined(swarm: str, swarms: Any) -> list[str] | None:
-    """Return ``swarms`` with ``swarm`` added in order, or None when it is already there."""
-    swarms = swarms or []
-    return None if swarm in swarms else sorted([*swarms, swarm])
+def _record(value: Any) -> dict[str, list[str]]:
+    """Return the repository record ``value`` as its swarms and the swarms awaiting a release, reading a legacy list of
+    swarms as both."""
+    if isinstance(value, list):
+        return {"swarms": value, "unreleased": value}
+    return {"swarms": [], "unreleased": [], **(value or {})}
+
+
+def _joined(swarm: str, value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` with ``swarm`` listed in order, or None when it already is."""
+    record = _record(value)
+    if swarm in record["swarms"]:
+        return None
+    return {**record, "swarms": sorted([*record["swarms"], swarm])}
+
+
+def _merged(swarms: list[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` with ``swarms`` listed and awaiting a release, or None when they already
+    are."""
+    record = _record(value)
+    merged = {"swarms": sorted({*record["swarms"], *swarms}), "unreleased": sorted({*record["unreleased"], *swarms})}
+    return None if merged == record else merged
+
+
+def _closed(swarms: list[str], busy: set[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` without each of ``swarms`` that has no open pull request in ``busy`` and
+    no merge awaiting a release, or None when every one stays."""
+    record = _record(value)
+    kept = [
+        swarm for swarm in record["swarms"] if swarm not in swarms or swarm in busy or swarm in record["unreleased"]
+    ]
+    return None if kept == record["swarms"] else {**record, "swarms": kept}
+
+
+def _released(busy: set[str], value: Any) -> dict[str, list[str]] | None:
+    """Return the repository record ``value`` once a release reached its swarms, keeping only those with an open pull
+    request in ``busy``, or None when that changes nothing."""
+    record = _record(value)
+    released = {"swarms": [swarm for swarm in record["swarms"] if swarm in busy], "unreleased": []}
+    return None if released == record else released
 
 
 def suite_result(app: dict | None, conclusion: str) -> dict:
@@ -109,6 +148,8 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
         snapshot["head"], snapshot["suites"], snapshot["early"] = seen.head, {}, {}
         found += _suites(snapshot, early)
     if seen.state is not None and seen.state != snapshot["state"]:
+        if snapshot["state"] is None and seen.state in TERMINAL:
+            found.append(("pull.opened", {}))
         found.append((ARRIVED.get(seen.state) or ("pull.reopened" if snapshot["state"] else "pull.opened"), {}))
         snapshot["state"] = seen.state
     if snapshot["state"] in TERMINAL:
@@ -146,12 +187,24 @@ def _rows(snapshot: dict, found: list[tuple[str, dict]], now: int) -> list[dict]
     return rows
 
 
+def _resumed(urls: list[str], cursor: str | None) -> list[str]:
+    """Return the open URLs from ``cursor`` on, or every one when the cursor has left the index."""
+    return urls[urls.index(cursor) :] if cursor in urls else urls
+
+
 class Pulls:
-    def __init__(self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms):
+    def __init__(
+        self,
+        bus: Bus,
+        fetch: Callable[[str], Observation] = fetch,
+        clock: lease.Clock = lease.wall_ms,
+        index: Bus | None = None,
+    ) -> None:
         self._events = bus.events
-        self._state = bus.state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
+        self._late = 0
 
     def reactor(self) -> Reactor:
         return Reactor("pulls", "swarm.*.task.*", self.handle, singleton=True, poll=self.poll)
@@ -160,6 +213,7 @@ class Pulls:
         url = event.data.get("pr_url")
         if event.type == "task.changed" and isinstance(url, str) and URL.fullmatch(url):
             self.track(event.swarm, url)
+        self._late = max(self._late, self._clock() - event.time)
 
     def track(self, swarm: str, url: str) -> None:
         def add(snapshot):
@@ -178,21 +232,29 @@ class Pulls:
                 return None
             return {**snapshot, "swarms": sorted([*snapshot["swarms"], swarm])}
 
-        _update(self._state, key(url), add)
-        _update(self._state, repository_key(url.rsplit("/pull/", 1)[0]), partial(_joined, swarm))
-        stored = self._snapshot(url)
+        added = _update(self._state, key(url), add)
+        stored = self._snapshot(url) or {}
+        name = repository_key(url.rsplit("/pull/", 1)[0])
         if stored["state"] not in TERMINAL:
             self._index(stored["url"], True)
+            _update(self._state, name, partial(_joined, swarm))
+        elif added is not None and stored["state"] == "merged":
+            _update(self._state, name, partial(_merged, [swarm]))
 
     def observe(self, seen: Observation) -> None:
         now = self._clock()
         created = []
+        moved: list[str] = []
+        swarms: list[str] = []
 
-        def change(snapshot):
+        def change(snapshot: Any) -> Any:
             if snapshot is None:
                 return None
             after = json.loads(json.dumps(snapshot))
-            created[:] = _rows(after, _changes(after, seen), now)
+            found = cast(list[tuple[str, Any]], _changes(after, seen))
+            moved[:] = [kind for kind, _ in found]
+            swarms[:] = after["swarms"]
+            created[:] = _rows(after, found, now)
             after["pending"] += created
             return None if after == snapshot else after
 
@@ -200,18 +262,52 @@ class Pulls:
         self._publish(seen.url, created)
         if written is not None:
             self._index(written["url"], written["state"] not in TERMINAL)
+        self._follow(seen.url.rsplit("/pull/", 1)[0], swarms, moved)
 
     def announce(self, repository: str, kind: str, ident: str, data: dict[str, object]) -> None:
-        """Publish event ``kind`` about change ``ident`` of ``repository`` to every swarm tracking a pull request in
-        it, under one id per swarm and change so a redelivery is the same event."""
+        """Publish event ``kind`` about change ``ident`` of ``repository`` to every swarm on its record, under one id
+        per swarm and change so a redelivery is the same event; a release then drops each swarm with nothing open
+        there and leaves none awaiting a release."""
         entry = self._state.get(repository_key(repository))
         now = self._clock()
-        swarms: list[str] = json.loads(entry.value) if entry else []
+        swarms = _record(json.loads(entry.value) if entry else None)["swarms"]
         for swarm in swarms:
             digest = hashlib.sha256(json.dumps([swarm, kind, repository.lower(), ident]).encode()).hexdigest()
             entity = kind.split(".")[0]
             event = Envelope(digest, kind, swarm, entity, ident, 1, now, AUTHOR, {"repository": repository, **data})
             self._events.publish(subject(swarm, *kind.split(".")), event)
+        if kind == "release.published":
+            self._settle(repository, _released)
+
+    def _follow(self, repository: str, swarms: list[str], kinds: list[str]) -> None:
+        """Keep the record of ``repository`` in step with a pull request of ``swarms`` that moved through ``kinds``: a
+        merge leaves its swarms awaiting a release, a close drops those with nothing else open or unreleased there,
+        and a reopen lists them again."""
+        name = repository_key(repository)
+        if "pull.merged" in kinds:
+            _update(self._state, name, partial(_merged, swarms))
+        elif "pull.closed" in kinds:
+            self._settle(repository, partial(_closed, swarms))
+        elif "pull.reopened" in kinds:
+            for swarm in swarms:
+                _update(self._state, name, partial(_joined, swarm))
+
+    def _settle(self, repository: str, change: Callable[[set[str], Any], dict[str, list[str]] | None]) -> None:
+        """Rewrite the record of ``repository`` through ``change`` given the swarms with an open tracked pull request
+        there, then list again each swarm a pull request opened for while it was rewritten."""
+        name = repository_key(repository)
+        busy = self._busy(repository)
+        _update(self._state, name, partial(change, busy))
+        for swarm in self._busy(repository) - busy:
+            _update(self._state, name, partial(_joined, swarm))
+
+    def _busy(self, repository: str) -> set[str]:
+        """Return the swarms tracking an open pull request in ``repository``."""
+        index = self._state.get(OPEN)
+        prefix = repository.lower() + "/pull/"
+        urls: list[str] = json.loads(index.value) if index else []
+        entries = self._state.get_many([key(url) for url in urls if url.lower().startswith(prefix)])
+        return {swarm for entry in entries if entry is not None for swarm in json.loads(entry.value)["swarms"]}
 
     def _snapshot(self, url: str) -> dict | None:
         entry = self._state.get(key(url))
@@ -242,15 +338,24 @@ class Pulls:
         _update(self._state, OPEN, change)
 
     def poll(self, guard: Callable[[], bool] = lambda: True) -> None:
+        """Sweep the open pull requests for at most ``SLICE_MS``, resuming the sweep a previous call paused.
+
+        A sweep starts once ``INTERVAL_MS`` has passed since the last one started, and records its start in
+        ``POLLED`` when it wraps; a rate limit ends it and waits a full interval from this call.
+        """
         if not guard():
             return
-        entry = self._state.get(POLLED)
         now = self._clock()
-        if entry is not None and now < json.loads(entry.value) + INTERVAL_MS:
+        sweep = self._sweep(now)
+        if sweep is None:
             return
+        polled = sweep["started"]
         index = self._state.get(OPEN)
-        for url in json.loads(index.value) if index else []:
+        for url in _resumed(json.loads(index.value) if index else [], sweep.get("next")):
             if not guard():
+                return
+            if self._clock() >= now + SLICE_MS:
+                self._pause(sweep, url)
                 return
             pending = self._snapshot(url)["pending"]
             self._publish(url, [row for row in pending if row["event"]["time"] <= now - FLUSH_AFTER_MS])
@@ -259,7 +364,32 @@ class Pulls:
             except FETCH_ERRORS as exc:
                 print(f"hub: GitHub poll skipped {url}: {exc}", file=sys.stderr)
                 if run_wait.rate_limited(exc):
+                    polled = now
                     break
                 continue
             self.observe(seen)
-        _update(self._state, POLLED, lambda _: now)
+        _update(self._state, POLLED, lambda _: polled)
+        _update(self._state, SWEEP, lambda _: {})
+        self._report({"sweep_ms": self._clock() - sweep["started"]})
+
+    def _sweep(self, now: int) -> dict[str, Any] | None:
+        """Return the sweep in progress, a new one starting at ``now`` once the interval has passed, or None."""
+        entry = self._state.get(SWEEP)
+        sweep: dict[str, Any] = json.loads(entry.value) if entry else {}
+        if sweep:
+            return sweep
+        polled = self._state.get(POLLED)
+        if polled is not None and now < json.loads(polled.value) + INTERVAL_MS:
+            return None
+        return {"started": now}
+
+    def _pause(self, sweep: dict[str, Any], url: str) -> None:
+        """Store ``url`` as the next pull request of ``sweep`` and report the track delay so far."""
+        _update(self._state, SWEEP, lambda _: {**sweep, "next": url})
+        self._report({})
+
+    def _report(self, extra: dict[str, int]) -> None:
+        """Write the oldest task event age handled since the last report, with ``extra``, to ``HEALTH``."""
+        late, self._late = self._late, 0
+        at = self._clock()
+        _update(self._state, HEALTH, lambda value: {**(value or {}), "at": at, "track_delay_ms": late, **extra})

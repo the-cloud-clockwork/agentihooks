@@ -1,0 +1,6 @@
+{
+  "scripts/gates/import_failure.py:scripts.gates.import_failure.x__write:25d1c8415f40aa87b5f8e6883dabbfd3350894c6d4d286098d9c333f26c2e7bf": {
+    "reader": "standards-reader",
+    "reason": "The suffix names only the private staging file. Both versions write identical JSON and replace the same canonical stamp path while holding the same lock. The staging name is neither persisted in stamp contents nor exposed through gate rows or setup alerts; concurrency and hourly suppression remain identical."
+  }
+}

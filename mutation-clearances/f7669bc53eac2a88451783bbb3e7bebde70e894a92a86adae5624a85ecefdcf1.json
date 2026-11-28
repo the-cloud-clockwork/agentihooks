@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__owned:ba76b84bf7ed73fe3e55fc0324a6366740a176f1c77c8bdb1f18712aa4bf73f5": {
+    "reader": "standards_reader",
+    "reason": "XX padding preserves the ownership-conflict reason, exception and refusal. It changes no lock acquisition, release or consumer behavior; exact diagnostic prose is not specified."
+  }
+}

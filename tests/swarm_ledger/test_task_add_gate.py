@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -230,7 +231,7 @@ def test_task_add_with_a_dash_mints_the_next_id_and_prints_it(monkeypatch, capsy
 
 
 def test_the_refusal_names_a_task_without_a_state_as_open():
-    ctx = SimpleNamespace(refused=[])
+    ctx: Any = SimpleNamespace(refused=[])
     assert ledger_tasks._add({"tasks": [{"id": "t1", "title": "old"}]}, {"task": "t1", "by": "swarm"}, ctx) is False
     assert ctx.refused == ['task t1 already exists as "old" (open): pick another id, or pass - as the id to mint one']
 

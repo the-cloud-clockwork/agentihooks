@@ -74,4 +74,5 @@ with urllib.request.urlopen(base + "/api/v1/layout", timeout=5) as response:
     assert json.load(response)["data"]["capacity-box"]["height"] == 240
 print("After container recreation: persisted height 240")
 PY
+bash scripts/packaging/scheduler-cache-smoke.sh
 printf 'Swarm container smoke passed\n'

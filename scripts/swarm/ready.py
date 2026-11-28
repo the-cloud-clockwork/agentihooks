@@ -31,7 +31,7 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_alerts, ledger_kinds
 from scripts.tick.deadline import Deadline
 
 AWAITING = "merge"
@@ -56,7 +56,7 @@ UNREAD_EXIT = "left the merge queue green and its merge group runs could not all
 DROPPED_GREEN = "left the merge queue green and was dropped again after {tries} requeues"
 BACKOFF_MS = 60_000
 RECOVER = "recover"
-ALERT_SOURCE = "requeue"
+ALERT_SOURCE = ledger_alerts.MERGE
 TRANSIENT = "unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green"
 STUCK = "stayed unmergeable after leaving the merge queue"
 MOVED = "changed its head after leaving the merge queue"
@@ -428,10 +428,26 @@ def _priority(run: Pass, url: str) -> Callable[[], dict[str, Any] | None]:
     return lambda: queue_priority.automatic(cast(RedisStore, run.store), run.slug, url, run.ledger)
 
 
+def _review(run: Pass, row: Mapping[str, Any], url: str, head: str) -> None:
+    from scripts.gates.base import Who
+    from scripts.review import gate as review
+
+    task = row["id"]
+    actor = AgentRecord(name="merge watcher", lane="system", task=task)
+    author = Who(name=row.get("claimed_by") or "", swarm=run.slug, task=task)
+    review.admit(cast(RedisStore, run.store), run.slug, actor, url, head, author)
+
+
 def _queue(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]:
     task_id, url = row["id"], found["url"]
     try:
-        run.queue("queue", url, journal=_journal(run, task_id, url), priority=_priority(run, url))
+        run.queue(
+            "queue",
+            url,
+            admit=lambda head: _review(run, row, url, head),
+            journal=_journal(run, task_id, url),
+            priority=_priority(run, url),
+        )
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -547,7 +563,13 @@ def _recover(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]
     if fresh.merge_problem or not fresh.resolved:
         return _retry(run, row, found, f"{url} for task {task_id} is not yet mergeable and green; it retries later")
     try:
-        run.queue("queue", url, journal=_journal(run, task_id, url), priority=_priority(run, url))
+        run.queue(
+            "queue",
+            url,
+            admit=lambda head: _review(run, row, url, head),
+            journal=_journal(run, task_id, url),
+            priority=_priority(run, url),
+        )
     except SwarmError as exc:
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
         return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")

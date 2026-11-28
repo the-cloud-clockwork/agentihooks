@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x\u01c1Scheduler\u01c1_retire_pushes:2ff9dae67aa880993e9062ba6c88ab6fb7246d11d6975f234b1c6a6ae6dc367a": {
+    "reader": "standards_reader",
+    "reason": "entry.get(\"ref\", None) is equivalent because stale_heads.branchless returns tier == Priority.PROMOTION and lane == head and not ref, which is a bool, and not None and not \"\" are both True, so the result is identical for every stored waiting entry."
+  }
+}

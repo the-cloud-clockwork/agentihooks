@@ -1,5 +1,7 @@
 """Correction quarantine in swarm priming: corrected culture lines and learned notes drop out, local patches refused."""
 
+from typing import Any
+
 import pytest
 
 from hooks.context import injection_trace
@@ -35,22 +37,17 @@ def _task():
     return {"id": "t1", "seat": SEAT, "culture": f"# How\n- {BAD}\n- plain words\n", "learned": learned}
 
 
-def test_a_corrected_learned_note_and_culture_line_drop_out_of_priming():
+def test_a_corrected_learned_note_and_culture_line_drop_out_of_priming() -> None:
     _correct(f"learned:{SEAT}#1", BAD, {"seat": SEAT, "note": 1})
 
     task = priming_trace.withhold("sw", _task())
 
     lines = "\n".join(prompt.priming_lines(task))
-    assert BAD not in lines
-    assert f"- insight: {GOOD}" in lines
-    assert "- plain words" in lines
+    assert BAD not in lines and GOOD not in lines
+    assert f"- insight: {GOOD}" in "\n".join(prompt.learned_lines(task["learned"]))
+    assert "- plain words" in task["culture"] and BAD not in task["culture"]
     found = priming_trace.rows("sw", task)
-    pairs = [(row["layer"], row["source"]) for row in found]
-    assert ("learned", f"learned:{SEAT}#1") not in pairs
-    assert ("culture", "culture:sw#2") not in pairs
-    assert ("learned", f"learned:{SEAT}#2") in pairs
-    assert ("culture", "culture:sw#3") in pairs
-    assert next(row["text"] for row in found if row["source"] == "culture:sw#3") == "- plain words"
+    assert all(row["layer"] == "withheld" for row in found)
     withheld = sorted((r["source"], r["locator"]["layer"]) for r in found if r["layer"] == "withheld")
     assert withheld == [("culture:sw#2", "culture"), (f"learned:{SEAT}#1", "learned")]
 
@@ -88,7 +85,8 @@ def test_shared_notes_keep_their_source_seat_and_number() -> None:
     held = priming_trace.withhold("sw", task)
     assert [note.get("withheld", False) for note in held["learned"]] == [False, True]
     found = priming_trace.rows("sw", held)
-    assert next(row for row in found if row["layer"] == "learned")["locator"] == {"seat": SEAT, "note": 4}
+    assert held["learned"][0] == task["learned"][0]
+    assert not any(row["layer"] == "learned" for row in found)
     assert next(row for row in found if row["layer"] == "withheld")["source"] == f"learned:{origin}#7"
 
 
@@ -100,13 +98,14 @@ def test_a_withheld_note_is_not_counted_as_data():
     ]
 
 
-def test_observe_mode_keeps_the_note_and_logs_it(monkeypatch):
+def test_observe_mode_keeps_the_note_and_logs_it(monkeypatch: pytest.MonkeyPatch) -> None:
     _correct(f"learned:{SEAT}#1", BAD, {"seat": SEAT, "note": 1})
     monkeypatch.setenv("AGENTIHOOKS_GATE_QUARANTINE", "observe")
 
     task = priming_trace.withhold("sw", _task())
 
-    assert BAD in "\n".join(prompt.priming_lines(task))
+    assert BAD in "\n".join(prompt.learned_lines(task["learned"]))
+    assert BAD not in "\n".join(prompt.priming_lines(task))
     modes = {r["locator"]["mode"] for r in priming_trace.rows("sw", task) if r["layer"] == "withheld"}
     assert modes == {"observe"}
 
@@ -140,7 +139,11 @@ def test_the_tick_primes_spawns_without_the_corrected_note(env):  # noqa: F811
     assert task["culture"] == "# How\n\n"
 
 
-def test_take_master_primes_without_the_corrected_note_and_traces_the_withhold(taker, capsys, monkeypatch):  # noqa: F811
+def test_take_master_primes_without_the_corrected_note_and_traces_the_withhold(
+    taker: Any,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store, _, _, _ = taker
     store.memory.learn("master@sw", "m0", BAD, 1)
     store.memory.learn("master@sw", "m0", GOOD, 2)
@@ -151,10 +154,11 @@ def test_take_master_primes_without_the_corrected_note_and_traces_the_withhold(t
     assert cli.main(["sw", "take-master"]) == 0
 
     out = capsys.readouterr().out
-    assert BAD not in out and f"- note: {GOOD}" in out
+    assert BAD not in out and GOOD not in out
+    assert prompt.SEAT_BRIEF in out
     rows = [(r["layer"], r["source"]) for r in injection_trace.trace("sess-master")]
     assert ("withheld", "learned:master@sw#1") in rows
-    assert ("learned", "learned:master@sw#2") in rows
+    assert ("learned", "learned:master@sw#2") not in rows
     assert ("learned", "learned:master@sw#1") not in rows
 
 
@@ -199,3 +203,16 @@ def test_culture_set_names_a_culture_file_it_cannot_read(env, tmp_path, capsys):
     assert cli.main(["sw", "culture", "set", str(missing)]) == 1
 
     assert capsys.readouterr().err == f"swarm: cannot read the culture file {missing}: No such file or directory\n"
+
+
+@pytest.mark.feature("swarm-read-non-utf8")
+def test_culture_set_refuses_a_culture_file_that_is_not_utf8_text_by_name(env, tmp_path, capsys):  # noqa: F811
+    swarm, _, _ = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    binary = tmp_path / "culture.md"
+    binary.write_bytes(b"# How\n\xff\xfe not text\n")
+
+    assert cli.main(["sw", "culture", "set", str(binary)]) == 1
+
+    assert capsys.readouterr().err == f"swarm: cannot read the culture file {binary}: it is not UTF-8 text\n"
+    assert swarm.culture.get("sw") == ""

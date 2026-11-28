@@ -158,6 +158,33 @@ def wave_problems(chart: str) -> list[str]:
     return found
 
 
+def cache_problems(chart: str, size: str, *extra: str) -> list[str]:
+    result = render(chart, "--set", f"ledger.cache.sizeLimit={size}", *extra)
+    if result.returncode:
+        return [f"ledger cache fails to render: {result.stderr.strip()}"]
+    docs = ledger_docs(result.stdout)
+    if "StatefulSet" not in docs:
+        return [f"ledger cache renders no StatefulSet named {LEDGER}"]
+    pod = docs["StatefulSet"]["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    environ = {entry["name"]: entry.get("value") for entry in container.get("env", [])}
+    found = []
+    if environ.get("AGENTIHOOKS_HOME") != "/run/agentihooks":
+        found.append("ledger cache home must be /run/agentihooks")
+    mount = next(
+        (entry for entry in container.get("volumeMounts", []) if entry.get("mountPath") == "/run/agentihooks"), {}
+    )
+    if not mount:
+        found.append("ledger cache home has no matching mount")
+    volume = next((entry for entry in pod.get("volumes", []) if entry.get("name") == mount.get("name")), {})
+    memory = volume.get("emptyDir", {})
+    if memory.get("medium") != "Memory":
+        found.append("ledger cache home needs a Memory emptyDir")
+    if memory.get("sizeLimit") != size:
+        found.append(f"ledger cache bound must be {size}")
+    return found
+
+
 def problems(chart: str) -> list[str]:
     found = [
         *refused(chart, "two folder ledgers", REFUSAL, "--set", "ledger.replicas=2"),
@@ -168,6 +195,9 @@ def problems(chart: str) -> list[str]:
         *host_problems(chart),
         *probe_problems(chart),
         *wave_problems(chart),
+        *cache_problems(chart, "512Mi"),
+        *cache_problems(chart, "64Mi", "--set", "ledger.tls.secretName=ledger-tls"),
+        *cache_problems(chart, "512Mi", "--set", "ledger.replicas=2", *SHARED),
     ]
     single = render(chart, *SHARED)
     if single.returncode:

@@ -45,19 +45,26 @@ def _blob(tree: Mapping[str, bytes], path: str) -> str | None:
     return hashlib.sha256(content).hexdigest() if content is not None else None
 
 
+def _cached_blob(tree: Mapping[str, bytes], path: str, cache: dict[str, str | None]) -> str | None:
+    """Return _blob(tree, path), hashing a given path at most once per cache."""
+    if path not in cache:
+        cache[path] = _blob(tree, path)
+    return cache[path]
+
+
 def _text(content: bytes) -> str:
     """Return a source file's text the way the manifest's change reader decodes it."""
     return content.decode(errors="replace")
 
 
-def _test_module(path: str) -> bool:
+def is_test_module(path: str) -> bool:
     """Return whether a path is a pytest test module under the test tree."""
     return path.startswith("tests/") and path.endswith(".py") and PurePosixPath(path).name.startswith("test_")
 
 
 def _shared(path: str) -> bool:
     """Return whether a Python file outside the measured trees and the test modules keys every test."""
-    return path.endswith(".py") and not path.startswith(dep_manifest.MEASURED) and not _test_module(path)
+    return path.endswith(".py") and not path.startswith(dep_manifest.MEASURED) and not is_test_module(path)
 
 
 def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str]:
@@ -100,17 +107,20 @@ def fingerprints(
 ) -> dict[str, str]:
     """Return a content key per manifest test over the repository tree it runs against.
 
-    The tree maps every tracked path to its blob content. The invocation is the interpreter and pytest arguments the
-    executor runs, without its slot count. Inputs the manifest does not record, such as the clock, the network and
-    environment variables, are not keyed.
+    The tree maps every tracked path to its blob content, hashed at most once per call. The invocation is the
+    interpreter and pytest arguments the executor runs, without its slot count. Inputs the manifest does not record,
+    such as the clock, the network and environment variables, are not keyed.
     """
+    cache: dict[str, str | None] = {}
     shared = _digest(
         {
             "invocation": list(invocation),
-            "files": {path: _blob(tree, path) for path in dep_manifest.GLOBAL_FILES.union(filter(_shared, tree))},
+            "files": {
+                path: _cached_blob(tree, path, cache) for path in dep_manifest.GLOBAL_FILES.union(filter(_shared, tree))
+            },
         }
     )
-    measured = _digest({path: _blob(tree, path) for path in tree if path.startswith(BROAD_TREES)})
+    measured = _digest({path: _cached_blob(tree, path, cache) for path in tree if path.startswith(BROAD_TREES)})
     names: list[str] = manifest["units"]
     units = _unit_keys(names, tree)
     owns = {dep_manifest.node(test).partition("::")[0] for test in manifest["tests"]}
@@ -122,7 +132,7 @@ def fingerprints(
         found: dict[str, object] = {
             "test": test,
             "shared": shared,
-            "files": {path: _blob(tree, path) for path in {*opened, own, *reached[own]}},
+            "files": {path: _cached_blob(tree, path, cache) for path in {*opened, own, *reached[own]}},
         }
         if broad(record):
             found["tree"] = measured
@@ -133,17 +143,21 @@ def fingerprints(
     return keys
 
 
+def unlisted_modules(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> list[str]:
+    """List the test modules of the tree that hold no manifest test."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    return sorted(path for path in tree if is_test_module(path) and path not in listed)
+
+
 def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
     """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
     for such a module and of each test tree module either imports, and while there is such a module, of every file
     under the measured and test trees, since the manifest records no file a test it never ran reads."""
-    listed = {test.partition("::")[0] for test in manifest["tests"]}
     reached: set[str] = set()
-    for path in tree:
-        if _test_module(path) and path not in listed:
-            for parent in PurePosixPath(path).parents:
-                _reached(tree, (parent / "conftest.py").as_posix(), reached)
-            _reached(tree, path, reached)
+    for path in unlisted_modules(manifest, tree):
+        for parent in PurePosixPath(path).parents:
+            _reached(tree, (parent / "conftest.py").as_posix(), reached)
+        _reached(tree, path, reached)
     if reached:
         reached.update(path for path in tree if path.startswith(BROAD_TREES))
     return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
@@ -155,16 +169,17 @@ def unlisted_units(
     """Return one test unit per test module among the paths that the tree holds and that holds no manifest test, its
     member the module's path, keyed as a broad test over the tree and the files the manifest's `UNLISTED` notes say
     the module opened outside it, with the pytest invocation and the toolchain."""
-    listed = {test.partition("::")[0] for test in manifest["tests"]}
     noted: Mapping[str, Sequence[str]] = manifest.get(UNLISTED, {})
-    files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
+    files = sorted(set(paths).intersection(unlisted_modules(manifest, tree)))
     keys = fingerprints({"units": [], "tests": {path: {"files": list(noted.get(path, ()))} for path in files}}, tree)
+    payload = json.dumps({"tests": {}})
     return tuple(
         Unit(
             KIND,
             test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)),
             (path,),
-            json.dumps({"tests": {}}),
+            payload,
+            hashlib.sha256(payload.encode()).hexdigest(),
         )
         for path in files
     )
@@ -218,9 +233,6 @@ def units(
         outside = {path for test in batch for path in manifest["tests"][test].get("outside", ())}
         opened = {path: blobs[path] for path in outside if path in blobs}
         inputs = TestInputs({test: keys[test] for test in batch}, opened, PYTEST_INVOCATION, toolchain)
-        found.append(
-            Unit(
-                KIND, test_key(inputs), batch, json.dumps({"tests": {test: manifest["tests"][test] for test in batch}})
-            )
-        )
+        payload = json.dumps({"tests": {test: manifest["tests"][test] for test in batch}})
+        found.append(Unit(KIND, test_key(inputs), batch, payload, hashlib.sha256(payload.encode()).hexdigest()))
     return tuple(found)

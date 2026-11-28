@@ -2640,9 +2640,10 @@ def worktree_run(world, tmp_path, monkeypatch):
 
 
 def test_render_from_a_worktree_leaves_the_live_home_untouched(world, worktree_run, monkeypatch, capsys):
+    from hooks import compat
     from scripts.profiles import render
 
-    monkeypatch.setattr(render.pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(Path.home())))
+    monkeypatch.setattr(compat.pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(Path.home())))
     settings = _write(render.rendered_root() / "rb-role" / "claude" / "settings.json", '{"live": true}\n')
     before = _tree_hashes(render.rendered_root(), Path("/none"))
 

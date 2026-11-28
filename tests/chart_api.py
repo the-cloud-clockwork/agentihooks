@@ -45,7 +45,7 @@ API_ROWS = [
     {"name": "API_SETTING", "value": "from-api"},
     {"name": "API_TOKEN", "valueFrom": {"secretKeyRef": {"name": "swarm-api", "key": "token"}}},
 ]
-LEDGER_ONLY = {"LEDGER_HOST", "LEDGER_PORT", "SWARM_RELOAD", "SWARM_ALLOWED_HOSTS"}
+LEDGER_ONLY = {"AGENTIHOOKS_HOME", "LEDGER_HOST", "LEDGER_PORT", "SWARM_RELOAD", "SWARM_ALLOWED_HOSTS"}
 COMMAND = ["python", "-m", "scripts.swarm_ledger.api_service", "--serve"]
 WRITES = ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 MATCH = re.compile(r"Host\(`(?P<host>[^`]+)`\) && \((?P<methods>Method\(`\w+`\)(?: \|\| Method\(`\w+`\))*)\)")

@@ -7,7 +7,9 @@ from typing import Any, TypeGuard
 import ledger_comments
 import ledger_kinds
 
+from scripts.forge.remote import CHANGE_LINK
 from scripts.swarm_ledger import ledger_plans, ledger_rank, ports, task_dependencies
+from scripts.swarm_ledger.op_context import OpContext
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -100,7 +102,6 @@ RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
 OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog", "review_rounds")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
-PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -335,7 +336,7 @@ def check_repository_branches(fields: dict) -> None:
 def check_pull_scopes(fields: dict) -> None:
     scopes = fields.get("pull_scopes", {})
     if not isinstance(scopes, dict) or not all(
-        PULL_URL_RE.fullmatch(url)
+        CHANGE_LINK.fullmatch(url)
         and isinstance(declared, dict)
         and set(declared) == {"kind", "scope"}
         and declared["kind"] in PULL_SCOPE_KINDS
@@ -440,7 +441,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')} is done without its proof: {', '.join(ledger_kinds.unmet(task))}")
 
 
-def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     op = ledger_plans.with_slice(doc, ledger_plans.with_plan_slice(doc, op))
     tasks = doc.setdefault("tasks", [])
     if taken := next((t for t in tasks if t["id"] == op["task"]), None):
@@ -709,7 +710,7 @@ def _block_author(by: str) -> bool:
     return by == "operator" or lane_of(by) == "master"
 
 
-def _held_block(task: dict, op: dict, ctx) -> bool:
+def _held_block(task: dict, op: dict, ctx: OpContext) -> bool:
     return (
         task.get("state") == "blocked"
         and "state" in op["fields"]
@@ -718,7 +719,7 @@ def _held_block(task: dict, op: dict, ctx) -> bool:
     )
 
 
-def _record_timing(task, changed, op, ctx):
+def _record_timing(task: dict[str, Any], changed: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> None:
     if "state" in changed:
         extra = {"pr_url": task.get("pr_url", ""), "branch": task.get("branch", "")} if changed["state"] == "pr" else {}
         ctx.record(op["by"], f"task {changed['state']}", op["item"], **extra)
@@ -746,7 +747,9 @@ def _done_refusal(doc, op, after):
     return None
 
 
-def _apply_update(task, after, changed, op, ctx):
+def _apply_update(
+    task: dict[str, Any], after: dict[str, Any], changed: dict[str, Any], op: dict[str, Any], ctx: OpContext
+) -> None:
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
@@ -762,7 +765,7 @@ def _apply_update(task, after, changed, op, ctx):
     ctx.dirty = ctx.dirty or bool(changed)
 
 
-def _gated(doc, op, ctx, task):
+def _gated(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, task: dict[str, Any] | None) -> bool | None:
     others = [t for t in doc["tasks"] if t["id"] != op["item"].split("/")[1]]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
@@ -774,7 +777,7 @@ def _gated(doc, op, ctx, task):
     return None
 
 
-def _update(doc, op, ctx):
+def _update(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     if (gated := _gated(doc, op, ctx, task)) is not None:
@@ -790,7 +793,7 @@ def _update(doc, op, ctx):
     return True
 
 
-def _relay_rank(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def _relay_rank(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     from scripts.swarm_ledger.ledger_relay import marks_of, relayed
 
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
@@ -808,7 +811,7 @@ def _relay_rank(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-def _changed(task, fields, op, ctx):
+def _changed(task: dict[str, Any], fields: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> dict[str, Any]:
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
     if "claimed_by" in changed:
         changed["claim_generation"] = task.get("claim_generation", 0) + 1
@@ -831,7 +834,7 @@ def _relay_refusal(task, op, meta, rank, words):
     return ""
 
 
-def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:
+def complete_outcome(doc: dict, op: dict, ctx: OpContext, outcome: dict, actor: str) -> bool:
     from scripts.swarm_ledger.api.resources import revision
 
     proposal = outcome["proposal"]
@@ -897,7 +900,7 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
         fields.setdefault("slice", "")
 
 
-def _follow_up(op: dict, ctx) -> bool:
+def _follow_up(op: dict, ctx: OpContext) -> bool:
     fields = op["fields"]
     if fields.get("plan_slice") or fields.get("slice"):
         task_id = op["item"].split("/")[1]
@@ -907,7 +910,7 @@ def _follow_up(op: dict, ctx) -> bool:
     return True
 
 
-def _set_slice(doc: dict, op: dict, ctx) -> bool:
+def _set_slice(doc: dict, op: dict, ctx: OpContext) -> bool:
     fields = op["fields"]
     supplied_slice = "plan_slice" in fields
     task_id = op["item"].split("/")[1]
@@ -947,7 +950,7 @@ def shared_refusal(doc: dict, task: dict) -> str:
     )
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["op"] == "task_add":
         return _add(doc, op, ctx)
     if "quote" in op:

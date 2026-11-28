@@ -123,7 +123,7 @@ def test_the_query_string_carries_the_state_and_an_integer_offset():
     }
 
 
-@pytest.mark.parametrize("query", ["state=open", "offset=-1", "offset=x", "offset=1000001"])
+@pytest.mark.parametrize("query", ["state=pending", "offset=-1", "offset=x", "offset=1000001"])
 def test_the_query_string_refuses_another_state_or_a_bad_offset(query):
     with pytest.raises(APIError) as caught:
         routes.pagination(f"/api/v1/ledgers/s/tasks?{query}")

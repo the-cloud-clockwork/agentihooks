@@ -1,0 +1,15 @@
+{
+  "id": "ledger-load-server-resources",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-load-gate-grades-read-server",
+  "behaviour": "The paired ledger load gate grades CPU, threads and memory across every server process, retains the legacy single server case, and preserves both server logs for initial and repeated windows even when a run fails.",
+  "seam": "The load gate process sampler, shared memory wrapper and paired workflow evidence uploads",
+  "tests": [
+    "tests/ledger_load/test_gate.py::test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledger_server",
+    "tests/ledger_load/test_gate.py::test_the_sampler_sums_the_cpu_threads_and_rss_of_every_ledger_server_process",
+    "tests/ledger_load/test_memory.py::test_paired_load_keeps_the_server_log_and_removes_storage_when_the_run_raises",
+    "tests/ledger_load/test_memory.py::test_paired_load_preserves_both_logs_when_a_write_breach_repeats",
+    "tests/ledger_load/test_memory.py::test_paired_load_keeps_the_log_of_every_ledger_server_and_no_other_file",
+    "tests/ledger_load/test_paired.py::test_each_pair_upload_keeps_the_logs_of_both_ledger_servers_of_each_side"
+  ]
+}

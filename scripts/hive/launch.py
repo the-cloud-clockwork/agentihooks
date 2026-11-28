@@ -13,7 +13,7 @@ from scripts.hive import admission, ceiling, headroom, orders, placement, placem
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.quota_state import CLOSED
-from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
+from scripts.routing.reservation import LaunchSlots, master_five_floor, master_week_floor
 from scripts.routing.slots import account_key
 from scripts.swarm import capacity, launch_endings, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -76,15 +76,17 @@ def loaded_hives(
     agents than the live worker records any swarm places on it. ``reservations`` reads a hive's pending admission
     count."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
+    masters = {agent.execution_id for agent in agents if agent.lane == "master"}
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         executions = counts.get("_executions", {})
         seen = {execution for ids in executions.values() for execution in ids}
         reported = {
-            key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+            key: max(0, count - max(counts.get(f"interactive:{key}", 0), len(set(executions.get(key, [])) & masters)))
+            for key, count in counts.items()
+            if key != "_executions" and not key.startswith("interactive:")
         }
-        masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
         spellings = {account_key(key): key for key in reported}
         pending: dict[str, int] = {}
         recorded = 0
@@ -96,10 +98,12 @@ def loaded_hives(
                     slot = spellings.get(account_key(slot), slot)
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
-            slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
+            slot: max(
+                0, reported.get(slot, 0) - sum(execution not in masters for execution in executions.get(slot, []))
+            )
             for slot in pending
         }
-        hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
+        hive["agents"] = sum(reported.values()) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
         hive["agents"] = max(hive["agents"], recorded)
@@ -166,7 +170,7 @@ def hosting(hives: list[dict[str, Any]], profile: str, advertised: dict[str, fro
     return [hive for hive in hives if profile in advertised.get(hive["id"], frozenset())]
 
 
-def _master_logins(hives: list[dict], front: bool) -> list[dict]:
+def _master_logins(hives: list[dict[str, Any]], front: bool) -> list[dict[str, Any]]:
     if not front:
         return hives
     rejected = {
@@ -174,7 +178,23 @@ def _master_logins(hives: list[dict], front: bool) -> list[dict]:
         for _, result in balancer.cached_observations()
         if result.provider_status in ("revoked", "rejected")
     }
-    return [hive for hive in hives if placement.account_key(hive["master_login"].get("claude", "")) not in rejected]
+    kept = []
+    for hive in hives:
+        accounts = placement.master_accounts(hive, "claude")
+        allowed = [account for account in accounts if placement.account_key(account) not in rejected]
+        if accounts and not allowed:
+            continue
+        if hive.get("master_logins"):
+            hive = {
+                **hive,
+                "master_logins": [
+                    item
+                    for item in hive["master_logins"]
+                    if item["harness"] != "claude" or placement.account_key(item["account"]) not in rejected
+                ],
+            }
+        kept.append(hive)
+    return kept
 
 
 def _master_closed(row: capacity.Account) -> bool:
@@ -185,9 +205,9 @@ def _master_closed(row: capacity.Account) -> bool:
 
 
 def _master_floor(row: capacity.Account) -> tuple[str, float] | None:
-    """The window and percent left at which ``row`` sits at the master floor: its week at or under the primary login
-    reserve, or its five hour window at or under the hard five hour handoff."""
-    if row.week_left is not None and row.week_left <= primary_reserve_pct(os.environ):
+    """The window and percent left at which ``row`` sits at the master floor: its week at or under the master week
+    floor, or its five hour window at or under the hard five hour handoff."""
+    if row.week_left is not None and row.week_left <= master_week_floor(os.environ):
         return "week", row.week_left
     if row.five_left is not None and row.five_left <= master_five_floor():
         return "five hour window", row.five_left
@@ -199,9 +219,7 @@ def _floored(waited: placement.Wait, rows: list[capacity.Account], hives: list[d
     slot for the master."""
     if waited.reason != NO_MASTER_SLOT:
         return waited
-    logins = {
-        placement.account_key(hive["master_login"]["claude"]) for hive in hives if "claude" in hive["master_login"]
-    }
+    logins = {placement.account_key(account) for hive in hives for account in placement.master_accounts(hive, "claude")}
     floored = [
         MASTER_FLOOR.format(account=row.name, window=floor[0], left=floor[1])
         for row in rows

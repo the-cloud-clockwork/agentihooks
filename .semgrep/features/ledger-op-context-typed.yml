@@ -1,0 +1,19 @@
+rules:
+  - id: feature-ledger-op-context-typed
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A function of a ledger module that takes the op context names it by the Protocol: ctx: OpContext, from
+      scripts.swarm_ledger.op_context. A ctx left untyped, or typed Any, object or the concrete class, lets an op
+      read or write a member no context promises it.
+    patterns:
+      - pattern: |
+          def $FUNCTION(..., ctx, ...):
+              ...
+      - pattern-not: |
+          def $FUNCTION(..., ctx: OpContext, ...):
+              ...
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_*.py
+        - ledger-op-context-typed.test.py

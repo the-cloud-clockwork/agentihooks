@@ -66,8 +66,8 @@ def test_vector_check_is_on_the_required_tests_path() -> None:
 
     root = VECTORS_FILE.parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
-    assert "lint" in workflow["jobs"]["gate-required"]["needs"]
-    steps = workflow["jobs"]["lint"]["steps"]
+    assert "lint-actions" in workflow["jobs"]["gate-required"]["needs"]
+    steps = workflow["jobs"]["lint-actions"]["steps"]
     checkout = next(
         step for step in steps if step.get("with", {}).get("repository") == "the-cloud-clockwork/agentibrain-kernel"
     )

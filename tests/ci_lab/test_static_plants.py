@@ -1,10 +1,13 @@
 import json
+import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from scripts import ci_wiring
+from scripts import ci_wiring, dead_code, size_limits
+from scripts.ci_lab.scheduler import UNIT_JOBS
 from scripts.ci_lab.static_gates import REGISTRY, STATIC_JOBS, WORKFLOW, StaticGate, discover
 
 pytestmark = pytest.mark.unit
@@ -23,7 +26,11 @@ def gates() -> dict[str, StaticGate]:
 
 def plants() -> dict[str, dict[str, Any]]:
     found = {path.stem: json.loads(path.read_text()) for path in sorted(PLANTS.glob("*.json"))}
-    return {name: spec for name, spec in found.items() if spec["gate"] not in STATIC_JOBS}
+    return {
+        name: spec
+        for name, spec in found.items()
+        if spec["gate"] not in STATIC_JOBS and spec["gate"].partition("/")[0] in STATIC_JOBS
+    }
 
 
 def exclusions() -> dict[str, dict[str, Any]]:
@@ -47,6 +54,15 @@ def test_a_gate_plant_is_named_after_its_gate() -> None:
     expected = {name: name.replace(".", "/") for name in plants()}
     expected["lint.threshold-pins"] = "lint/pin-thresholds-floors-and-allowlists-against-the-base"
     assert {name: spec["gate"] for name, spec in plants().items()} == expected
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_catalog_plant_outside_the_static_gates_is_a_unit_plant_named_after_its_gate() -> None:
+    found = {path.stem: json.loads(path.read_text())["gate"] for path in sorted(PLANTS.glob("*.json"))}
+    others = {name: gate for name, gate in found.items() if name not in plants() and gate not in STATIC_JOBS}
+    assert others
+    assert {name: gate.partition("/")[0] for name, gate in others.items()} == dict.fromkeys(others, UNIT_JOBS[0])
+    assert {name: name.replace(".", "/") for name in others} == others
 
 
 @pytest.mark.parametrize("name", sorted(plants()))
@@ -74,3 +90,23 @@ def test_an_exclusion_names_what_the_lab_lacks() -> None:
         assert set(entry["needs"]) <= NEEDS
     unsupplied = {name for name, gate in gates().items() if not supplied(gate)}
     assert unsupplied == {name for name, entry in exclusions().items() if UNSUPPLIED & set(entry["needs"])}
+
+
+@pytest.mark.feature("lab-dead-code-plant-reported")
+def test_the_dead_code_plant_adds_a_function_the_dead_code_gate_reports_on_this_tree(tmp_path: Path) -> None:
+    [edit] = plants()["lint.hold-dead-code-in-hooks-and-scripts"]["edits"]
+    [planted] = re.findall(r"def (\w+)\(", edit["after"].removesuffix(edit["before"]))
+    names = [path.relative_to(ROOT).as_posix() for path in size_limits.files(ROOT)]
+    for name in names:
+        if name.startswith(dead_code.SCOPE):
+            target = tmp_path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / name).read_bytes())
+    target = tmp_path / edit["path"]
+    target.write_text(target.read_text().replace(edit["before"], edit["after"]))
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-f", "--", "hooks", "scripts"], check=True)
+
+    found = dead_code.hits(tmp_path).get(edit["path"], [])
+
+    assert [line for line in found if f"unused function '{planted}'" in line] != []

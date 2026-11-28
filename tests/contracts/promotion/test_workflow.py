@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[3]
 
 NON_GATING: dict[str, str] = {
     "access-audit.yml": "audits collaborators and installed apps and alerts only on unapproved or unreadable access",
-    "chart-release.yml": "follows each worker image run and packages and publishes a chart only after a release",
     "ci-lab-image.yml": "builds, smokes and publishes the CI lab image",
     "count-record.yml": "records the dev suite test count that later pull request bases read",
     "coverage-stability.yml": "compares the measured lines of the newest dev commit's finished runs",
@@ -177,9 +176,11 @@ def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, Si
         "coverage-baseline",
         "flake-budget",
         "sonar",
+        "sonar-after-unit",
         "hierarchy-cpu",
         "tick-scale",
         "tick-pattern-tree",
+        "type-gate-tree",
     ],
 )
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
@@ -251,6 +252,18 @@ def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None
     for consumer in ("promotion-ready", "promote"):
         needs = _graded_needs(jobs[consumer])
         needs["tick-pattern-tree"].result = result
+        assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
+
+
+@pytest.mark.feature("type-gate-split-by-tier")
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_clean_whole_tree_type_check(result: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    tree = jobs["type-gate-tree"]
+    assert any(step.get("run") == "python -m scripts.type_gate --tree" for step in tree["steps"])
+    for consumer in ("promotion-ready", "promote"):
+        needs = _graded_needs(jobs[consumer])
+        needs["type-gate-tree"].result = result
         assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 

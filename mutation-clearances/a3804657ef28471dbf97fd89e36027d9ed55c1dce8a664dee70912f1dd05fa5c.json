@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__generation:8db6e209f17a76c93e8aed4d4b1c65dea55c4696d2b09f3c4b36930fec288223": {
+    "reader": "standards_reader",
+    "reason": "Adding XX around the same ownership-refusal sentence preserves PolicyError, refusal ordering and the ownership reason. The issue does not prescribe exact prose and introduces no parser."
+  }
+}

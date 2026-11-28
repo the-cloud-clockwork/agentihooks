@@ -62,8 +62,11 @@ ledger:
   persistence:
     size: 1Gi
     storageClassName: ""
+  cache:
+    sizeLimit: 512Mi
   env: {}
-  # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
+  # Secret env the ledger and API containers read. swarm.databaseEnv copies its shared database URL, and no other
+  # entry, into the controller, hub and worker containers, and into a worker hive unless workers.envFromSecrets is set.
   secretEnv: []
   resources:
     requests:
@@ -71,7 +74,7 @@ ledger:
       memory: 512Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 2Gi
+      memory: 2560Mi
       ephemeral-storage: 256Mi
 
 api:
@@ -205,6 +208,8 @@ controller:
   terminationGracePeriodSeconds: 300
   env:
     LANGFUSE_MCP_URL: ""
+    # The controller home dies with its pod, so an automatic swarm snapshot there restores nothing; a swarm's snapshot-minutes setting still takes them.
+    AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES: "0"
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
   secretEnv: []
   # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
@@ -232,13 +237,15 @@ controller:
       limits:
         memory: 128Mi
         ephemeral-storage: 64Mi
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 250m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Event hub: reactors on the swarm event bus. Two replicas share each reactor's durable consumer; a singleton
@@ -264,13 +271,15 @@ hub:
   # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
   # [{name, secretName, key, optional}].
   secretEnv: []
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
@@ -329,6 +338,9 @@ nats:
 workers:
   replicas: 0
   maxAgents: 20
+  sandboxProfiles:
+    seccomp: ""
+    apparmor: ""
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
   rollout:

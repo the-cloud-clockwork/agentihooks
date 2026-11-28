@@ -19,6 +19,7 @@ class Unit:
     key: str
     members: tuple[str, ...]
     manifest: str = field(default="", compare=False, repr=False)
+    manifest_digest: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

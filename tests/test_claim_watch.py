@@ -1,3 +1,4 @@
+import importlib.util
 import subprocess
 import sys
 import time
@@ -69,7 +70,7 @@ def hive(monkeypatch):
 
 @pytest.fixture
 def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
-    from scripts.tick.adapters import database_ledger
+    from scripts.tick.adapters import writer_client
 
     reads = []
 
@@ -85,7 +86,7 @@ def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
             return [self.request(slug, path)]
 
     module = ledger_client._ledger()
-    monkeypatch.setattr(database_ledger, "ResourceClient", Slow)
+    monkeypatch.setattr(writer_client, "ResourceClient", Slow)
     monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
     monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
     monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
@@ -320,6 +321,66 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
         )
     assert redis.reads == [KEY]
     assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
+
+
+@pytest.mark.feature("swarm-gates-platform-invocation")
+@pytest.mark.parametrize("import_platform", ["win32", "linux"])
+def test_swarm_gates_choose_the_platform_at_each_call(monkeypatch: pytest.MonkeyPatch, import_platform: str) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    spec = importlib.util.spec_from_file_location("isolated_swarm_gates", swarm_gates.__file__)
+    assert spec is not None and spec.loader is not None
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, "platform", import_platform)
+    spec.loader.exec_module(fresh)
+    calls = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict, session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == []
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert fresh.pretool("Bash", {}, "s1") == "stop"
+    assert calls == ["claim"]
+    monkeypatch.setattr(claim_watch, "check", lambda: None)
+    calls.clear()
+    assert fresh.pretool("Bash", {}, "s1") == "handoff"
+    assert calls == ["recycle"]
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == ["recycle"]
+
+
+@pytest.mark.feature("swarm-gates-platform-invocation")
+def test_windows_runs_neither_swarm_gate_at_the_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    calls: list[str] = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict[str, object], session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert calls == []
 
 
 @pytest.mark.wall_clock

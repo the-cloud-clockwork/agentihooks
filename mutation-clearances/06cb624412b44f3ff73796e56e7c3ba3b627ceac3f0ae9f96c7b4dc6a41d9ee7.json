@@ -1,0 +1,6 @@
+{
+  "scripts/review/gate.py:scripts.review.gate.x_queue_admit:d228f2f313e86f31f60753b3a3cd631d96b862e6a8f4a4be7e2ea24f0010dec4": {
+    "reader": "standards_reader",
+    "reason": "cast(None, queue_exit.require_fresh) returns require_fresh unchanged because gate.py imports cast from typing and nothing rebinds it, so the same freshness check runs."
+  }
+}

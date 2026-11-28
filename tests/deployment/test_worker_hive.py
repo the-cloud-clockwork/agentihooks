@@ -52,7 +52,7 @@ def startup(
     cli.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == "ledger writer serve" ]]; then\n'
-        '  printf "%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
+        '  printf "%s|%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" "${MALLOC_ARENA_MAX:-}" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
         '  if [[ "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
         "    trap 'printf stopped > \"$AGENTIHOOKS_HOME/writer-stopped\"; exit 0' TERM INT\n"
         '    printf %s "$$" > "$AGENTIHOOKS_HOME/writer.pid"\n'
@@ -212,12 +212,13 @@ def test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hiv
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer_status: str
 ) -> None:
     monkeypatch.setenv("WRITER_TEST_STATUS", writer_status)
+    monkeypatch.setenv("MALLOC_ARENA_MAX", "13")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://writer.example.test/swarm")
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 9, result.stderr
     assert (home / "writer-calls").read_text().splitlines() == [
-        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
-        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15|2",
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15|2",
     ]
 
 

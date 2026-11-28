@@ -153,7 +153,7 @@ def test_serve_answers_in_one_queue_group_across_hub_replicas():
 
     bus = Mock()
     slots.serve(bus)
-    bus.serve.assert_called_once_with("slots.*.*", "hub-slots", ANY, wait_ms=10_000)
+    bus.serve.assert_called_once_with("slots.*.*", "hub-slots", ANY, wait_ms=10_000, refusal=ANY)
 
 
 def test_a_take_without_a_reading_is_refused(hub):

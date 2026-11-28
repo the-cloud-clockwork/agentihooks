@@ -354,6 +354,9 @@ class Consumer:
             return FOREIGN
         launched = placed.launched_at or lease.now_ms(store)
         try:
+            from scripts.swarm import spawn_counts
+
+            spawn_counts.record(store, order.slug, current.harness, current.name, launched)
             store.put_agent(order.slug, replace(current, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
         except Exception:
             runtime.terminate(replace(held, pane_id=placed.pane_id))
@@ -414,6 +417,9 @@ class Consumer:
         return Ack(DONE if outcome.ok else FAILED, ack.target, "" if outcome.ok else outcome.detail)
 
     def apply(self, order: LaunchOrder) -> Ack | None:
+        cleanup = self.store.redis.hget(self.orders.receipt(order), "cleanup")
+        if cleanup is not None:
+            return self._cleanup_failed_launch(json.loads(cleanup))
         now = lease.now_ms(self.store)
         started = self.store.redis.hget(self.orders.receipt(order), "started")
         if started is not None:
@@ -503,7 +509,7 @@ class Consumer:
                 return slot["account"]
         return order.slot
 
-    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict[str, Any]) -> Ack:
+    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict[str, Any]) -> Ack | None:
         if refused := self.front_door_refusal(order, agent):
             return Ack("failed", {}, refused)
         config = self.store.config(order.slug)
@@ -540,7 +546,7 @@ class Consumer:
             return Ack("failed", {}, "retired")
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
-            return Ack("failed", {}, _failure(outcome))
+            return self._failed_spawn(order, agent, outcome)
         placed = outcome.value
         pid = placed.profile_decision.get("validation", {}).get("pid")
         try:
@@ -576,6 +582,24 @@ class Consumer:
             **({"remote_control": placed.remote_control} if placed.remote_control else {}),
         }
         return Ack("live", target, "", execution)
+
+    def _failed_spawn(self, order: LaunchOrder, agent: AgentRecord, outcome: Outcome) -> Ack | None:
+        pane = (outcome.value or {}).get("pane_id")
+        if not pane:
+            return Ack("failed", {}, _failure(outcome))
+        failed = replace(agent, pane_id=pane)
+        cleanup = {"agent": asdict(failed), "failure": _failure(outcome)}
+        self.store.redis.hset(self.orders.receipt(order), "cleanup", json.dumps(cleanup))
+        return self._cleanup_failed_launch(cleanup)
+
+    def _cleanup_failed_launch(self, cleanup: dict[str, Any]) -> Ack | None:
+        agent = AgentRecord(**cleanup["agent"])
+        try:
+            if not self.runtime.terminate(agent).ok:
+                return None
+        except Exception:
+            return None
+        return Ack("failed", agent.runtime_target, cleanup["failure"], {"pane_id": agent.pane_id})
 
     def _stop(self, agent: AgentRecord, failure: str) -> Ack:
         outcome = self.runtime.terminate(agent)

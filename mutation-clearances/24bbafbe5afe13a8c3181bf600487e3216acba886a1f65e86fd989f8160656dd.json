@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.xǁAdmissionǁfailed:cd2432a5b0f8959288455c67c35ba4b4a7822af8fdddc8d1c09b3ccd8f5e8993": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: Admission.store supplies RedisStore, the repository's only note_launch_failure implementation. It always stores the unchanged reason and writes a harness only when truthy. Both the empty string and None skip that write and the handler's avoidance update, admission TTL write and steering log. Both return the same acknowledgement and preserve prior avoidance; no observable output differs."
+  }
+}

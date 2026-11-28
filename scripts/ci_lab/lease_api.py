@@ -1,8 +1,10 @@
 """The lease API the scheduler serves: the only interface a lab worker calls, and the control routes a swarm calls on
 their own port with the lab's bearer token to mark heads hotfix, pause a class but its excepted heads and resume."""
 
+import base64
 import hmac
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -16,7 +18,9 @@ from scripts.ci_lab.leases import Grant, Leases
 
 __all__ = [
     "MAX_WAIT_MS",
+    "STALE",
     "Answer",
+    "Bundler",
     "ControlRoutes",
     "Reply",
     "UploadSigner",
@@ -27,9 +31,11 @@ __all__ = [
     "respond",
     "serve",
     "serve_control",
+    "unbundled",
 ]
 
 MAX_WAIT_MS = 30_000
+STALE = 426
 MAX_BODY_BYTES = 65_536
 LENGTH = "Content-Length"
 AUTHORIZATION = "Authorization"
@@ -37,6 +43,12 @@ UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
 Answer = Callable[[str, str, bytes, str | None], Reply]
+Bundler = Callable[[str], bytes | None]
+
+
+def unbundled(sha: str) -> bytes | None:
+    """The bundler port of a lease API served without one: no served repository's store holds any commit."""
+    return None
 
 
 class UploadSigner(Protocol):
@@ -115,17 +127,20 @@ def _grant(grant: Grant) -> dict[str, Any]:
         "slots": grant.slots,
         "expires_ms": grant.expires_ms,
         **({"manifest": grant.unit.manifest} if grant.unit.manifest else {}),
+        **({"manifest_digest": grant.unit.manifest_digest} if grant.unit.manifest_digest else {}),
+        **({"graded_commit": grant.graded_commit} if grant.graded_commit else {}),
     }
 
 
 def _lease(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
-    grants = leases.lease(
-        _text(data, "worker"),
-        _number(data, "free_slots"),
-        _texts(data, "capabilities"),
-        min(_number(data, "wait_ms"), MAX_WAIT_MS),
-    )
+    worker = _text(data, "worker")
+    free_slots = _number(data, "free_slots")
+    capabilities = _texts(data, "capabilities")
+    wait_ms = min(_number(data, "wait_ms"), MAX_WAIT_MS)
+    if leases.stale(worker):
+        return STALE, {"error": "stale worker"}
+    grants = leases.lease(worker, free_slots, capabilities, wait_ms)
     return 200, {"leases": [_grant(grant) for grant in grants]}
 
 
@@ -153,18 +168,37 @@ def _upload_url(leases: Leases, signer: UploadSigner, query: str, raw: bytes) ->
     return 200, {"url": signer.upload_url(job, fields["name"])}
 
 
+def _bundle(bundler: Bundler, leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
+    data = _body(raw)
+    job = _text(data, "job")
+    token = _text(data, "token")
+    if not leases.owns(job, token):
+        return _refused()
+    record = leases.queue.job(job)
+    if record is None or not record.graded_commit:
+        raise BadRequest
+    found = bundler(record.graded_commit)
+    if found is None:
+        return 404, {"error": "no served repository's store holds the graded commit"}
+    return 200, {"bundle": base64.b64encode(found).decode()}
+
+
 ROUTES: dict[tuple[str, str], Callable[[Leases, UploadSigner, str, bytes], Reply]] = {
     ("POST", "/lease"): _lease,
     ("POST", "/heartbeat"): _heartbeat,
     ("POST", "/complete"): _complete,
     ("GET", "/upload-url"): _upload_url,
 }
+BUNDLE_ROUTE = ("POST", "/bundle")
 
 
-def respond(leases: Leases, signer: UploadSigner, method: str, target: str, raw: bytes) -> Reply:
+def respond(
+    leases: Leases, signer: UploadSigner, method: str, target: str, raw: bytes, bundler: Bundler = unbundled
+) -> Reply:
     """Answer one worker request with its status and JSON body."""
     url = urlsplit(target)
-    route = ROUTES.get((method, url.path))
+    key = (method, url.path)
+    route = partial(_bundle, bundler) if key == BUNDLE_ROUTE else ROUTES.get(key)
     if route is None:
         return 404, {"error": "not found"}
     try:
@@ -230,14 +264,20 @@ def answer(
     target: str,
     raw: bytes,
     _authorization: str | None,
+    bundler: Bundler = unbundled,
 ) -> Reply:
     """Answer one lease port request through the lease API; the control routes answer only on the control port."""
-    return respond(leases, signer, method, target, raw)
+    return respond(leases, signer, method, target, raw, bundler)
 
 
 def answer_control(routes: ControlRoutes, method: str, target: str, raw: bytes, authorization: str | None) -> Reply:
     """Answer one control port request: a control route with its bearer token, any other request not found."""
     return command(routes, method, target, raw, authorization) or (404, {"error": "not found"})
+
+
+def _log_request(request: BaseHTTPRequestHandler, code: int | str = "-", size: int | str = "-") -> None:
+    line = re.sub(r"\?[^ ]*", "", request.requestline)
+    request.log_message('"%s" %s %s', line, str(code), str(size))
 
 
 def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
@@ -258,13 +298,19 @@ def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
+    handler = type(
+        BaseHTTPRequestHandler.__name__,
+        (BaseHTTPRequestHandler,),
+        {"do_GET": handle, "do_POST": handle, "log_request": _log_request},
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
-def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
+def serve(
+    host: str, port: int, leases: Leases, signer: UploadSigner, bundler: Bundler = unbundled
+) -> ThreadingHTTPServer:
     """Bind the lease API on host and port; the caller runs serve_forever."""
-    return bind(host, port, partial(answer, leases, signer))
+    return bind(host, port, partial(answer, leases, signer, bundler=bundler))
 
 
 def serve_control(host: str, port: int, routes: ControlRoutes) -> ThreadingHTTPServer:

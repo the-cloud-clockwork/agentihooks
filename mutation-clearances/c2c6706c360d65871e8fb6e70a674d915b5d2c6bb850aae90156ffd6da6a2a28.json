@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__owned:46a88528ad00c8dbd3cb8afa22f2d2ca38294a3e4b74801942ab4a5d849b0f24": {
+    "reader": "standards_reader",
+    "reason": "Capitalization leaves the unsafe-lock refusal and safety reason intact. The same validation predicate and PolicyError remain, with no exact-string consumer."
+  }
+}

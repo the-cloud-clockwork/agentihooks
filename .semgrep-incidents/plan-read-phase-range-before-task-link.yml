@@ -1,0 +1,21 @@
+rules:
+  - id: plan-read-phase-range-before-task-link
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Plan read took the phase plan range first and reached the task's own plan link only when the phase had none.
+      Each enhancement publish replaces its phase plan, so every other enhanced task in that phase read a sibling's
+      plan and plan read refused it with a missing slice anchor. Resolve the task's own link through its plans row
+      first and fall back to the phase range.
+    paths:
+      include:
+        - /scripts/swarm_ledger/plan_read.py
+        - plan-read-phase-range-before-task-link.py
+    patterns:
+      - pattern-inside: |
+          $REF = $PHASE.get("plan_ref")
+          ...
+      - pattern: |
+          if <... not $REF ...>:
+              ...
+              $REF = ...

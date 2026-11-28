@@ -1,12 +1,13 @@
 """Durable transcript cursors; a commit is a compare-and-set on ``revision``."""
 
-import fcntl
 import hashlib
 import json
 import os
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+
+from hooks.compat import fcntl
 
 
 class CursorConflict(Exception):

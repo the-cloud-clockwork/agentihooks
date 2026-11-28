@@ -52,6 +52,15 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
 
 
+class Unpushed(SwarmError):
+    """A worktree holds commits origin lacks: branch is the one a push would write and base the commit they follow."""
+
+    def __init__(self, message: str, branch: str, base: str) -> None:
+        super().__init__(message)
+        self.branch = branch
+        self.base = base
+
+
 def pushed(root: Path, recorded: str = "") -> bool:
     git = ["git", "-C", str(root)]
     local = _out([*git, "branch", "--show-current"], "cannot read the worktree branch")
@@ -68,9 +77,11 @@ def pushed(root: Path, recorded: str = "") -> bool:
         return True
     if remote or _out([*git, "rev-list", "--count", "origin/dev..HEAD"], "cannot count the worktree commits") != "0":
         target = branch if branch == local else f"HEAD:{branch}"
-        raise SwarmError(
+        raise Unpushed(
             f"the worktree {root} holds commits origin lacks; "
-            f"push them with git -C {root} push -u {remote_name} {target} before blocking"
+            f"push them with git -C {root} push -u {remote_name} {target} before blocking",
+            branch,
+            remote[0] if remote else "origin/dev",
         )
     return False
 

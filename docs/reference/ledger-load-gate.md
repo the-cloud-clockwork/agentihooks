@@ -377,7 +377,8 @@ The current workflow grades as follows:
 | Part | Current behavior |
 |---|---|
 | Load pairs | A five job matrix, `pair: [1, 2, 3, 4, 5]`. Each job starts one base and one head gate side by side on its own runner, base first on odd pairs and head first on even pairs |
-| Load measures | Write p50 and the busiest CPU window. Write p95 stays an absolute budget inside each gate run |
+| Load measures | Write p50 and `busiest_cores`, the busiest CPU window of the process that takes writes: the ledger API service on a revision with the API service, the one ledger server on a revision before the write cutover such as `726353637`, so both sides measure the same process. The read only ledger server's own window is printed as `read_busiest_cores` on head only and is not paired. Write p95 and the summed CPU of every server process stay absolute budgets inside each gate run |
+| Load evidence | Each pair uploads `load-pair-N` holding `base.log`, `head.log` and every server log of each side: `server.log` and `server-read.log`, including logs under `repeat/` when a write breach repeats the window |
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
 | Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'`, described under [Hierarchy CPU grading](#hierarchy-cpu-grading) |
@@ -489,7 +490,7 @@ A compare dispatch skips the `load` job and runs these instead:
 
 | Job | What it does |
 |---|---|
-| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and both server logs either way |
+| `compare` | A five job matrix, `pair: [1, 2, 3, 4, 5]`, one runner per pair. Each job extracts the base tree with `git archive`, copies the head's `tests/ledger_load/gate.py` into it so both sides run the same harness, and starts both load windows together on its runner, each with its own Redis database. Pairs 1, 3 and 5 start base first; pairs 2 and 4 start head first. The job fails when either side's own load gate fails, and uploads `compare-pair-N` holding `base.log`, `head.log` and every server log of each side, `server.log` and `server-read.log`, either way |
 | `compare-grade` | Runs after every pair job that was not cancelled. It downloads the five artifacts and runs `tests.ledger_load.paired` on them with `--margin "$SAME_CODE_MARGIN"` and `--same-code tests/ledger_load/compare_same_code_pairs.json` |
 
 The grade reads the last measure line of each log, takes the head over base
@@ -803,7 +804,7 @@ done
 | Item readers | 10, one single resource read a second each |
 | Page stream | one server-sent event stream held open through the run |
 | Duration | three bin sweeps of the server watcher: `(SWEEPS + 1) × BIN_SWEEP_EVERY × watch interval` = 3 × 15 × 2 s = 90 s |
-| Sampler | once a second: server CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
+| Sampler | once a second, for every ledger server process the run started (the ledger API service and the read only ledger server, or the one ledger server of a revision before the write cutover): CPU seconds from `/proc/<pid>/stat` per process and summed, and `Threads` and `VmRSS` from `/proc/<pid>/status` summed |
 
 ## Verdict
 
@@ -814,7 +815,7 @@ The run fails on any of these, each printed as a `::error::` line:
 | Failed requests | none | `N requests failed, first: …`; a rejected write (`write rejected: …`), a dropped page stream (`event stream: …`) and a sampler error (`server sampler: …`) each count as one |
 | Writes completed | 90% of expected | `N writes completed of M expected` |
 | Write latency | p95 at most 2.0 s | `write p95 Xs exceeds 2.0s` |
-| Server CPU | busiest 10 s window at most 1.0 core | `server CPU held X cores over 10s, budget 1.0`, or `no 10s window of server CPU was sampled` |
+| Server CPU | busiest 10 s window of every server process summed, at most 1.0 core | `server CPU held X cores over 10s, budget 1.0`, or `no 10s window of server CPU was sampled` |
 | Thread growth | 8 threads | `server threads kept growing: medians A, B, C; growth budget 8` |
 | Memory growth | 65,536 KiB (64 MiB) | `server RSS kept growing: medians A, B, C; growth budget 65536` |
 | Resource coverage | 60 s of samples after warmup | `server resource sampling did not cover 60s after warmup` |
@@ -860,12 +861,12 @@ Each run prints one JSON line with the measure, then the error lines:
 {"seconds": 90.0, "clients": 10, "write_every_s": 10.345, "writes": 90,
  "write_p50_s": 0.071, "write_p95_s": 0.178, "write_max_s": 0.31,
  "reads": 90, "read_p95_s": 0.05, "item_reads": 900, "item_read_p95_s": 0.02,
- "busiest_cores": 0.42, "errors": 0,
+ "busiest_cores": 0.18, "read_busiest_cores": 0.42, "errors": 0,
  "resources": [[1234.5, 6, 81234], [1235.5, 6, 81240], "…"],
  "budget": {"write_p95_s": 2.0, "cores": 1.0, "thread_growth": 8, "rss_growth_kib": 65536}}
 ```
 
-`resources` holds every sample as `[monotonic seconds, threads, RSS KiB]`, so a failing run shows exactly when the growth started. The `budget` object and the `seconds`, `clients` and `write_every_s` values come from code; the measured values are illustrative. On a failure the gate also prints the last 4000 characters of the server log.
+`busiest_cores` is the busiest 10 s window of the process that takes writes, the value `tests.ledger_load.paired` compares with the base. `read_busiest_cores` is the read only ledger server's own window. It appears only when the run started that server, and nothing pairs it. `resources` holds every sample as `[monotonic seconds, threads, RSS KiB]`, so a failing run shows exactly when the growth started. The `budget` object and the `seconds`, `clients` and `write_every_s` values come from code; the measured values are illustrative. On a failure the gate also prints the last 4000 characters of the server log.
 
 ## Running it by hand
 

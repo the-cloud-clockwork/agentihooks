@@ -16,6 +16,9 @@ from scripts import locked_tests
 
 ORIGINS = ("operator", "regression", "inventory")
 LEDGER_ITEM = r"ledger:[\w-]+/(tasks|phases|comments|chat)/[\w-]+"
+_DECODER = json.JSONDecoder()
+_TOKEN = re.compile(r"[^ \t\n\r]")
+_LEAD = re.compile(r"[ \t]*")
 
 
 def entry_path(map_path: Path, feature: str) -> Path:
@@ -35,6 +38,51 @@ def load(map_path: Path) -> dict[str, Any]:
             entries.append(entry)
         data["features"] = entries
     return data
+
+
+def _token(text: str, index: int) -> int:
+    """The index of the first character of ``text`` at or after ``index`` that is not JSON whitespace."""
+    return next(_TOKEN.finditer(text, index)).start()
+
+
+def _spans(text: str, start: int, count: int) -> list[tuple[int, int]]:
+    """The first and end index of each of the ``count`` values of the JSON object or array opening at ``start``."""
+    spans: list[tuple[int, int]] = []
+    index = start
+    for _ in range(count):
+        index = _token(text, index + 1)
+        if text[start] == "{":
+            index = _token(text, _token(text, _DECODER.raw_decode(text, index)[1]) + 1)
+        end = _DECODER.raw_decode(text, index)[1]
+        spans.append((index, end))
+        index = _token(text, end)
+    return spans
+
+
+def _encoded(text: str, index: int, value: object) -> str:
+    """``value`` as JSON on one line when ``index`` is on the first line of ``text``, else indented by two under the
+    leading whitespace of the line holding ``index`` and ended like that line."""
+    line = text[:index].rfind("\n") + 1
+    if not line:
+        return json.dumps(value)
+    ending = "\r\n" if text[line - 2 : line] == "\r\n" else "\n"
+    return json.dumps(value, indent=2).replace("\n", ending + next(_LEAD.finditer(text, line)).group())
+
+
+def with_entry(text: str, entry: dict[str, Any]) -> str:
+    """``text`` of a feature map with ``entry`` in place of the feature of its id, or first in the features array when
+    no feature has it, and every byte outside that entry unchanged."""
+    first = _token(text, 0)
+    root = _DECODER.raw_decode(text, first)[0]
+    start, end = dict(zip(root, _spans(text, first, len(root))))["features"]
+    spans = _spans(text, start, len(root["features"]))
+    for feature, (begin, finish) in zip(root["features"], spans):
+        if feature["id"] == entry["id"]:
+            return text[:begin] + _encoded(text, begin, entry) + text[finish:]
+    if not spans:
+        return text[:start] + _encoded(text, start, [entry]) + text[end:]
+    begin = spans[0][0]
+    return text[:begin] + _encoded(text, begin, entry) + "," + text[start + 1 : begin] + text[begin:]
 
 
 def _tests(root: Path) -> dict[str, str | None]:
@@ -58,12 +106,17 @@ def _is_feature(decorator: ast.expr) -> bool:
     return isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature"
 
 
-def _rules(root: Path) -> set[str]:
+def _rule_ids(folder: Path) -> list[str]:
     rules = []
-    for path in (root / ".semgrep/features").rglob("*"):
+    for path in folder.rglob("*"):
         if path.suffix in {".yaml", ".yml"} and not path.name.endswith((".test.yaml", ".test.yml")):
             data = yaml.safe_load(path.read_text())
             rules.extend(rule["id"] for rule in data["rules"])
+    return rules
+
+
+def _rules(root: Path) -> set[str]:
+    rules = _rule_ids(root / ".semgrep/features")
     if len(rules) != len(set(rules)):
         raise ValueError("duplicate feature rule id")
     return set(rules)
@@ -156,7 +209,9 @@ def _live_check(entry: dict, root: Path, name: str) -> None:
         raise ValueError(f"{name}: missing live check {command}")
 
 
-def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None]) -> list[str]:
+def _entry(
+    entry: dict, root: Path, feature_rules: set[str], declared: set[str], tests: dict[str, str | None]
+) -> list[str]:
     name = _require(entry, "id")
     _require(entry, "behaviour")
     _require(entry, "seam")
@@ -165,8 +220,11 @@ def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None
         raise ValueError(f"{name}: origin must be one of {', '.join(ORIGINS)}")
     _provenance(entry, name, origin)
     if origin == "operator" or "semgrep_rule" in entry:
-        if _require(entry, "semgrep_rule") not in rules:
+        if _require(entry, "semgrep_rule") not in feature_rules:
             raise ValueError(f"{name}: missing rule {entry['semgrep_rule']}")
+    for rule in entry.get("rules", []):
+        if rule not in declared:
+            raise ValueError(f"{name}: missing rule {rule}")
     if origin == "operator" or "live_check" in entry:
         _live_check(entry, root, name)
     nodes = _nodes(entry, name)
@@ -226,9 +284,10 @@ def validate(root: Path, map_path: Path, base: Path | None = None) -> int:
     if not isinstance(entries, list) or not entries:
         raise ValueError("features must be a nonempty list")
     rules, tests = _rules(root), _tests(root)
+    declared = rules.union(_rule_ids(root / ".semgrep-incidents"))
     ids, owned_tests = set(), set()
     for entry in entries:
-        owned_tests.update(_entry(entry, root, rules, tests))
+        owned_tests.update(_entry(entry, root, rules, declared, tests))
         if entry["id"] in ids:
             raise ValueError(f"duplicate feature {entry['id']}")
         ids.add(entry["id"])
@@ -248,7 +307,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--base", type=Path)
+    parser.add_argument("--record")
     args = parser.parse_args()
+    if args.record:
+        print(entry_path(Path("feature-map.json"), args.record).as_posix())
+        return
     base = args.base / "feature-map.json" if args.base else None
     count = validate(args.root, args.root / "feature-map.json", base)
     print(f"Feature map: {count} features, all rule, test and live check links exist")

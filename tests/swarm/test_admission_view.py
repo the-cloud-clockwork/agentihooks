@@ -1,6 +1,7 @@
 """The hub admission's narrow view: which rows it reads, the document its claim seeds read, the ledger's claim gate
 verdict it trusts and the root slots it keeps."""
 
+import time
 from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
@@ -8,13 +9,82 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import admission_view, readiness
+from scripts.swarm import admission_view, claim_hold, lab_capacity, readiness
 from scripts.swarm.health import focus_check
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm_ledger.api import resources
 from tests.helpers.narrow_ledger import DocLedger
 from tests.swarm.test_readiness import doc, task
 
 SLUG = "sw"
+RUNNING_FIELDS = ("state", "claimed_by", "awaiting", "done", "territory", "branch", "branch_repo", "pr_url")
+WAITING_FIELDS = (
+    "after_release",
+    "applied_at",
+    "awaiting",
+    "branch",
+    "claimed_by",
+    "contract",
+    "depends_on",
+    "enhancement",
+    "enhances",
+    "frozen",
+    "group_members",
+    "hive",
+    "kind",
+    "lane",
+    "merged_into",
+    "needs",
+    "out_of_scope",
+    "parked_on",
+    "phase",
+    "pr_url",
+    "rank",
+    "slice",
+    "state",
+    "workstation",
+)
+RELATED_FIELDS = (
+    "after_release",
+    "applied_at",
+    "awaiting",
+    "branch",
+    "branch_repo",
+    "claimed_by",
+    "contract",
+    "depends_on",
+    "description",
+    "done",
+    "enhancement",
+    "enhances",
+    "frozen",
+    "group_members",
+    "hive",
+    "kind",
+    "lane",
+    "merged_into",
+    "needs",
+    "out_of_scope",
+    "parked_on",
+    "phase",
+    "pr_url",
+    "rank",
+    "slice",
+    "state",
+    "territory",
+    "title",
+    "workstation",
+)
+RUNNING_ROW = {
+    "state": "claimed",
+    "claimed_by": "engineer@h-1",
+    "awaiting": "checks",
+    "done": False,
+    "territory": ["scripts/hub"],
+    "branch": "c1-branch",
+    "branch_repo": "org/repo",
+    "pr_url": "https://example.invalid/pull/9",
+}
 
 
 class Recording(DocLedger):
@@ -91,7 +161,10 @@ def test_the_view_reads_the_task_the_rows_it_names_and_the_running_rows_only(nar
 
     assert sorted(view.rows) == ["t1", "t2", "t3", "t4", "t5", "t6", "t7"]
     assert seen == ["row", "rows", "parts"]
-    assert narrow.ledger.selected == [{"ids": ["t2", "t3", "t4", "t5"]}, {"states": ("claimed", "pr")}]
+    assert narrow.ledger.selected == [
+        {"ids": ["t2", "t3", "t4", "t5"], "fields": RELATED_FIELDS},
+        {"states": ("claimed", "pr"), "fields": RUNNING_FIELDS},
+    ]
     assert narrow.ledger.exports == 0
     assert view.doc["overview"] == "o"
     assert [phase["id"] for phase in view.doc["phases"]] == ["p1"]
@@ -103,7 +176,42 @@ def test_a_task_with_nothing_named_reads_only_the_running_rows(narrow: SimpleNam
     view = narrow.view.task(SLUG, "t8", marks()[1])
 
     assert sorted(view.rows) == ["t6", "t7", "t8"]
-    assert narrow.ledger.selected == [{"states": ("claimed", "pr")}]
+    assert narrow.ledger.selected == [{"states": ("claimed", "pr"), "fields": RUNNING_FIELDS}]
+
+
+def oversized(task_id: str, **fields: Any) -> dict[str, Any]:
+    """A task row whose description alone takes half the ledger's reply cap."""
+    return task(task_id, description="x" * (resources.MAX_REPLY // 2), **fields)
+
+
+@pytest.mark.feature("hub-admission-running-fields")
+def test_running_rows_over_the_reply_cap_still_give_the_admission_its_view(narrow: SimpleNamespace) -> None:
+    narrow.found["tasks"] += [oversized("c1", kind="ops", applied_at=5, **RUNNING_ROW), oversized("c2", state="pr")]
+
+    view = narrow.view.task(SLUG, "t8", marks()[1])
+
+    assert sorted(view.rows) == ["c1", "c2", "t6", "t7", "t8"]
+    assert view.rows["c1"] == {"id": "c1", **RUNNING_ROW}
+    assert view.rows["c2"] == {"id": "c2", "state": "pr"}
+
+
+@pytest.mark.feature("hub-admission-running-fields")
+def test_a_running_group_member_keeps_what_its_readers_take(narrow: SimpleNamespace) -> None:
+    narrow.found["tasks"] += [
+        task("g0", group_members=["g1"]),
+        task("g1", state="claimed", description="member work", kind="ops", applied_at=7, territory=["scripts/hub"]),
+    ]
+
+    row = narrow.view.task(SLUG, "g0", marks()[1]).rows["g1"]
+
+    assert {key: row[key] for key in ("title", "description", "phase", "kind", "applied_at", "territory")} == {
+        "title": "title g1",
+        "description": "member work",
+        "phase": "p1",
+        "kind": "ops",
+        "applied_at": 7,
+        "territory": ["scripts/hub"],
+    }
 
 
 @pytest.mark.feature("hub-admission-narrow-read")
@@ -195,9 +303,24 @@ def test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive(n
     ]
 
     assert narrow.view.waiting(SLUG, lambda: []) == 1
-    assert narrow.ledger.selected == [{"states": ("open",), "pinned": True}, {"ids": ["t8"]}]
+    assert narrow.ledger.selected == [
+        {"states": ("open",), "pinned": True, "fields": WAITING_FIELDS},
+        {"ids": ["t8"], "fields": RELATED_FIELDS},
+    ]
     assert narrow.ledger.judged == ["tasks/w1"]
     assert narrow.ledger.exports == 0
+
+
+@pytest.mark.feature("hub-admission-running-fields")
+def test_pinned_open_rows_over_the_reply_cap_keep_the_same_root_waiting_count(narrow: SimpleNamespace) -> None:
+    narrow.found["tasks"] += [
+        oversized("w1", workstation=True),
+        oversized("w2", hive="root", depends_on=["t8"]),
+        oversized("w3", hive="hive-b"),
+    ]
+
+    assert narrow.view.waiting(SLUG, lambda: []) == 1
+    assert narrow.ledger.judged == ["tasks/w1"]
 
 
 def test_a_swarm_with_no_pinned_task_keeps_no_root_slot(narrow: SimpleNamespace) -> None:
@@ -318,3 +441,34 @@ def test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear(
     assert ("release config", SLUG) in seen
     assert ("apply rows", ["t1"]) in seen
     assert ("lab fix", "") in seen
+
+
+def lab_behind(store: RedisStore, slug: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES", "10")
+    capacity = {
+        "classes": {claim_hold.LAB_CLASS: {"pending": 4, "running": 2, "predicted_wait_s": 900}},
+        "slots": {"total": 2, "busy": 2},
+        "shed": [],
+        "utilisation": 1.0,
+        "budget_fraction": 1.0,
+    }
+    monkeypatch.setattr(lab_capacity, "read", lambda url: capacity)
+    assert lab_capacity.capture(store, slug, "http://lab.invalid", int(time.time() * 1000))
+
+
+@pytest.mark.feature("hub-admission-composed-admits-gate")
+def test_the_composed_admits_gate_holds_eng_behind_a_slow_lab_and_refuses_every_lane_while_paused(
+    narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eng, ci = task("t1"), task("t2", lane="ci")
+    rows = {row["id"]: row for row in (eng, ci)}
+    running = replace(narrow.store.config(SLUG), state="running")
+    clear = admission_view.admits(narrow.store, SLUG, running, rows)
+    lab_behind(narrow.store, SLUG, monkeypatch)
+
+    behind = admission_view.admits(narrow.store, SLUG, running, rows)
+    paused = admission_view.admits(narrow.store, SLUG, replace(running, state="paused"), rows)
+
+    assert (clear(eng), clear(ci)) == (True, True)
+    assert (behind(eng), behind(ci)) == (False, True)
+    assert (paused(eng), paused(ci)) == (False, False)

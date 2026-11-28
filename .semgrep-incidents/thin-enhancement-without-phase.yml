@@ -1,0 +1,12 @@
+rules:
+  - id: thin-enhancement-without-phase
+    languages: [python]
+    severity: ERROR
+    message: An enhancement plan task add must name its phase, so its planner always has a phase to publish its plan into.
+    paths:
+      include:
+        - /scripts/tick/steps/thin.py
+        - thin-enhancement-without-phase.py
+    patterns:
+      - pattern: '{"op": "task_add", ..., "enhances": $TARGET, ...}'
+      - pattern-not: '{"op": "task_add", ..., "phase": $PHASE, ...}'

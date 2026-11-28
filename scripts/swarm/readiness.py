@@ -14,7 +14,7 @@ from scripts.events.bus import Bus, Delivery, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.scope import LANES
-from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
+from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, offer_quota, release_wait
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.probe import ROOT
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmError, connect
@@ -49,6 +49,11 @@ class Snapshot:
     def classes(self) -> Classes:
         """The classes of the snapshot's offers, worked out once for every read of the snapshot."""
         return _classes(self.doc)
+
+    @cached_property
+    def admitted(self) -> frozenset[str] | None:
+        """The focus queue of the snapshot's document, worked out once for every claimable check over it."""
+        return freeze.admitted(self.doc, self.graph)
 
 
 def _classes(doc: dict[str, Any]) -> Classes:
@@ -130,19 +135,19 @@ class Source:
         )
 
 
-def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
+def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str, admitted_queue: Any = freeze.UNCACHED) -> bool:
     return (
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and not claim_hold.holds(task, rows, doc, graph, fix)  # pyright: ignore[reportUnknownArgumentType]
+        and not claim_hold.holds(task, rows, doc, graph, fix, admitted_queue)  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
 def claimable(task: dict, lane: str, view: Snapshot) -> bool:
     return (
         task.get("lane") == lane
-        and ready(task, view.rows, view.doc, view.graph, view.fix)
+        and ready(task, view.rows, view.doc, view.graph, view.fix, admitted_queue=view.admitted)
         and not view.claimed(task["id"])
         and view.admits(task)
     )
@@ -164,7 +169,11 @@ def queue_name(slug: str, lane: str) -> str:
 
 
 def offer(task: dict[str, Any], view: Snapshot, now_ms: int) -> Envelope:
-    data: dict[str, Any] = {"lane": task["lane"], "generation": generation(task)}
+    data: dict[str, Any] = {
+        "lane": task["lane"],
+        "generation": generation(task),
+        "quota": offer_quota.restrictions(task),
+    }
     if hive := task.get("hive") or (ROOT if task.get("workstation") else None):
         data["hive"] = hive
     if needs := task.get("needs"):
@@ -279,7 +288,7 @@ def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
     kept: list[Envelope] = []
 
     def swept(event: Envelope) -> bool:
-        if stale(event, view):
+        if stale(event, view) or event.data.get("quota") != offer_quota.restrictions(view.rows[event.key]):
             return True
         kept.append(event)
         return False

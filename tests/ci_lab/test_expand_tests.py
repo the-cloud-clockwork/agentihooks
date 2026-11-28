@@ -2,13 +2,14 @@ import copy
 import hashlib
 import json
 import subprocess
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import digests, executors, expand_tests, scheduler
+from scripts.ci_lab import digests, expand_tests, scheduler
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import LocalObjects, manifest_folder
 from scripts.ci_lab.units import Unit
@@ -204,6 +205,7 @@ def test_broad_reads_the_tracer_signals(record: dict[str, Any], expected: bool) 
     assert expand_tests.broad(record) is expected
 
 
+@pytest.mark.feature("lab-fingerprints-hash-once-per-call")
 def test_fingerprints_are_golden() -> None:
     tree = {
         "pyproject.toml": b"[project]\n",
@@ -221,6 +223,62 @@ def test_fingerprints_are_golden() -> None:
         "tests/test_alpha.py::test_first": "ed5f3ba8a40286607a29357d071cc0a880c91abd882b321d70b64b723311c74f",
         "tests/test_alpha.py::test_second": "f0b37256e2d223dbdeb48a0dc09112641b9ceeebe91963ffcc955a652f3131ee",
     }
+
+
+class _CountingTree(Mapping[str, bytes]):
+    """A tree wrapper counting the ``get`` reads ``_blob`` makes against each path."""
+
+    def __init__(self, data: Mapping[str, bytes]) -> None:
+        self._data = dict(data)
+        self.reads: dict[str, int] = {}
+
+    def get(self, path: str, default: bytes | None = None) -> bytes | None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        self.reads[path] = self.reads.get(path, 0) + 1
+        return self._data.get(path, default)
+
+    def __getitem__(self, path: str) -> bytes:
+        return self._data[path]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+def _manifest_sharing_one_file(count: int) -> dict[str, Any]:
+    return {
+        "units": [],
+        "tests": {
+            f"tests/test_shared.py::test_{index}": {"units": [], "files": ["data/shared.json"], "escapes": False}
+            for index in range(count)
+        },
+    }
+
+
+@pytest.mark.feature("lab-fingerprints-hash-once-per-call")
+def test_fingerprints_hashes_a_shared_opened_file_the_same_number_of_times_for_few_or_many_tests() -> None:
+    contents = {"data/shared.json": b"{}\n", "tests/test_shared.py": b"def test_0():\n    pass\n"}
+    few = _CountingTree(contents)
+    expand_tests.fingerprints(_manifest_sharing_one_file(2), few)
+    many = _CountingTree(contents)
+    expand_tests.fingerprints(_manifest_sharing_one_file(30), many)
+    assert few.reads["data/shared.json"] == many.reads["data/shared.json"]
+
+
+@pytest.mark.feature("lab-fingerprints-hash-once-per-call")
+def test_fingerprints_keys_a_missing_opened_file_the_same_as_a_tree_that_never_held_it() -> None:
+    manifest = {
+        "units": [],
+        "tests": {"tests/test_missing.py::test_one": {"units": [], "files": ["data/outside.txt"], "escapes": False}},
+    }
+    tree_without = {"tests/test_missing.py": b"def test_one():\n    pass\n"}
+    tree_with = {**tree_without, "data/outside.txt": b"content\n"}
+    lacking = expand_tests.fingerprints(manifest, tree_without)
+    still_lacking = expand_tests.fingerprints(manifest, dict(tree_without))
+    holding = expand_tests.fingerprints(manifest, tree_with)
+    assert lacking == still_lacking
+    assert lacking != holding
 
 
 @pytest.mark.feature("lab-mutant-unit-unlisted-tests")
@@ -280,9 +338,28 @@ def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path
         (repository / path).write_text(text)
     _git(repository, "add", "-A")
     _git(repository, "commit", "-qm", "extra")
-    runs = executors._test_files(repository)  # pyright: ignore[reportPrivateUsage]
-    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, _tree(repository)))
+    tree = _tree(repository)
+    runs = expand_tests.unlisted_modules({"tests": {}}, tree)
+    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, tree))
     assert "tests/inner/test_deep.py" in runs
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_unlisted_modules_lists_the_test_modules_that_hold_no_manifest_test() -> None:
+    tree = {path: text.encode() for path, text in FILES.items()}
+    assert expand_tests.unlisted_modules(MANIFEST, tree) == []
+    added = ["tests/test_new.py", "tests/inner/test_deep.py", "tests/new_helper.py", "scripts/test_tool.py"]
+    tree.update(dict.fromkeys(added, b""))
+    found = expand_tests.unlisted_modules(MANIFEST, tree)
+    assert found == ["tests/inner/test_deep.py", "tests/test_new.py"]
+    assert set(found) <= set(expand_tests.unlisted_test_hashes(MANIFEST, tree))
+    assert expand_tests.unlisted_modules({"tests": {}}, tree) == [
+        "tests/inner/test_deep.py",
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_group.py",
+        "tests/test_new.py",
+    ]
 
 
 def _manifest(*tests: str) -> dict[str, Any]:

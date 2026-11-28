@@ -1,6 +1,7 @@
 import sqlite3
 from contextlib import closing
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -143,7 +144,7 @@ def test_only_the_swarm_acknowledges_a_nonnegative_revision(repo, operation, mes
     [({"rev": 5}, 0, 0, True), ({"rev": 5, "events_ack": 3}, 3, 3, False), ({"rev": 5, "events_ack": 3}, 4, 4, True)],
 )
 def test_an_acknowledgement_marks_the_ledger_dirty_only_when_it_advances(meta, revision, after, dirty):
-    ctx = SimpleNamespace(meta=meta, dirty=False)
+    ctx: Any = SimpleNamespace(meta=meta, dirty=False)
     assert ledger_events_ack.apply({}, ack(revision), ctx) is True
     assert (ctx.meta["events_ack"], ctx.dirty) == (after, dirty)
 

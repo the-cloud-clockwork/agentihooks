@@ -647,17 +647,25 @@ def _expire(
     records: dict[str, StepRecord],
     found: pool.Pass,
     clock: Callable[[], float],
+    apply: Appliers,
 ) -> None:
-    """Stop waiting on every submitted step whose lane expired, recording it ended on the pass and in the dropped set
-    of ``lost``, or in its cut set when only the reserve it leaves to a step that needs it ran out.
+    """End every submitted step whose run ended, then stop waiting on every one whose lane expired, recording it
+    ended on the pass and in the dropped set of ``lost``, or in its cut set when only the reserve it leaves to a step
+    that needs it ran out.
 
-    A step that had not started is skipped and never starts. A step already running is recorded cut, its wall counted
+    A step whose run ended is ended with its own record, its writes applied through ``apply`` on this thread and a
+    skipped one joining the dropped set, before any step is recorded cut or skipped, whether or not its lane expired.
+    A step that had not started is skipped and never starts. A step still running is recorded cut, its wall counted
     from its own start and its writes dropped; its run goes on under its own budget, and only a run past that budget
-    journals it abandoned.
+    journals it abandoned. A step whose run ends while those writes are applied is left for the next collection.
     """
     dropped, cut = lost
+    for future in [future for future in running if future.done()]:
+        step, _, _ = running.pop(future)
+        records[step.name] = _ended(found, _applied(future.result(), apply))
+        dropped.update({step.name} if records[step.name].skipped else ())
     for future, (step, start, lane) in list(running.items()):
-        if lane.expired:
+        if lane.expired and not future.done():
             running.pop(future)
             (dropped if _drops(step, dropped, found) else cut).add(step.name)
             began = start.close()
@@ -742,12 +750,8 @@ def _eager(
                     time.sleep(SETTLE_S)
                 continue
             timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []) + ended)
-            done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
-            for future in done:
-                step, _, _ = running.pop(future)
-                records[step.name] = _ended(found, _applied(future.result(), apply))
-                dropped.update({step.name} if records[step.name].skipped else ())
-            _expire(running, (dropped, cut), records, found, clock)
+            wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
+            _expire(running, (dropped, cut), records, found, clock, apply)
     finally:
         for future in submitted:
             future.cancel()

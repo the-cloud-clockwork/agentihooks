@@ -1,0 +1,25 @@
+rules:
+  - id: lab-empty-chmods-folder-unconditionally
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A folder's mode is changed before its entries are removed, with no look at the mode it already has. The system
+      refuses a mode change for a caller that is not the owner, whatever mode it asks for. On 25 November two lab
+      workers crash looped at start on this: their work root is an emptyDir owned by root with mode 777, and the
+      worker runs as user 1001 with every capability dropped. Change the mode only when the folder lacks an owner
+      bit, so an open folder of another user is emptied as it is.
+    paths:
+      include:
+        - /scripts/ci_lab/worktrees.py
+        - lab-empty-chmods-folder-unconditionally.py
+    pattern-either:
+      - pattern: |
+          $FOLDER.chmod(...)
+          ...
+          for $ENTRY in $FOLDER.iterdir():
+              ...
+      - pattern: |
+          os.chmod($FOLDER, ...)
+          ...
+          for $ENTRY in $FOLDER.iterdir():
+              ...

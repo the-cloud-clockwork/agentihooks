@@ -123,7 +123,8 @@ def tool_versions(lock: dict, destination: Path) -> dict:
     for name, artifact in lock["tools"].items():
         if "companion" in artifact:
             result = subprocess.run([str(destination / name), "--help"], check=True, capture_output=True, text=True)
-            if not result.stdout.startswith(f"Usage: {name} "):
+            usage = f"usage: {destination / name} " if name == "bwrap" else f"Usage: {name} "
+            if not result.stdout.startswith(usage):
                 raise ValueError(f"binary usage mismatch: {name}")
             versions[name] = f"{name} {artifact['version']} sha256:{checksum(destination / name)}"
         else:
