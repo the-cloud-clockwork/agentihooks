@@ -141,8 +141,6 @@ SLOW_STEPS = frozenset(
         "master stall",
         "prompt stall",
         "retire idle master",
-        "ledger watchdog",
-        "ledger probe",
         "prompt backlog",
         "host pressure",
         "hive ledger",
@@ -162,6 +160,8 @@ SLOW_STEPS = frozenset(
 )
 CRITICAL_STEPS = frozenset(
     {
+        "ledger watchdog",
+        "ledger probe",
         "config load",
         "ledger state",
         "exits sweep",

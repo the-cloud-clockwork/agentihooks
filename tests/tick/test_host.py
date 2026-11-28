@@ -115,8 +115,8 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         ("hive ledger", "wrapper probes"),
         ("ledger health", "wrapper probes"),
         ("host pressure", "wrapper health"),
-        ("ledger watchdog", "wrapper health"),
-        ("ledger probe", "wrapper health"),
+        ("ledger watchdog", "before"),
+        ("ledger probe", "before"),
         ("prompt backlog", "wrapper health"),
         ("command runner", "wrapper commands"),
         ("urgent hold", "wrapper phases"),
@@ -133,7 +133,7 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in host.STEPS:
         assert step in registered
-        slow = {"hive ledger", "host pressure", "ledger watchdog", "ledger probe", "prompt backlog"}
+        slow = {"hive ledger", "host pressure", "prompt backlog"}
         lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
@@ -150,16 +150,23 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
     ]
 
 
-def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_health_steps_return_pressure_and_backlog_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3", "ran 5"]
+    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 3"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
-        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
-        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
         ("call", sweep.notify_drains, STORE),
+    ]
+
+
+def test_the_before_group_returns_watchdog_then_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    assert _run("before", calls, _pass(), monkeypatch) == ["ran 1", "ran 2"]
+    assert calls == [
+        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
+        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
     ]
 
 

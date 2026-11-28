@@ -706,12 +706,12 @@ def run_tick(
         )
         timing.keep()
         budgets.resolve(store, slug)
-        run_group("before")
         if store.config(slug).state == "stopped":
             actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
+        before = run_group("before", **state)
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
@@ -725,10 +725,10 @@ def run_tick(
         finally:
             host_steps.raise_held(wrapper.judging)
         if "stop" in box or wrapper.ended is not None:
-            return box.get("stop") or wrapper.ended or []
+            return [*before, *(box.get("stop") or wrapper.ended or [])]
         doc = timing.call(ledger_client.pass_state, ledger, slug)
         ended = report_steps.FULL
-        return wrapper.actions(records)
+        return [*before, *wrapper.actions(records)]
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)

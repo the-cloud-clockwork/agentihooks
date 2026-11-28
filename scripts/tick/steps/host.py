@@ -31,6 +31,7 @@ from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
+BEFORE = "before"
 REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "hive drain notice", "outbox migration"})
 VIEW_RESERVE_S = 20.0
 PENDING_VIEW = object()
@@ -278,8 +279,8 @@ STEPS = (
     CallStep("hive ledger", "wrapper probes", held(_hive_ledger), lane=SLOW),
     CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
     CallStep("host pressure", "wrapper health", held(_host_pressure), lane=SLOW),
-    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog), lane=SLOW),
-    CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
+    CallStep("ledger watchdog", BEFORE, held(_ledger_watchdog), lane=Lane("tick")),
+    CallStep("ledger probe", BEFORE, held(_ledger_probe), needs=frozenset({"ledger watchdog"}), lane=Lane("tick")),
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold), reads=hook_domains("doc")),

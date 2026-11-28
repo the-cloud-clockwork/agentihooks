@@ -75,7 +75,6 @@
   "step ledger health: no reads",
   "step ledger probe: no effects",
   "step ledger probe: no feature",
-  "step ledger probe: no needs",
   "step ledger probe: no reads",
   "step ledger probe: no writes",
   "step ledger watchdog: no effects",
