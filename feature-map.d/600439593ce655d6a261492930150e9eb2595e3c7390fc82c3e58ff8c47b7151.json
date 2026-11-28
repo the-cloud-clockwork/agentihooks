@@ -1,0 +1,21 @@
+{
+  "id": "tick-quota-thin-cpu",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-quota-thin-cpu",
+  "behaviour": "The quota notice and thin task pass tick steps keep their decisions while their own CPU stays a few seconds per pass. The thin task check returns the same problems and seam verdicts as before, scans each part's observations once, and grades a task whose id, description, territory and kind are unchanged once per process, through a memo bounded at 4096 tasks, so a second thin task pass over an unchanged doc writes the same ledger operations and master notice and grades no task again. Quota notice refresh returns the same ordered actions, sends the same hurry, handoff warning and stale notices, records the same notice and warning lives and writes the same capacity decision for working agents at hurry, handoff, healthy, unknown and missing accounts.",
+  "seam": "scripts.swarm.thin_task.thin and thin_task._named_seam, scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass, and scripts.swarm.quota_notice.refresh with the decision capacity.apply writes",
+  "tests": [
+    "tests/swarm/test_thin_task_cpu.py::test_thin_and_named_seam_pin_each_corpus_task",
+    "tests/swarm/test_thin_task_cpu.py::test_a_boundary_touching_its_observation_is_no_seam",
+    "tests/swarm/test_thin_task_cpu.py::test_named_seam_scans_the_observations_of_each_part_once",
+    "tests/swarm/test_thin_task_cpu.py::test_a_second_grading_of_an_unchanged_task_scans_no_seam",
+    "tests/swarm/test_thin_task_cpu.py::test_an_edited_task_is_graded_again_after_its_first_grading",
+    "tests/swarm/test_thin_task_cpu.py::test_a_returned_problem_list_is_the_callers_own",
+    "tests/swarm/test_thin_task_cpu.py::test_the_grading_memo_forgets_only_the_oldest_task_past_four_thousand_ninety_six",
+    "tests/tick/steps/test_thin_task_pass.py::test_a_second_pass_over_an_unchanged_doc_writes_the_same_and_grades_no_task_again",
+    "tests/swarm/test_quota_notice_decisions.py::test_refresh_returns_the_pinned_actions_for_mixed_agents",
+    "tests/swarm/test_quota_notice_decisions.py::test_refresh_sends_the_pinned_notices_and_records_each_life",
+    "tests/swarm/test_quota_notice_decisions.py::test_refresh_writes_the_pinned_decision",
+    "tests/swarm/test_quota_notice_decisions.py::test_a_second_refresh_sends_nothing_new"
+  ]
+}

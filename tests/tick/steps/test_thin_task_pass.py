@@ -483,3 +483,28 @@ def test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_d
     assert found.inbox.sent == []
     ctx.stamp.assert_not_called()
     ctx.record.assert_not_called()
+
+
+@pytest.mark.feature("tick-quota-thin-cpu")
+def test_a_second_pass_over_an_unchanged_doc_writes_the_same_and_grades_no_task_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+    named = thin_task._named_seam  # pyright: ignore[reportPrivateUsage]
+
+    def counted(text: str) -> bool:
+        seen.append(text)
+        return named(text)
+
+    monkeypatch.setattr(thin_task, "_named_seam", counted)
+    rows = [THIN, {**THIN, "id": "t2", "description": FULL, "territory": ["scripts/tick/steps"]}]
+    first = _run([dict(row) for row in rows])
+    graded = list(seen)
+    second = _run([dict(row) for row in rows])
+    assert first.lines == ["queued enhance-t1 for thin task t1"]
+    assert (second.lines, _operations(second), second.inbox.sent) == (
+        first.lines,
+        _operations(first),
+        first.inbox.sent,
+    )
+    assert graded == seen == ["Fix the claim.", FULL]
