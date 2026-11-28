@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 
 def bundles_through_a_temp_file(store: Path, ref: str) -> bytes:
@@ -13,6 +14,17 @@ def bundles_through_a_temp_file(store: Path, ref: str) -> bytes:
 def checks_out_into_the_default_temp_folder() -> Path:
     # ruleid: lab-scheduler-temp-file-outside-its-store
     return Path(tempfile.mkdtemp())
+
+
+def names_a_temp_file_through_the_imported_name() -> str:
+    # ruleid: lab-scheduler-temp-file-outside-its-store
+    with NamedTemporaryFile(suffix=".bundle") as handle:
+        return handle.name
+
+
+def reads_the_default_temp_folder() -> str:
+    # ruleid: lab-scheduler-temp-file-outside-its-store
+    return tempfile.gettempdir()
 
 
 def bundles_to_standard_output(store: Path, ref: str) -> bytes:
