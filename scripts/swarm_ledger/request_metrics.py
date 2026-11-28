@@ -1,20 +1,24 @@
 import argparse
+import bisect
+import fcntl
 import json
 import math
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
 from _thread import LockType
 from collections import deque
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request
 
@@ -24,6 +28,8 @@ SLOW_SECONDS = 5.0
 DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
+SPOOL_SUFFIX = ".spool"
+SPOOL_BYTES = 32 << 20
 TIMING_FILE = "AGENTIHOOKS_LEDGER_TIMING_FILE"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
 STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
@@ -153,6 +159,34 @@ def hold(row: Row) -> None:
     SAMPLES.append(row)
 
 
+def sample_row(ended: float, method: str, route: str, wall: float, cpu: float, lock_wait: float, waits: Timing) -> Row:
+    """The stored sample of one request that ended at ``ended``: its method, route, wall, CPU and waits and each write
+    substep's wall."""
+    hierarchy, outbox, refresh, events = (waits.steps.get(name, 0.0) for name in STEPS)
+    return (
+        ended,
+        method,
+        route,
+        wall,
+        cpu,
+        lock_wait,
+        waits.client_wait,
+        waits.postgres_wait,
+        hierarchy,
+        outbox,
+        refresh,
+        events,
+    )
+
+
+def placed(rows: list[Row]) -> None:
+    """Hold ``rows`` among the held samples in the time order the retention and eviction reads rely on."""
+    at = bisect.bisect_right(SAMPLES, min(rows)[0], key=lambda row: row[0])
+    later = [SAMPLES.pop() for _ in range(len(SAMPLES) - at)]
+    for row in sorted([*rows, *later]):
+        hold(row)
+
+
 def record(
     method: str,
     route: str,
@@ -164,23 +198,9 @@ def record(
     global EVICTED_THROUGH
 
     waits = Timing() if waits is None else waits
-    hierarchy, outbox, refresh, events = (waits.steps.get(name, 0.0) for name in STEPS)
     with GUARD:
         ended = time.time()
-        row: Row = (
-            ended,
-            method,
-            route,
-            wall,
-            cpu,
-            lock_wait,
-            waits.client_wait,
-            waits.postgres_wait,
-            hierarchy,
-            outbox,
-            refresh,
-            events,
-        )
+        row = sample_row(ended, method, route, wall, cpu, lock_wait, waits)
         hold(row)
         if JOURNAL is not None:
             PENDING.append(row)
@@ -189,7 +209,7 @@ def record(
             EVICTED_THROUGH = max(EVICTED_THROUGH, expired[0])
 
 
-def journal_rows(path: Path) -> Iterator[list]:
+def journal_rows(path: Path) -> Iterator[list[Any]]:
     try:
         lines = path.read_text().splitlines()
     except FileNotFoundError:
@@ -270,6 +290,64 @@ def replace_lines(path: Path, lines: list) -> None:
     Path(staged).replace(path)
 
 
+@contextmanager
+def exclusive(path: Path) -> Generator[None]:
+    """Hold the lock every process takes on the spool at ``path`` to add samples to it or take them from it."""
+    with path.with_suffix(".lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def spool(row: Row) -> None:
+    """Append one sample row to the spool beside this host's ledger journal for its ledger server to take, first
+    compacting a spool no server takes once it passes its byte cap; a host with no ledger folder keeps none."""
+    from scripts.swarm_ledger import ledger_link
+
+    link: Any = ledger_link
+    folder: Path = link.folder()
+    if not folder.is_dir():
+        return
+    path = (folder / JOURNAL_NAME).with_suffix(SPOOL_SUFFIX)
+    with exclusive(path):
+        if path.is_file() and path.stat().st_size > SPOOL_BYTES:
+            replace_lines(path, compacted(path))
+        append_lines(path, [["s", *row]])
+
+
+def compacted(path: Path) -> list[list[Any]]:
+    """The newest rows spooled at ``path`` inside the retention window, at most the sample capacity of them."""
+    floor = time.time() - RETENTION_SECONDS
+    return [row for row in journal_rows(path) if row[1] >= floor][-MAX_SAMPLES:]
+
+
+def drained(path: Path) -> list[Row]:
+    """The sample rows spooled at ``path``, read and emptied under its lock; none while nothing is spooled."""
+    if not (path.is_file() and path.stat().st_size):
+        return []
+    with exclusive(path):
+        rows = list(journal_rows(path))
+        path.write_text("")
+    return [tuple(row[1:]) for row in rows if row[0] == "s"]
+
+
+def absorb() -> None:
+    """Hold the samples other processes spooled beside this process's journal and queue them for its next journal
+    write; a spool that cannot be taken is named and left for a later pass."""
+    if JOURNAL is None:
+        return
+    try:
+        rows = drained(JOURNAL.with_suffix(SPOOL_SUFFIX))
+    except OSError as exc:
+        sys.stderr.write(f"request metrics spool: {exc}\n")
+        return
+    floor = time.time() - RETENTION_SECONDS
+    fresh = [row for row in rows if row[0] >= floor]
+    if fresh:
+        with GUARD:
+            placed(fresh)
+            PENDING.extend(fresh)
+
+
 def restore(path: Path) -> None:
     global JOURNAL, HELD_SINCE, APPENDED, EVICTED_THROUGH, STALE
 
@@ -299,6 +377,7 @@ def stop() -> None:
 def persist(stopped: bool = False) -> None:
     global APPENDED, STALE
 
+    absorb()
     with JOURNAL_GUARD:
         with GUARD:
             if JOURNAL is None or not (PENDING or stopped or STALE):
@@ -420,9 +499,9 @@ def step(name: str) -> Iterator[None]:
 
 
 @contextmanager
-def command(method: str, path: str) -> Generator[None]:
-    """Time one command line ledger request as a server request is timed and append its line to the file the timing
-    variable names; inside a server request its substeps join that request instead."""
+def owned(method: str, path: str, finished: Callable[[str, str, float, float, Timing], None]) -> Generator[None]:
+    """Time one request this process answers as a server request is timed and hand its wall, CPU and waits to
+    ``finished``; inside a server request its substeps join that request instead."""
     if CURRENT.get() is not None:
         yield
         return
@@ -434,9 +513,41 @@ def command(method: str, path: str) -> Generator[None]:
     finally:
         elapsed, used = time.perf_counter() - wall, time.thread_time() - cpu
         CURRENT.reset(token)
-        target = os.environ.get(TIMING_FILE)
-        if target:
-            append_lines(Path(target), [timed(method, path, elapsed, used, timing)])
+        finished(method, path, elapsed, used, timing)
+
+
+def command(method: str, path: str) -> AbstractContextManager[None]:
+    """Time one command line ledger request as a server request is timed, spool a write's sample for the ledger server
+    and append its line to the file the timing variable names; inside a server request its substeps join that request
+    instead."""
+    return owned(method, path, lined)
+
+
+def answering(method: str, path: str) -> AbstractContextManager[None]:
+    """Time one request the warm writer answers as a server request is timed and spool a write's sample for the ledger
+    server; inside a server request its substeps join that request instead."""
+    return owned(method, path, kept)
+
+
+def lined(method: str, path: str, wall: float, cpu: float, timing: Timing) -> None:
+    """Spool a command line write's sample and append the request's timing line to the file the timing variable
+    names."""
+    kept(method, path, wall, cpu, timing)
+    target = os.environ.get(TIMING_FILE)
+    if target:
+        append_lines(Path(target), [timed(method, path, wall, cpu, timing)])
+
+
+def kept(method: str, path: str, wall: float, cpu: float, timing: Timing) -> None:
+    """Spool the sample of one write answered outside a server request, its route named as ``measured`` names it; a
+    read keeps none, and a spool that cannot be written is named without failing the write."""
+    if method not in WRITES:
+        return
+    route = " ".join(filter(None, (route_name(path), timing.detail)))
+    try:
+        spool(sample_row(time.time(), method, route, wall, cpu, timing.lock_wait, timing))
+    except OSError as exc:
+        sys.stderr.write(f"request metrics spool: {exc}\n")
 
 
 def timed(method: str, path: str, wall: float, cpu: float, timing: Timing) -> dict[str, object]:

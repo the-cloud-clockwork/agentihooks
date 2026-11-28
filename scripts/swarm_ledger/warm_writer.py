@@ -1,16 +1,19 @@
 """The host's warm ledger writer."""
 
 import argparse
+import contextlib
 import json
 import os
 import signal
+import socket
 import socketserver
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 from scripts.scheduler.service import ROOT, revision
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import ledger_server, request_metrics
 from scripts.tick.adapters import database_ledger
 from scripts.tick.adapters.writer_client import RAISED, connected, socket_path
 
@@ -32,11 +35,26 @@ class Answering(socketserver.StreamRequestHandler):
     timeout = READ_S
 
     def handle(self) -> None:
-        """Reply with the in process answer's status line and body, or with the error the in process call raises."""
+        """Reply with the in process answer's status line and body, or with the error the in process call raises; a
+        write keeps one request metric sample once its reply is sent and the connection closed for writing."""
         sent = self.rfile.read()
         if not sent:
             return
         asked = json.loads(sent)
+        timed = (
+            contextlib.nullcontext()
+            if asked["payload"] is None
+            else request_metrics.answering("POST", f"/api/v1/ledgers/{asked['slug']}/{asked['path']}")
+        )
+        with timed:
+            try:
+                self.answer(asked)
+            finally:
+                with contextlib.suppress(OSError):
+                    self.connection.shutdown(socket.SHUT_WR)
+
+    def answer(self, asked: dict[str, Any]) -> None:
+        """Write the in process answer to ``asked``, or the error the in process call raises, as this request's reply."""
         with database_ledger.acting(asked["principal"]):
             try:
                 _, status, body = database_ledger.replied(

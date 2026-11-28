@@ -9829,6 +9829,35 @@
       ]
     },
     {
+      "id": "ledger-writer-request-samples",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2868",
+      "behaviour": "Each ledger write the host warm writer or the in process fallback answers, applied or refused, keeps exactly one POST request metric sample with its normalized route and operation detail and its measured wall and CPU seconds, spooled beside the ledger server's journal under a cross process lock. The ledger server takes the spool on each journal pass, so its metrics reader returns each sample once, across processes and through its rewrites, while the journal keeps a single writer and its legacy rows. Reads, empty probes and writes inside a server request keep no extra sample, the writer ends its reply before it keeps the sample, a spool no server takes stays under its byte cap with its newest samples inside retention, and a spool failure never fails a write or the server's own journal write; a host with no ledger folder keeps nothing.",
+      "seam": "scripts.swarm_ledger.warm_writer.Answering.handle over the writer socket, scripts.tick.adapters.writer_client.routed falling back to scripts.tick.adapters.database_ledger.request, and scripts.swarm_ledger.request_metrics persist and records with GET /api/v1/metrics, read across processes",
+      "tests": [
+        "tests/swarm_ledger/test_writer_request_samples.py::test_each_socket_write_keeps_one_post_sample_with_its_wall_in_the_server_report",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_each_fallback_write_keeps_one_post_sample_with_its_wall_in_the_server_report",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_socket_read_and_an_empty_probe_keep_no_sample",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_fallback_write_inside_a_server_request_keeps_only_the_server_sample",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_socket_write_caller_has_its_reply_while_the_writer_still_keeps_the_sample",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_writer_whose_half_close_fails_still_answers_keeps_the_sample_and_logs_no_error",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_an_idle_owner_pass_leaves_its_journal_bytes_unchanged",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_an_owner_returns_each_sample_child_writers_spool_during_its_rewrites_once_through_its_metrics_reader",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_an_owner_returns_each_sample_a_writer_in_another_process_spools_once_through_its_metrics_reader",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_legacy_journal_stays_readable_beside_spooled_samples",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_no_server_takes_keeps_only_its_newest_samples_under_its_cap",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_no_server_takes_drops_samples_past_retention_when_it_compacts",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_no_server_takes_keeps_a_sample_exactly_at_the_retention_floor_when_it_compacts",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_exactly_at_its_cap_is_not_compacted",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_spooled_samples_take_their_time_order_among_the_held_samples",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_the_spool_lock_keeps_every_other_holder_out_until_it_is_released",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_the_owner_takes_a_spooled_sample_at_the_retention_floor_and_drops_an_older_one",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_the_owner_cannot_take_never_stops_its_own_journal_write",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_write_whose_sample_cannot_be_spooled_still_answers_and_names_the_failure",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_host_with_no_ledger_folder_spools_nothing_and_says_nothing"
+      ]
+    },
+    {
       "id": "ledger-record-read-scoped",
       "origin": "inventory",
       "behaviour": "A ledger API read of one record of a record collection, such as tasks/t1 or phases/p1, with no query reads only that record's stored rows and their ancestors and answers exactly as a read of the whole ledger would, so a fresh process, as every agentihooks ledger get is, never streams and parses every row of the ledger to answer it.",
