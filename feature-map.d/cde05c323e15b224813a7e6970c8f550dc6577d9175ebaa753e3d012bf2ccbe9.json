@@ -1,0 +1,13 @@
+{
+  "id": "hub-hive-one-claude-cap",
+  "origin": "regression",
+  "rules": ["hive-spawn-claude-cap-one-computation"],
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-hive-cap-agree",
+  "behaviour": "A hive worker spawn reads the same Claude cap the hub admission reads, the band scaled toward the hive ceiling, so the hub never admits a seat the hive spawn refuses.",
+  "seam": "capacity.worker_accounts against the hub capacity reader, and the spawn runtimes of the hive lane spokes and the hive order consumer",
+  "tests": [
+    "tests/swarm/test_capacity.py::test_a_hive_worker_spawn_reads_the_claude_cap_the_hub_admits_by",
+    "tests/hive/test_lanes.py::test_the_lane_spokes_spawn_on_the_worker_claude_cap",
+    "tests/hive/test_orders.py::test_the_local_order_consumer_spawns_on_the_worker_claude_cap"
+  ]
+}

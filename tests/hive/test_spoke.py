@@ -711,6 +711,19 @@ def test_a_launch_waiting_for_room_reports_no_failure(rig):
     rig.tasks.failed.assert_not_called()
 
 
+@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
+def test_a_refused_spawn_gives_its_claim_back_with_the_refusal(rig: SimpleNamespace) -> None:
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    refusal = "no claude account has placeable quota seats"
+    rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail=refusal)
+
+    assert rig.spoke.poll() == "retry"
+
+    rig.tasks.reopen.assert_called_once_with(rig.event, refusal)
+    rig.tasks.failed.assert_not_called()
+
+
 @pytest.mark.parametrize("value", [None, {"pane_id": "w1:p1"}])
 def test_a_launch_failure_naming_no_harness_is_reported_without_one(rig, value):
     from scripts.swarm_v2.runtime.base import Outcome, Status
