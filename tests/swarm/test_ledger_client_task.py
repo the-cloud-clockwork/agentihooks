@@ -157,8 +157,8 @@ def test_a_thread_read_pages_one_record_thread_by_its_quoted_id(monkeypatch: pyt
     entries = [{"id": "c1", "text": "landed"}]
     reads = served(monkeypatch, entries)
 
-    assert ledger_client.LedgerClient().thread("demo", "phases/p 1", "comments") == entries
-    assert reads == [("demo", "phases/p%201/comments", True)]
+    assert ledger_client.LedgerClient().thread("demo", "phases/p 1/a", "comments") == entries
+    assert reads == [("demo", "phases/p%201%2Fa/comments", True)]
 
 
 @pytest.mark.feature("plan-lane-admission-narrow-read")
