@@ -78,7 +78,7 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True, worker: bool = False) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     if refresh:
@@ -93,7 +93,7 @@ def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
         listed = result.account in routed
         if not listed and (token or not counts.get(result.account)):
             continue
-        cap = tokens.cap(result, now) if listed and session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now, environ if worker else None) if listed and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
@@ -190,7 +190,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
             cap = (
                 session_bands.week_cap(week)
                 if row["harness"] == "codex"
-                else session_bands.scaled_cap(five, week, session_bands.hive_ceiling(environ))
+                else session_bands.worker_cap(five, week, environ)
             )
         weight = None
         if row["kind"] == API:
@@ -269,6 +269,15 @@ def hive_accounts(store: RedisStore) -> Callable[..., list[Account]]:
         return accounts(environ, now, refresh=refresh, redis=store.redis)
 
     return read
+
+
+def worker_accounts(environ: dict[str, str], now: float, refresh: bool = True) -> list[Account]:
+    """The quota reader of a hive spawn: every account with the Claude cap the hub admits that hive's workers by."""
+    from scripts.routing import aggregate
+
+    if aggregate.enabled(environ):
+        return accounts(environ, now, refresh)
+    return reserved_accounts(_claude(environ, now, refresh, worker=True) + _codex(environ, now, refresh), environ)
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:

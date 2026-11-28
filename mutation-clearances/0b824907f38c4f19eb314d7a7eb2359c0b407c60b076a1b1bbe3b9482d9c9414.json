@@ -1,0 +1,6 @@
+{
+  "scripts/hive/workstation.py:scripts.hive.workstation.x\u01c1MasterTasks\u01c1reopen:d90f6b6e9d1c04afdb4bda9fb06b5ddb489abd04f0ee7145cbe39d1637be5d1d": {
+    "reader": "standards_reader",
+    "reason": "MasterTasks.reopen returns None and never reads refused, so changing that parameter's default cannot change any output."
+  }
+}

@@ -660,6 +660,16 @@ def test_local_consumer_uses_the_selected_hive_and_runtime(setup, monkeypatch):
     constructor.assert_called_once_with(herdr)
 
 
+@pytest.mark.feature("hub-hive-one-claude-cap")
+def test_the_local_order_consumer_spawns_on_the_worker_claude_cap(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import capacity
+
+    consumer = Consumer.local(setup.redis, "selected-host")
+
+    assert consumer.runtime.herdr.quota_accounts is capacity.worker_accounts
+
+
 def test_order_keys_isolate_hives_and_execution_receipts(setup):
     from scripts.hive import registry
 

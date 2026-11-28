@@ -740,9 +740,13 @@ def refused(result: ProbeResult) -> bool:
 
 
 def account_cap(
-    result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
+    result: ProbeResult,
+    now: float | None = None,
+    include_fable: bool = False,
+    environ: Mapping[str, str] | None = None,
 ) -> int | None:
-    """Live sessions the account may hold under the session bands; None without a full reading."""
+    """Live sessions the account may hold under the session bands, or the swarm worker cap under ``environ``; None
+    without a full reading."""
     if refused(result):
         return 0
     timestamp = time.time() if now is None else now
@@ -754,7 +758,7 @@ def account_cap(
 
     if reservation.primary_reserved(result.account, week, os.environ):
         return 0
-    return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
+    return session_bands.cap(five, week) if environ is None else session_bands.worker_cap(five, week, environ)
 
 
 def is_routable(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> bool:
@@ -797,11 +801,11 @@ class ClaudeTokenSource:
             credentials, **cast("dict[str, Any]", self.options), environ=environ, **cast("dict[str, Any]", timing)
         )
 
-    def cap(self, result: ProbeResult, now: float) -> int | None:
+    def cap(self, result: ProbeResult, now: float, environ: Mapping[str, str] | None = None) -> int | None:
         held = (each for each in (self.held, *self.others) if each is not None)
         if any(each.closes(result.account, result.seven_day.used) for each in held):
             return 0
-        return account_cap(result, now, bool(self.options.get("include_fable")))
+        return account_cap(result, now, bool(self.options.get("include_fable")), environ)
 
     def offer(self, results: list[ProbeResult], now: float) -> list[Slot]:
         return [
