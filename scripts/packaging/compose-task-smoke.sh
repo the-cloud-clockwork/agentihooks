@@ -87,7 +87,7 @@ class Tasks:
                 "execution_generation": agent.generation, "claim_generation": event.version}
         return SpawnRequest(config, "eng", name, task)
 
-    def reopen(self, event):
+    def reopen(self, event, refused=""):
         return None
 
     def launched(self, event: Envelope, placed: SimpleNamespace) -> None:

@@ -758,9 +758,9 @@ def test_a_held_lane_spares_a_task_that_permits_a_harness_the_refused_task_could
 def test_a_lane_hold_expires_on_its_own(rig: SimpleNamespace) -> None:
     _refused_give_back(rig)
 
-    held = rig.store.redis.pttl(rig.store.key(SLUG, getattr(admission, "LANE_HOLD"), "eng", "hive-a"))
+    held = rig.store.redis.pttl(rig.store.key(SLUG, admission.LANE_HOLD, "eng", "hive-a"))
 
-    assert 0 < held <= getattr(admission, "HOLD_MS")
+    assert 0 < held <= admission.HOLD_MS
 
 
 @pytest.mark.feature("dead-offer-generation")

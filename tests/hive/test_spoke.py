@@ -391,7 +391,8 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
         ]
     assert rig.spoke.poll() == "retry"
     assert rig.queue.take(0) is None
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    refused = () if failure == "request" else ("no room",)
+    rig.tasks.reopen.assert_called_once_with(rig.event, *refused)
     rig.clock.now = 9
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 10
@@ -493,7 +494,7 @@ def test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch
     if failure == "unavailable":
         assert claim(rig) == {"state": "ready"}
         assert pending == {}
-        rig.tasks.reopen.assert_called_once_with(rig.event)
+        rig.tasks.reopen.assert_called_once_with(rig.event, "no room")
     else:
         assert claim(rig) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
         assert pending["event"] == rig.event.to_dict()
@@ -796,7 +797,7 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
 
     rig.bus.dead.publish = publish
     rig.queue.take = take
-    rig.tasks.reopen.side_effect = lambda event: observed.append("reopen")
+    rig.tasks.reopen.side_effect = lambda event, refused: observed.append("reopen")
     rig.tasks.dead_lettered.side_effect = lambda event: observed.append("dead_lettered")
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 10
@@ -804,7 +805,7 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
     assert observed == ["reopen", "reopen", "dead", "dead_lettered", "term"]
-    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 2
+    assert rig.tasks.reopen.call_args_list == [((rig.event, "no room"),)] * 2
     assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)]
     letters = rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0)
     assert len(letters) == 1
@@ -1096,7 +1097,7 @@ def test_a_refused_spawn_is_logged_with_the_runtime_status_and_detail(rig, capsy
 
     rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
     assert rig.spoke.poll() == "retry"
-    assert "poll failed (RuntimeError: spawn unavailable: no room)" in capsys.readouterr().err
+    assert "poll failed (SpawnUnavailable: spawn unavailable: no room)" in capsys.readouterr().err
 
 
 def test_failed_work_and_a_failed_attempt_check_are_logged_before_the_nack(rig, capsys):

@@ -33,7 +33,7 @@ class MasterTasks:
         task = {"id": event.key, **{field: data[field] for field in IDENTITY}}
         return SpawnRequest(self.configs(event.swarm), LANE, data["name"], task)
 
-    def reopen(self, event: Envelope) -> None:
+    def reopen(self, event: Envelope, refused: str = "") -> None:
         return None
 
     def dead_lettered(self, event: Envelope) -> None:

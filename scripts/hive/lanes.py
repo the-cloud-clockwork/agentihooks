@@ -60,8 +60,8 @@ class LaneTasks:
             raise RuntimeError("spawn unavailable: serena")
         return SpawnRequest(config, event.data["lane"], admitted["name"], task)
 
-    def reopen(self, event: Envelope) -> None:
-        self._ask("reopen", event)
+    def reopen(self, event: Envelope, refused: str = "") -> None:
+        self._ask("reopen", event, **({"refused": refused} if refused else {}))
 
     def dead_lettered(self, event: Envelope) -> None:
         self._ask("reopen", event, dead=True)
