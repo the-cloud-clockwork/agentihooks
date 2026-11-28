@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.forge.cli import parse as forge_parse
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.review.cli import parser as review_parser
 from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
@@ -51,6 +53,8 @@ LOOP = {
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
 PARSERS["seat"] = lambda argv: seat_parser().parse_args(argv)
+PARSERS["forge"] = lambda argv: forge_parse(argv)
+PARSERS["review"] = lambda argv: review_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:
@@ -94,7 +98,25 @@ def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance: 
 
 
 def _commands(text: str) -> list[str]:
-    return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
+    inline = re.findall(r"`([^`\n]+)`", text)
+    return [span for span in [*inline, *_fenced(text)] if span.startswith("agentihooks ")]
+
+
+def _fenced(text: str) -> list[str]:
+    lines: list[str] = []
+    pending = ""
+    inside = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            lines += [pending.rstrip()] if pending else []
+            inside, pending = not inside, ""
+        elif inside and line.endswith("\\"):
+            pending += line[:-1].rstrip() + " "
+        elif inside:
+            lines.append(pending + line)
+            pending = ""
+    return lines
 
 
 def _argv(command: str) -> tuple[str, list[str]]:
@@ -139,14 +161,46 @@ def test_role_skill_covers_its_loop(role):
     assert [step for step in (*COMMON, *LOOP[role]) if step not in text] == []
 
 
+@pytest.mark.feature("role-skill-commands-parse")
 @pytest.mark.parametrize("role", ROLE_SKILLS)
-def test_every_role_skill_command_parses(role):
-    commands = [c for c in _commands(_skill(role).read_text()) if not c.startswith("agentihooks ledger watch")]
+def test_every_role_skill_command_parses(role: str) -> None:
+    _parse_each([c for c in _commands(_skill(role).read_text()) if not c.startswith("agentihooks ledger watch")])
 
+
+def _parse_each(commands: list[str]) -> None:
     assert commands
     for command in commands:
         tool, argv = _argv(command)
         assert PARSERS[tool](argv), command
+
+
+@pytest.mark.feature("role-skill-commands-parse")
+def test_commands_reads_fenced_blocks_with_continuations() -> None:
+    commands = _commands(_skill("reviewer").read_text())
+
+    assert "agentihooks forge read 123 --remote https://github.com/owner/repo.git --forge github" in commands
+    assert (
+        "agentihooks review post https://github.com/owner/repo/pull/123 --slug <slug> "
+        "--finding '<first finding>' --finding '<next finding>'"
+    ) in commands
+    assert _commands("```bash\nagentihooks forge read 1 \\\n  --forge github \\\n```\n") == [
+        "agentihooks forge read 1 --forge github"
+    ]
+
+
+FENCED_FORGE = (
+    "Read the change request:\n\n   ```bash\n   agentihooks forge read {number} \\\n"
+    "     --remote https://github.com/owner/repo.git \\\n     --forge {kind}\n   ```\n"
+)
+
+
+@pytest.mark.feature("role-skill-commands-parse")
+@pytest.mark.parametrize(("number", "kind"), [("notanumber", "github"), ("123", "bitbucket")])
+def test_a_planted_bad_forge_command_in_a_fence_turns_the_parse_check_red(number: str, kind: str) -> None:
+    _parse_each(_commands(FENCED_FORGE.format(number="123", kind="github")))
+
+    with pytest.raises(SystemExit):
+        _parse_each(_commands(FENCED_FORGE.format(number=number, kind=kind)))
 
 
 @pytest.mark.parametrize("role", ROLE_SKILLS)
