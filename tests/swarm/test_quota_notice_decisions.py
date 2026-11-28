@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -194,6 +193,8 @@ class Refreshed:
 
 
 def scenario(home: Path) -> tuple[RedisStore, Any, HerdrRuntime, list[tuple[str, str, str]]]:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, max_plan=0, code="a1b2c3"))
     for agent in AGENTS:
