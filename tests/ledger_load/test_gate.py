@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import inspect
 import io
@@ -8,12 +9,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.ledger_load import gate as ledger_load
+from tests.ledger_load import paired
 
 
 def test_p95_is_the_nearest_rank_sample():
@@ -275,6 +278,7 @@ def test_the_reported_write_p95_is_none_without_writes():
 def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_path):
     results = {"writes": [0.1] * 9 + [0.7], "reads": [0.05] * 10, "item_reads": [0.01] * 100, "errors": []}
     results["cpu"] = [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)]
+    results["server_cpu"] = [(0.0, [0.0, 0.0]), (float(ledger_load.CPU_WINDOW_S), [1.0, 0.0])]
     results["resources"] = resource_samples()
     monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
     monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
@@ -302,20 +306,23 @@ def test_the_harness_loads_on_a_base_revision_that_has_no_api_service(monkeypatc
     assert harness.api_service is None
 
 
+@pytest.mark.feature("ledger-load-server-resources")
 @pytest.mark.parametrize("has_api_service", [True, False])
 def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledger_server(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, has_api_service: bool
 ) -> None:
     started: list[tuple[int, list[str] | None]] = []
     stopped: list[SimpleNamespace] = []
-    loaded: list[tuple[int, int, int]] = []
+    loaded: list[tuple[int, int, list[int]]] = []
     ports = iter([8101, 8102])
+    servers = 2 if has_api_service else 1
     results = {
         "writes": [0.1] * 9 + [0.7],
         "reads": [0.05] * 10,
         "item_reads": [0.01] * 100,
         "errors": [],
         "cpu": [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)],
+        "server_cpu": [(0.0, [0.0] * servers), (float(ledger_load.CPU_WINDOW_S), [1.0] + [0.0] * (servers - 1))],
         "resources": resource_samples(),
     }
 
@@ -323,8 +330,8 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
         started.append((port, argv))
         return SimpleNamespace(pid=len(started))
 
-    def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
-        loaded.append((write_port, read_port, pid))
+    def load(write_port: int, read_port: int, token: str, pids: list[int], seconds: float) -> dict:
+        loaded.append((write_port, read_port, pids))
         return results
 
     if not has_api_service:
@@ -342,11 +349,117 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
         writes = started[0][1]
         assert writes is not None and writes[-2:] == ["scripts.swarm_ledger.api_service", "--serve"]
         assert started[1] == (8102, None)
-        assert loaded == [(8101, 8102, 1)]
+        assert loaded == [(8101, 8102, [1, 2])]
     else:
         assert started == [(8101, None)]
-        assert loaded == [(8101, 8101, 1)]
+        assert loaded == [(8101, 8101, [1])]
     assert [server.pid for server in stopped] == list(range(len(started), 0, -1))
+
+
+@pytest.mark.feature("ledger-load-server-resources")
+@pytest.mark.parametrize(
+    ("pids", "cpu", "resources", "cores"),
+    [
+        ([1], [2.0, 3.0, 4.0], (4, 80_000), 0.1),
+        ([1, 2], [5.5, 16.5, 37.5], (10, 170_000), 2.1),
+    ],
+)
+def test_the_sampler_sums_the_cpu_threads_and_rss_of_every_ledger_server_process(
+    monkeypatch: pytest.MonkeyPatch,
+    pids: list[int],
+    cpu: list[float],
+    resources: tuple[int, int],
+    cores: float,
+) -> None:
+    clock = iter([0.0, 10.0, 20.0])
+    values = {1: [2.0, 3.0, 4.0], 2: [3.5, 13.5, 33.5]}
+    counters = {pid: iter(used) for pid, used in values.items()}
+    slept: list[float] = []
+    monkeypatch.setattr(ledger_load, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=slept.append))
+    monkeypatch.setattr(ledger_load, "cpu_seconds", lambda pid: next(counters[pid]))
+    monkeypatch.setattr(ledger_load, "server_resources", {1: (4, 80_000), 2: (6, 90_000)}.__getitem__)
+    results: dict[str, list[Any]] = {"cpu": [], "server_cpu": [], "resources": [], "errors": []}
+    ledger_load.sample_cpu(pids, 20.0, results)
+    assert results == {
+        "cpu": list(zip([0.0, 10.0, 20.0], cpu)),
+        "server_cpu": [(at, [values[pid][n] for pid in pids]) for n, at in enumerate((0.0, 10.0, 20.0))],
+        "resources": [(at, *resources) for at in (0.0, 10.0, 20.0)],
+        "errors": [],
+    }
+    assert ledger_load.busiest_window(results["cpu"]) == pytest.approx(cores)
+    assert slept == [1, 1]
+
+
+SIDE_CPU_COUNTERS = {True: {1: [2.0, 3.23456, 4.0], 2: [3.5, 13.5, 33.5]}, False: {1: [1.0, 2.0, 3.0]}}
+
+
+def measure_side(
+    monkeypatch: pytest.MonkeyPatch, folder: Path, capsys: pytest.CaptureFixture[str], has_api_service: bool
+) -> tuple[list[str], dict[str, Any]]:
+    """Run one paired side through the real sampler on faked CPU counters: the ledger API service and the read only
+    ledger server when the revision has the API service, else the one ledger server."""
+    counters = {pid: iter(values) for pid, values in SIDE_CPU_COUNTERS[has_api_service].items()}
+    clock = iter([0.0, 10.0, 20.0])
+    started: list[int] = []
+
+    def start(ledger: Path, port: int, log: object, *args: object, **kwargs: object) -> SimpleNamespace:
+        started.append(port)
+        return SimpleNamespace(pid=len(started))
+
+    def load(write_port: int, read_port: int, token: str, pids: list[int], seconds: float) -> dict[str, list[Any]]:
+        results: dict[str, list[Any]] = collections.defaultdict(
+            list, writes=[0.1] * 10, reads=[0.05] * 10, item_reads=[0.01] * 100
+        )
+        ledger_load.sample_cpu(pids, 20.0, results)
+        return results
+
+    if not has_api_service:
+        monkeypatch.setattr(ledger_load, "api_service", None)
+    monkeypatch.setattr(ledger_load, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda seconds: None))
+    monkeypatch.setattr(ledger_load, "cpu_seconds", lambda pid: next(counters[pid]))
+    monkeypatch.setattr(ledger_load, "server_resources", lambda pid: (4, 80_000))
+    monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
+    monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
+    monkeypatch.setattr(ledger_load, "free_port", lambda: 0)
+    monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
+    monkeypatch.setattr(ledger_load, "start_server", start)
+    monkeypatch.setattr(ledger_load, "stop_server", lambda server: None)
+    monkeypatch.setattr(ledger_load, "load", load)
+    monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
+    folder.mkdir()
+    problems, _ = ledger_load.run(folder)
+    measure = paired.graded_measure(capsys.readouterr().out)
+    assert measure is not None
+    return problems, measure
+
+
+@pytest.mark.feature("ledger-load-paired-writer-cpu")
+def test_a_head_with_two_servers_and_a_base_with_one_pair_the_busiest_cpu_window_of_the_writer_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, head = measure_side(monkeypatch, tmp_path / "head", capsys, has_api_service=True)
+    _, base = measure_side(monkeypatch, tmp_path / "base", capsys, has_api_service=False)
+    assert (head["busiest_cores"], base["busiest_cores"]) == (0.123, 0.1)
+    assert paired.pair_ratios([(base, head)], "busiest_cores") == [pytest.approx(1.23)]
+
+
+@pytest.mark.feature("ledger-load-paired-writer-cpu")
+def test_the_read_only_server_cpu_is_reported_under_its_own_key_on_the_head_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, head = measure_side(monkeypatch, tmp_path / "head", capsys, has_api_service=True)
+    _, base = measure_side(monkeypatch, tmp_path / "base", capsys, has_api_service=False)
+    assert head.get("read_busiest_cores") == 2.0
+    assert "read_busiest_cores" not in base
+
+
+@pytest.mark.feature("ledger-load-paired-writer-cpu")
+def test_the_cpu_budget_still_holds_every_server_process_of_the_head(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    problems, _ = measure_side(monkeypatch, tmp_path / "head", capsys, has_api_service=True)
+    budget = f"server CPU held 2.08 cores over {ledger_load.CPU_WINDOW_S}s, budget {ledger_load.CPU_CORES}"
+    assert budget in problems
 
 
 def test_a_base_without_the_api_service_times_its_sweeps_and_expiry_by_the_ledger_server(
@@ -669,7 +782,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     began = time.monotonic()
     with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
-        ledger_load.load(0, 0, "token", os.getpid(), 15.0)
+        ledger_load.load(0, 0, "token", [os.getpid()], 15.0)
     assert time.monotonic() - began < 5
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
 
@@ -679,7 +792,7 @@ def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     monkeypatch.setattr(ledger_load, "Front", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
-    results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    results = ledger_load.load(0, 0, "token", [os.getpid()], 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []

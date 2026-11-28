@@ -1,0 +1,10 @@
+{
+  "id": "block-refuses-unpushed-commits",
+  "origin": "inventory",
+  "behaviour": "swarm block refuses, with exit 1 and a message naming the worktree and the exact push command, while the task worktree holds commits origin lacks and no panic holds the push; the task stays claimed and no branch is recorded, so a seat never blocks away unpushed work.",
+  "seam": "the swarm block command through scripts.swarm.publish.block_branches, scripts.swarm.publish.pushed_branches and scripts.swarm.stack.pushed",
+  "tests": [
+    "tests/swarm/test_block_push.py::test_block_refuses_a_task_branch_never_pushed_that_holds_commits",
+    "tests/swarm/test_block_push.py::test_block_without_panic_still_refuses_unpushed_commits"
+  ]
+}

@@ -1,10 +1,11 @@
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from scripts.swarm import naming, resume, snapshot
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_tick import FakeRuntime
 
@@ -211,6 +212,130 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     assert "/.agentihooks/swarm/sw/tasks/t1" in text
     assert snapshot.ledger_source("sw") in text
     assert "Before acting, re-read" in text
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    from scripts.swarm import prompt
+
+    action = "Read the saved task proof."
+    handoff = f"# Handoff v2\n## Done\nresume-body-sentinel\n## Next\n1. {action}\n"
+    saved(store, tmp_path, harness=harness)
+
+    def read_handoff(slug: str, task: str) -> str:
+        assert slug == "sw" and task in ("t1", "master")
+        return handoff if task == "t1" else ""
+
+    monkeypatch.setattr(store, "handoff", read_handoff)
+    runtime = ResumingRuntime()
+    restore(store, runtime)
+    text = runtime.resumed[0][2]
+    restored = resume.restored_text("sw", agent(seat="eng-1@sw"), snapshot.ledger_source("sw"))
+    assert text.startswith(f"{restored}\n{prompt.SEAT_BRIEF}\n")
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "resume-body-sentinel" not in text
+    assert "agentihooks swarm sw confirm-handoff " in text
+    assert f"--next '1. {action}'" in text
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize(
+    ("harness", "transport"),
+    [("claude", ""), ("codex", ""), ("codex", APP_SERVER_TRANSPORT)],
+    ids=["claude", "codex-legacy", "codex-push"],
+)
+def test_a_resumed_master_is_given_the_next_action_its_confirmation_accepts(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, transport: str
+) -> None:
+    import shlex
+
+    from scripts.handoff import transfers
+    from scripts.swarm import prompt
+
+    store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
+    master = AgentRecord(
+        "sw-master-1",
+        MASTER,
+        MASTER,
+        pane_id="w1:m1",
+        harness=harness,
+        transport=transport,
+        seat="master@sw",
+        conversation_id=ID,
+    )
+    store.put_agent("sw", master)
+    snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
+    store.redis.flushall()
+    handoff = "# Handoff v2\n## Done\nmaster-body-sentinel\n## Next\n1. Rearm a Monitor on the ledger and answer the operator.\n"
+    monkeypatch.setattr(store, "handoff", lambda slug, task: handoff if (slug, task) == ("sw", MASTER) else "")
+    runtime = ResumingRuntime()
+    restore(store, runtime)
+    ((_, _, text),) = runtime.resumed
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "master-body-sentinel" not in text
+    transfer, flag, action = shlex.split(text.split("confirm-handoff ", 1)[1].splitlines()[0])
+    resumed = next(a for a in store.agents("sw") if a.name == master.name)
+    transfers.confirm(store, "sw", transfer, resumed, action, 2_000)
+    assert flag == "--next"
+    assert transfers.get(store, "sw", transfer)["handoff"] == handoff
+    assert transfers.get(store, "sw", transfer)["next"] == "1. Rearm a Monitor on the ledger and answer the operator."
+    assert transfers.get(store, "sw", transfer)["continuity"] == {
+        "state": "confirmed",
+        "at": 2_000,
+        "by": master.name,
+        "next": action,
+    }
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_an_unseated_resume_retains_its_inline_handoff_without_a_seat_brief(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    import shlex
+
+    from scripts.swarm import prompt
+
+    store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
+    worker = agent(pane_id="w1:p1", harness=harness)
+    store.put_agent("sw", worker)
+    handoff = "# Handoff v2\n## Done\nunseated-body-sentinel\n## Next\n1. Read the saved task proof.\n"
+
+    def read_handoff(slug: str, task: str) -> str:
+        assert (slug, task) == ("sw", "t1")
+        return handoff
+
+    monkeypatch.setattr(store, "handoff", read_handoff)
+    runtime = ResumingRuntime()
+    ledger = snapshot.ledger_source("sw")
+    outcomes = resume.reopen(store, "sw", {worker.name: str(tmp_path)}, runtime, 1_000, ledger, has_quota=always)
+    assert outcomes[0].outcome == resume.RESUMED
+    ((_, _, text),) = runtime.resumed
+    assert text.startswith(
+        f"{resume.restored_text('sw', worker, ledger)}\nRead this handoff before continuing. Confirm you read it and "
+        "will take its first Next action by running agentihooks swarm sw confirm-handoff "
+    )
+    assert prompt.SEAT_BRIEF not in text
+    assert handoff in text
+    transfer, flag, action = shlex.split(text.split("confirm-handoff ", 1)[1].splitlines()[0])
+    assert transfer == outcomes[0].transfer
+    assert flag == "--next"
+    assert action == "1. Read the saved task proof."
+
+
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize("module", ["scripts.swarm.resume", "scripts.swarm.snapshot", "scripts.swarm.prompt"])
+def test_resume_entry_modules_import_in_a_fresh_interpreter(module: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_resumed_agent_record_takes_the_model_effort_and_source_its_relaunch_reports(store, tmp_path):

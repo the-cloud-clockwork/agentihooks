@@ -491,8 +491,8 @@ def test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the
 
 @pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
 def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(
-    store, tmp_path, monkeypatch, conversation
-):
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conversation: str
+) -> None:
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -516,7 +516,8 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     transfer = runtime.tasks[-1]["transfer"]
     assert transfer == transfers.get(store, "sw", transfer["id"])
     assert (transfer["reason"], transfer["successor"], transfer["handoff"]) == ("outage", dead.name, handoff)
-    assert handoff in "\n".join(prompt.priming_lines(runtime.tasks[-1]))
+    assert handoff not in "\n".join(prompt.priming_lines(runtime.tasks[-1]))
+    assert prompt.SEAT_BRIEF in prompt.priming_lines(runtime.tasks[-1])
     assert runtime.spawn_configs[-1] == "sw"
     assert runtime.tasks[-1]["seat"] == dead.seat
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
@@ -528,7 +529,9 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     )
 
 
-def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_seat(store, tmp_path, monkeypatch):
+def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_seat(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -550,7 +553,8 @@ def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_s
     assert runtime.spawned[launches:] == [("eng", dead.name, dead.task)]
     fresh = runtime.tasks[-1]
     assert (fresh["seat"], fresh["handoff"], fresh["transfer"]["handoff"]) == (dead.seat, handoff, handoff)
-    assert handoff in "\n".join(prompt.priming_lines(fresh))
+    assert handoff not in "\n".join(prompt.priming_lines(fresh))
+    assert prompt.SEAT_BRIEF in prompt.priming_lines(fresh)
     assert recovery_state(store, dead.name) == "done"
 
 

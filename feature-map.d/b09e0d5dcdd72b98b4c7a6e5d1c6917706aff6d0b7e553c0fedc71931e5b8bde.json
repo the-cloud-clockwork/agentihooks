@@ -1,0 +1,12 @@
+{
+  "id": "chart-docs-name-every-database-url-holder",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-db-address-docs",
+  "behaviour": "The swarm chart values note on the ledger secret settings and every service split sentence that names an only holder of the shared database URL name each service whose chart template gives it that URL.",
+  "seam": "chart template includes of swarm.databaseEnv and the ledger secretEnv read as text against the values note and docs/reference/service-split.md",
+  "tests": [
+    "tests/test_swarm_chart_api.py::test_database_url_holders_are_read_from_the_templates",
+    "tests/test_swarm_chart_api.py::test_ledger_secret_env_note_names_every_service_that_gets_the_database_url",
+    "tests/test_swarm_chart_api.py::test_service_split_names_every_holder_wherever_it_names_an_only_holder"
+  ]
+}

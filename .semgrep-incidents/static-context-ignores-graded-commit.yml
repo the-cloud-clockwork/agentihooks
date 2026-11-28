@@ -1,0 +1,19 @@
+rules:
+  - id: static-context-ignores-graded-commit
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A unit's context and the tree it runs in must read the lease's graded commit when it names one, the test
+      merge GitHub built for a resolved pull request, and the lease's head only when it names none. Setting
+      github.sha, or cutting a shared or owned tree, from the lease's head alone grades the bare head and never
+      the merge Actions built. Read `lease.graded_commit or lease.head` into one name and use that name for both
+      the context and the tree.
+    paths:
+      include:
+        - /scripts/ci_lab/executors.py
+        - static-context-ignores-graded-commit.py
+    patterns:
+      - pattern-either:
+          - pattern: '{..., "github.sha": $LEASE.head, ...}'
+          - pattern: '$TREES.shared($LEASE.head, ...)'
+          - pattern: '$TREES.owned($LEASE.head, ...)'

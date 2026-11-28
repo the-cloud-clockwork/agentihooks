@@ -205,6 +205,16 @@ def test_claim_records_when_the_lease_started_and_an_older_lease_reads_zero(jobs
     assert found(jobs, "h1:test:b").leased_ms == 0
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_job_enqueued_with_a_graded_commit_decodes_it_and_a_record_written_before_it_existed_decodes_none(
+    jobs: queue.Queue, client
+) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    assert found(jobs, "h1:test:a").graded_commit == "m" * 40
+    client.hdel("agentihooks-ci:queue:job:h1:test:b", "graded_commit")
+    assert found(jobs, "h1:test:b").graded_commit == ""
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_tally_counts_each_finished_attempt_of_a_job_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a"), unit("b")], "h1", {})

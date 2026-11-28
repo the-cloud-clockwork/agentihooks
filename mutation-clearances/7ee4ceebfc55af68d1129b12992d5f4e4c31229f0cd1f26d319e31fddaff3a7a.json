@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__prepare:2f567fe043c9eeee5121834ea22611572aeb17bcaa5c265df8ea7c8b0fc71bf5": {
+    "reader": "standards_reader",
+    "reason": "Capitalization leaves the still-excess-root refusal and reason intact. Allocation checks, cleanup, exception type and consumer refusal are unchanged."
+  }
+}

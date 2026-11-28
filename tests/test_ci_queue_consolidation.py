@@ -43,10 +43,7 @@ def test_container_proofs_share_one_runner_without_losing_commands() -> None:
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
         "docker run --rm --network none --entrypoint python local/agentihooks-swarm:clients-check"
-        " -c 'import importlib, pkgutil, scripts.ci_lab; modules = sorted(module.name for module in"
-        ' pkgutil.walk_packages(scripts.ci_lab.__path__, scripts.ci_lab.__name__ + "."));'
-        " [importlib.import_module(module) for module in modules]; import scripts.ci_test_plan;"
-        ' print("lab modules imported:", ", ".join(modules))\'',
+        " -m scripts.ci_lab_smoke scripts.ci_test_plan",
         'rm -rf "$RUNNER_TEMP/swarm-smoke-layers"\n'
         'mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"\n',
         'mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"\n'

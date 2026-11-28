@@ -228,6 +228,15 @@ def busiest_window(samples: list[tuple[float, float]]) -> float | None:
     return max(windows, default=None)
 
 
+def paired_cores(samples: list[tuple[float, list[float]]], servers: int) -> dict[str, float | None]:
+    """The busiest CPU window of the process taking writes, which the paired grade compares with the base, and on a
+    revision with the ledger API service the read only ledger server's own window, which it does not."""
+    series = {"busiest_cores": [(at, used[0]) for at, used in samples]}
+    if servers > 1:
+        series["read_busiest_cores"] = [(at, used[1]) for at, used in samples]
+    return {key: None if (cores := busiest_window(part)) is None else round(cores, 3) for key, part in series.items()}
+
+
 def verdict(writes: list[float], expected: int, cores: float | None, errors: list[str]) -> list[str]:
     problems = [f"{len(errors)} requests failed, first: {errors[0]}"] if errors else []
     if len(writes) < MIN_WRITES * expected:
@@ -408,12 +417,17 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
 
 
-def sample_cpu(pid: int, deadline: float, results: dict) -> None:
+def sample_cpu(pids: list[int], deadline: float, results: dict) -> None:
+    """Each second until the deadline, the CPU seconds of each ledger server process and their sum, and the threads
+    and RSS of every ledger server process, summed."""
     try:
         while True:
             at = time.monotonic()
-            results["cpu"].append((at, cpu_seconds(pid)))
-            results["resources"].append((at, *server_resources(pid)))
+            used = [cpu_seconds(pid) for pid in pids]
+            results["cpu"].append((at, sum(used)))
+            results["server_cpu"].append((at, used))
+            threads, rss = zip(*(server_resources(pid) for pid in pids))
+            results["resources"].append((at, sum(threads), sum(rss)))
             if at >= deadline:
                 break
             time.sleep(1)
@@ -449,9 +463,9 @@ class Front(ResourceClient):
         return super().request(slug, path, payload)
 
 
-def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
+def load(write_port: int, read_port: int, token: str, pids: list[int], seconds: float) -> dict:
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
-    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
+    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "server_cpu": [], "resources": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
@@ -474,7 +488,7 @@ def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) 
         for n, (_, reader_client, _, _) in enumerate(apis)
     ]
     threads.append(threading.Thread(target=watcher, args=(read_base, {"X-Ledger-Token": token}, deadline, results)))
-    threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
+    threads.append(threading.Thread(target=sample_cpu, args=(pids, deadline, results)))
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -493,7 +507,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     with log_path.open("w") as log, read_log_path.open("w") as read_log:
         servers = start_servers(folder, write_port, read_port, log, read_log)
         try:
-            results = load(write_port, read_port, token, servers[0].pid, seconds)
+            results = load(write_port, read_port, token, [server.pid for server in servers], seconds)
         finally:
             for server in reversed(servers):
                 stop_server(server)
@@ -522,7 +536,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
                 "read_p95_s": round(p95(results["reads"]), 3) if results["reads"] else None,
                 "item_reads": len(item_reads),
                 "item_read_p95_s": round(p95(item_reads), 3) if item_reads else None,
-                "busiest_cores": None if cores is None else round(cores, 3),
+                **paired_cores(results["server_cpu"], len(servers)),
                 "errors": len(results["errors"]),
                 "resources": results["resources"],
                 "budget": {
