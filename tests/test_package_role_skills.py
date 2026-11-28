@@ -109,6 +109,7 @@ def _fenced(text: str) -> list[str]:
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("```"):
+            lines += [pending.rstrip()] if pending else []
             inside, pending = not inside, ""
         elif inside and line.endswith("\\"):
             pending += line[:-1].rstrip() + " "
@@ -182,6 +183,9 @@ def test_commands_reads_fenced_blocks_with_continuations() -> None:
         "agentihooks review post https://github.com/owner/repo/pull/123 --slug <slug> "
         "--finding '<first finding>' --finding '<next finding>'"
     ) in commands
+    assert _commands("```bash\nagentihooks forge read 1 \\\n  --forge github \\\n```\n") == [
+        "agentihooks forge read 1 --forge github"
+    ]
 
 
 FENCED_FORGE = (
