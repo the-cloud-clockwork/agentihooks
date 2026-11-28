@@ -65,7 +65,8 @@ def _unlisted(gate: static_gates.StaticGate) -> list[str]:
 def _shell_reads(gate: static_gates.StaticGate) -> bool:
     """Whether the gate's own run text, or the run text of an earlier step whose output, outcome or conclusion it
     reads, names GITHUB_SHA or runs git rev-parse: a commit id read in the shell, invisible to expressions.reads
-    and so to both the gate's reads and the static key."""
+    and so to both the gate's reads and the static key. The match is on the text alone, so a script that only
+    mentions either name, in an echoed message or a comparison, is refused too."""
     return any(SHELL_SHA.search(text) for text in (gate.run, *(producer.run for producer in gate.producers)))
 
 
