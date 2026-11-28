@@ -1,0 +1,16 @@
+{
+  "id": "ledger-watch-database-reconnect",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2829",
+  "behaviour": "A ledger watch waits out a dropped shared ledger database, at its start and mid stream, with a wait doubling from --interval to a cap that starts over after a frame, resumes from its cursor printing each operator event once, keeps retrying server errors and lost connections, and prints STOPPED with its reason and exits non zero when an HTTP 401, 403 or 404 refusal repeats on a fresh credential.",
+  "seam": "scripts.swarm_ledger.watch_ledger.main",
+  "tests": [
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_a_database_drop_mid_stream_resumes_from_the_cursor_and_prints_each_event_once",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_a_database_drop_on_the_remote_read_keeps_the_watch_and_its_kept_exports",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_repeated_database_drops_wait_longer_up_to_a_cap_and_start_over_after_a_frame",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_a_refusal_that_repeats_on_a_fresh_credential_stops_the_watch_with_its_reason",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_a_refusal_cleared_by_a_fresh_credential_keeps_the_watch_streaming",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_a_server_error_or_a_lost_connection_keeps_retrying_at_the_interval",
+    "tests/swarm_ledger/test_watch_ledger_reconnect.py::test_the_startup_ledger_check_waits_out_a_database_drop"
+  ]
+}
