@@ -5,7 +5,7 @@ Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
 Follows the ledger server's event stream, reading the ledger in process when it opens or names a newer revision, and prints each event logged after
 rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
-too). A dropped stream reconnects after --interval seconds and replays from its cursor. On a remote host, such
+too). A dropped stream reconnects after --interval seconds (a dropped database: doubling to 30 s) and replays from its cursor. On a remote host, such
 as a hive worker, it reads the ledger in process every --interval seconds instead:
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
@@ -16,8 +16,8 @@ as a hive worker, it reads the ledger in process every --interval seconds instea
   OPERATOR rev=17 checked phases/p2
   OPERATOR rev=18 message added on chat [m-3c4d]: "text" | REPLY RULES: <chat_instructions>
 
-plus `SEED_ERROR <message>` when the HTML seed stops parsing and `WARNING <message>`
-when a word limit is broken. Restart with --since-rev <last rev printed> to replay.
+plus `SEED_ERROR <message>` when the HTML seed stops parsing, `WARNING <message>` when a word limit is broken or a read fails,
+and `STOPPED ledger watch: <reason>` before exit 1 on a repeated 401, 403 or 404. Restart with --since-rev <last rev printed> to replay.
 """
 
 import argparse
@@ -25,6 +25,7 @@ import atexit
 import json
 import os
 import signal
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -47,6 +48,8 @@ from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
 IN_PROCESS = "in-process"
 EXPORTS: dict[Any, Any] = {}
+BACKOFF_CAP_S = 30.0
+REFUSALS = (401, 403, 404)
 
 
 def credentials(slug: str) -> dict[str, str]:
@@ -185,6 +188,51 @@ def alive(beat):
         beat.touch()
 
 
+def backoff(delay: float, interval: float) -> float:
+    """The wait after one more failed read of the ledger database: twice the last, at most BACKOFF_CAP_S or
+    --interval when that is longer."""
+    return min(delay * 2, max(BACKOFF_CAP_S, interval))
+
+
+def warned(exc: Exception, failure: str | None) -> str:
+    """Print the stream warning for exc unless it repeats the last failure; the failure now on record."""
+    if str(exc) != failure:
+        say(f"WARNING ledger stream: {exc}")
+    return str(exc)
+
+
+def reason(exc: urllib.error.HTTPError) -> str:
+    """The refusal's status and the ledger's error message, or the HTTP reason when the body carries none."""
+    try:
+        message = json.loads(exc.read())["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        message = exc.reason
+    return f"HTTP {exc.code} {message}"
+
+
+def refused(exc: Exception, again: bool) -> bool:
+    """Whether exc is an HTTP 401, 403 or 404 refusal; one that follows a refusal, on a credential read again,
+    prints STOPPED and exits 1, since another reconnect cannot clear it."""
+    if not isinstance(exc, urllib.error.HTTPError) or exc.code not in REFUSALS:
+        return False
+    if again:
+        say(f"STOPPED ledger watch: {reason(exc)}")
+        sys.exit(1)
+    return True
+
+
+def found(repository: Any, slug: str, interval: float) -> bool:
+    """Whether the ledger exists, asked again after a growing wait while its database is unreachable."""
+    delay, failure = interval, None
+    while True:
+        try:
+            return repository.exists(slug)
+        except sqlite3.DatabaseError as exc:
+            failure = warned(exc, failure)
+            time.sleep(delay)
+            delay = backoff(delay, interval)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("slug")
@@ -197,7 +245,7 @@ def main() -> None:
 
     repository = storage.default()
 
-    if not repository.exists(args.slug):
+    if not found(repository, args.slug, args.interval):
         sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")
     beat = core.watch_path(args.slug, args.name) if args.name else None
     watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
@@ -211,9 +259,10 @@ def main() -> None:
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, stop)
-    headers, cursor, failure = None, None, None
+    headers, cursor, failure, delay, refusal = None, None, None, args.interval, False
     while not stopping:
         alive(beat)
+        pause = args.interval
         try:
             headers = headers or credentials(args.slug)
             if stopping:
@@ -221,18 +270,18 @@ def main() -> None:
             for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)
-                cursor, failure = event_id or cursor, None
+                cursor, failure, delay, refusal = event_id or cursor, None, args.interval, False
         except Expired:
             cursor = None
             continue
         except (KeyError, TypeError):
             cursor = None
+        except sqlite3.DatabaseError as exc:
+            failure, pause, delay = warned(exc, failure), delay, backoff(delay, args.interval)
         except (OSError, ValueError) as exc:
-            headers = None
-            if str(exc) != failure:
-                failure = str(exc)
-                say(f"WARNING ledger stream: {failure}")
-        time.sleep(args.interval)
+            headers, refusal = None, refused(exc, refusal)
+            failure = warned(exc, failure)
+        time.sleep(pause)
 
 
 if __name__ == "__main__":
