@@ -95,7 +95,7 @@ def test_a_scaffolded_step_passes_the_catalogue_check_beside_every_registered_st
     for each in real:
         fresh.register(each)
     mapped = json.loads((tree / "feature-map.json").read_text())
-    mapped["features"] += json.loads((ROOT / "feature-map.json").read_text())["features"]
+    mapped["features"] += import_module("scripts.feature_map").load(ROOT / "feature-map.json")["features"]
     (tree / "feature-map.json").write_text(json.dumps(mapped))
     assert import_module("scripts.tick.catalogue").check(tree) == []
     assert STEP in {each.name for each in fresh.steps()}
