@@ -2,7 +2,7 @@
 own task selection and focus verdict code, so a fake never judges a gate its own way."""
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, cast
 
 from scripts.swarm import admission_view
@@ -11,7 +11,8 @@ from scripts.swarm_ledger.api import resources
 
 
 class NarrowReads:
-    """The task, phase, metadata, selection and focus reads of the document ``document(slug)`` returns."""
+    """The task, phase, metadata, selection, thread, artifact and focus reads of the document ``document(slug)``
+    returns."""
 
     def __init__(self, document: Callable[[str], dict[str, Any]], fix: str = "") -> None:
         self.document, self.fix = document, fix
@@ -39,6 +40,23 @@ class NarrowReads:
         reply = task_list.selecting(self.document(slug)["tasks"], where_query(**filters))
         found: list[dict[str, Any]] = reply["data"]
         return found
+
+    def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
+        from scripts.swarm.ledger_client import where_query
+        from scripts.swarm_ledger.api import task_list
+
+        reply = task_list.selecting(self.document(slug)["tasks"], where_query(phases=phases, fields=fields))
+        found: list[dict[str, Any]] = reply["data"]
+        return found
+
+    def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
+        collection, _, item_id = record.partition("/")
+        rows: list[dict[str, Any]] = self.document(slug).get(collection) or []
+        found = next((row for row in rows if row.get("id") == item_id), {})
+        return [dict(entry) for entry in found.get(name, [])]
+
+    def artifacts(self, slug: str) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.document(slug).get("artifacts") or []]
 
     def focus_verdicts(self, slug: str, target: str) -> dict[str, Any] | None:
         found = focus_check.read(self.document(slug), f"focus/{target}", self.fix, int(time.time() * 1000))

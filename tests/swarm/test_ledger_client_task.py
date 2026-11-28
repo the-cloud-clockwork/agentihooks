@@ -118,6 +118,79 @@ def test_any_other_refusal_of_a_targeting_read_is_raised(
     assert raised.value.code == code
 
 
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_phase_read_asks_the_ledger_for_the_tasks_of_those_phases_cut_to_their_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads = served(monkeypatch, [{"id": "t1", "title": "T"}])
+
+    found = ledger_client.LedgerClient().tasks_in_phases("demo", iter(["p1", "p2"]), ("title", "state"))
+
+    assert found == [{"id": "t1", "title": "T"}]
+    assert reads == [("demo", "tasks?fields=title%2Cstate&phases=p1%2Cp2", False)]
+
+
+PHASED_ROWS = [
+    {"id": "t1", "phase": "p1", "title": "A", "comments": [{"text": "x"}]},
+    {"id": "t2", "phase": "p3", "title": "B"},
+    {"id": "t3", "phase": "p2", "title": "C", "state": "done"},
+]
+
+
+def phase_refusing(code: int, error: str, reads: list[tuple[str, str, bool]]) -> object:
+    def resource(slug: str, path: str, collection: bool = False) -> list[dict[str, object]]:
+        reads.append((slug, path, collection))
+        if not collection:
+            raise refused(code, error)
+        return PHASED_ROWS
+
+    return SimpleNamespace(resource=resource)
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_ledger_without_the_phase_selection_falls_back_to_selecting_its_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: phase_refusing(400, "schema_invalid", reads))
+
+    found = ledger_client.LedgerClient().tasks_in_phases("demo", iter(["p1", "p2"]), ("title", "state"))
+
+    assert found == [{"id": "t1", "title": "A"}, {"id": "t3", "state": "done", "title": "C"}]
+    assert reads[1:] == [("demo", "tasks", True)]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+@pytest.mark.parametrize("code,error", [(400, "revision_conflict"), (500, "schema_invalid")])
+def test_any_other_refusal_of_a_phase_read_is_raised(monkeypatch: pytest.MonkeyPatch, code: int, error: str) -> None:
+    reads: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: phase_refusing(code, error, reads))
+
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        ledger_client.LedgerClient().tasks_in_phases("demo", ["p1"])
+
+    assert raised.value.code == code
+    assert [collection for _, _, collection in reads] == [False]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_thread_read_pages_one_record_thread_by_its_quoted_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = [{"id": "c1", "text": "landed"}]
+    reads = served(monkeypatch, entries)
+
+    assert ledger_client.LedgerClient().thread("demo", "phases/p 1", "comments") == entries
+    assert reads == [("demo", "phases/p%201/comments", True)]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_an_artifacts_read_pages_the_artifact_collection_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [{"id": "artifact_add-a1", "plan": True, "file": {"id": "plan-file"}}]
+    reads = served(monkeypatch, rows)
+
+    assert ledger_client.LedgerClient().artifacts("demo") == rows
+    assert reads == [("demo", "artifacts", True)]
+
+
 def test_a_watchdog_copy_read_names_the_watchdog_resource(monkeypatch):
     reads = served(monkeypatch, {"text": "copy", "digest": "d"})
     assert ledger_client.LedgerClient(service=True).watchdog_copy("demo") == {"text": "copy", "digest": "d"}

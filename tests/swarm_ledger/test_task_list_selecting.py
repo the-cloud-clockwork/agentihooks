@@ -65,6 +65,31 @@ def test_the_client_query_names_only_the_filters_given() -> None:
     assert ledger_client.where_query() == {}
 
 
+PHASED: list[dict[str, Any]] = [
+    {"id": "a", "phase": "p2", "title": "A", "proof": {"evidence": "run"}},
+    {"id": "b", "phase": "p1", "title": "B", "state": "open"},
+    {"id": "c", "phase": "p3", "title": "C"},
+    {"id": "d", "phase": "p2", "title": "D", "state": "done"},
+    {"id": "e", "title": "E"},
+]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_phase_selection_returns_the_rows_of_those_phases_in_stored_order() -> None:
+    assert ids(task_list.selecting(PHASED, {"phases": "p2,p1"})) == ["a", "b", "d"]
+    assert ids(task_list.selecting(PHASED, {"phases": "p2", "states": "done"})) == ["d"]
+    assert task_list.selecting(PHASED, {"phases": "p2", "fields": "proof,title"})["data"] == [
+        {"id": "a", "proof": {"evidence": "run"}, "title": "A"},
+        {"id": "d", "title": "D"},
+    ]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_the_client_query_names_the_phases_it_selects() -> None:
+    assert ledger_client.where_query(phases=["p1", "p2"], fields=["title"]) == {"phases": "p1,p2", "fields": "title"}
+    assert task_list.selection("tasks", {"phases": "p1"})
+
+
 @pytest.mark.feature("hub-admission-narrow-read")
 @pytest.mark.parametrize(
     ("path", "query", "selected"),
@@ -94,8 +119,9 @@ def test_only_a_plain_tasks_read_naming_a_filter_is_a_selection(
         ({"pinned": True}, []),
         ({"branches": ("c-branch",)}, []),
         ({"ids": ("t1", "t2"), "fields": ("state",)}, ["t1", "t2"]),
+        ({"phases": ("p1",), "fields": ("title",)}, []),
     ],
-    ids=["ids", "states", "pinned", "branches", "fields"],
+    ids=["ids", "states", "pinned", "branches", "fields", "phases"],
 )
 def test_the_tasks_route_serves_every_selection_the_client_asks_for(
     filters: dict[str, Any], expected: list[str]

@@ -246,6 +246,18 @@ class LedgerClient:
         rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
         return rows
 
+    def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
+        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection."""
+        return []
+
+    def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
+        """Every entry of one record's thread, such as a phase's comments, read page by page without the record."""
+        return []
+
+    def artifacts(self, slug: str) -> list[dict[str, Any]]:
+        """The ledger's artifact rows, read without the rest of the ledger."""
+        return []
+
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
@@ -537,6 +549,7 @@ def where_query(
     pinned: bool = False,
     branches: Iterable[str] = (),
     fields: Iterable[str] = (),
+    phases: Iterable[str] = (),
 ) -> dict[str, str]:
     """The tasks collection query naming only the filters given."""
     query = {

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from scripts.hive import orders
 from scripts.hub import admission
 from scripts.swarm import admission_view, readiness
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -156,12 +157,19 @@ def test_an_admission_hands_the_continuation_the_rows_on_its_task_branch(
 
 
 @pytest.mark.feature("hub-admission-narrow-read")
-def test_an_admission_reads_a_plan_task_steering_through_its_readiness_source(gates: SimpleNamespace) -> None:
-    gates.found["tasks"].append(task("plan-p1", kind="plan", lane="plan"))
+def test_a_plan_task_admission_never_reads_the_full_export_when_the_revision_moves(
+    gates: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gates.found["phases"][0]["comments"] = [{"id": "c1", "by": "engineer@h-1", "at": 1, "text": "built it"}]
+    gates.found["tasks"].append(task("plan-p2", phase="p2", kind="plan", lane="plan"))
 
-    gates.admitter.admit(SLUG, ask(task="plan-p1", lane="plan"))
+    admitted = gates.admitter.admit(SLUG, ask(task="plan-p2", lane="plan"))
 
-    assert gates.ledger.exports == 1
+    assert admitted is not None and admitted["task"]["id"] == "plan-p2"
+    steering = admitted["task"][orders.SEEDS]["steering.md"]
+    assert "Dependency tasks for build" in steering and "Last five comments for build\nbuilt it" in steering
+    assert gates.ledger.exports == 0
+    assert "late" not in capsys.readouterr().err
 
 
 @pytest.mark.feature("plan-evidence-phase-less-plan-task")
