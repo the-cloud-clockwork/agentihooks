@@ -339,15 +339,19 @@ The package supplies `pre-any-first_read.sh`, `post-bash-first_read_mark.py`
 and `start-first_read_reset.py` on Claude Code and Codex. They apply to swarm
 members and quick seats; standalone sessions pass through.
 
-The `first-read` gate defaults to `observe`. Before a session runs
-`agentihooks seat brief`, ordinary calls produce a would-be denial naming that
-command. `enforce` blocks those calls. Seat brief, the mounted profile canary,
-the launch opening prompt Read, ToolSearch and condition tools remain exempt.
+The `first-read` gate defaults to `enforce`. Before a session runs
+`agentihooks seat brief`, ordinary calls are refused with a reason naming that
+command; `observe` lets them run and records a would-be denial. Seat brief, the
+mounted profile canary, the launch opening prompt Read, ToolSearch and condition
+tools remain exempt.
 Codex shell names are normalized to Bash before the conditions run.
 
 A completed successful brief writes `AGENTIHOOKS_HOME/first-read/<session-id>`;
 the default home is `~/.agentihooks`. A failed or still-running command leaves
-the session unread. SessionStart with `source=compact` clears only that session's
+the session unread. Codex sends the command output as plain text with no exit
+code, so a plain response counts as success when its first line, after an
+optional Codex truncation warning, is the brief's `Seat <seat>.` header or its
+no seat line. SessionStart with `source=compact` clears only that session's
 marker. The pre condition exits in Bash before starting Python for standalone
 sessions and for sessions whose marker already exists.
 
@@ -355,10 +359,11 @@ SessionStart also caches resolved seat membership under
 `first-read/.members/<session-id>`, so a swarm identity supplied by the session
 registry follows the same fast path as one supplied by environment variables.
 
-Use the existing gate controls to select `first-read-gate=off` on a swarm.
-`AGENTIHOOKS_GATE_FIRST_READ=off` selects off when the swarm configuration does
-not supply a mode. Changing the default to enforce is a separate rollout after
-the observe log is checked.
+Use the existing gate controls to select `first-read-gate=observe` or
+`first-read-gate=off` on a swarm; hooks pick it up within five seconds, with no
+release.
+`AGENTIHOOKS_GATE_FIRST_READ` selects the mode only outside a swarm or when the
+swarm configuration cannot be read.
 
 ## Performance
 

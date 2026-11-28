@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from scripts import seat_brief
 from scripts.gates import first_read
 
 
@@ -116,6 +117,56 @@ def test_codex_code_mode_success_marks(response: Any) -> None:
         }
     )
     assert first_read.marker_path("one").read_text() == "1"
+
+
+@pytest.mark.feature("first-read-gate")
+@pytest.mark.parametrize(
+    "response",
+    [
+        "Warning: truncated output (original token count: 51981)\nTotal output lines: 740\n\n"
+        "Seat ci-1@rig-grade-swarm.\nHandoff:\n# Handoff v2\n",
+        "Seat eng-1@rig-grade-swarm.\nHandoff:\nnone\nCulture:\nnone\n",
+        f"{seat_brief.NO_SEAT}\n",
+    ],
+)
+def test_codex_plain_brief_output_marks(response: str) -> None:
+    first_read.mark(
+        {
+            "session_id": "one",
+            "tool_name": "Bash",
+            "tool_input": {"command": "agentihooks seat brief"},
+            "tool_response": response,
+        }
+    )
+    assert first_read.marker_path("one").read_text() == "1"
+
+
+@pytest.mark.feature("first-read-gate")
+@pytest.mark.parametrize(
+    "response",
+    [
+        "seat brief: Error 111 connecting to localhost:6379. Connection refused.\n",
+        "Warning: truncated output (original token count: 12)\nTotal output lines: 2\n\nseat brief: store failed\n",
+        "On branch dev\nnothing to commit\n",
+        "notes\nSeat eng-1@rig-grade-swarm.\n",
+        "Seat eng-1@rig-grade-swarm\n",
+        "Seat .\n",
+        "Warning: truncated output (original token count: )\nTotal output lines: 1\n\nSeat eng-1@rig-grade-swarm.\n",
+        "Warning: truncated output (original token count: 9)\nTotal output lines: \n\nSeat eng-1@rig-grade-swarm.\n",
+        "Warning: truncated output (original token count: 9)\nTotal output lines: 1\n\n\nSeat eng-1@rig-grade-swarm.\n",
+        "",
+    ],
+)
+def test_codex_plain_output_without_brief_header_does_not_mark(response: str) -> None:
+    first_read.mark(
+        {
+            "session_id": "one",
+            "tool_name": "Bash",
+            "tool_input": {"command": "agentihooks seat brief"},
+            "tool_response": response,
+        }
+    )
+    assert not first_read.marker_path("one").exists()
 
 
 @pytest.mark.feature("first-read-gate")
