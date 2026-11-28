@@ -151,6 +151,25 @@ def test_the_resolver_reads_each_repository_through_one_reader_of_its_own() -> N
     assert merges.Resolver(mirror).reader is merges.Actions
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_resolver_builds_its_reader_for_the_owner_and_name_of_a_repository_address() -> None:
+    made: list[str] = []
+    asked: list[str] = []
+
+    def reader(slug: str) -> FakePullRequests:
+        made.append(slug)
+        return FakePullRequests({41: {}})
+
+    def mirror(repo: str) -> Mirror:
+        asked.append(repo)
+        return Mirror(Path("node"), Path("store"), repo)
+
+    resolver = merges.Resolver(mirror, reader)
+    assert resolver("https://github.com/example/repo", 41, HEAD) is None
+    assert made == ["example/repo"]
+    assert asked == ["https://github.com/example/repo"]
+
+
 WAIT_S = 10.0
 
 
@@ -491,6 +510,28 @@ def test_actions_builds_a_scoped_github_app_auth_when_none_is_given(monkeypatch:
     actions = merges.Actions("owner/name")
     assert actions.auth is build.return_value
     build.assert_called_once_with("github.com/owner/name", permissions=merges.PERMISSIONS)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_resolvers_default_reader_reads_a_repository_address_by_its_owner_and_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = Mock(return_value=Token())
+    monkeypatch.setattr(merges, "GitHubAppAuth", build)
+    get = Mock(return_value=_response(200, {"number": 41}))
+    monkeypatch.setattr(requests, "get", get)
+
+    def mirror(repo: str) -> Mirror:
+        return Mirror(Path("node"), Path("store"), repo)
+
+    resolver = merges.Resolver(mirror)
+    assert resolver("https://github.com/owner/name", 41, HEAD) is None
+    build.assert_called_once_with("github.com/owner/name", permissions=merges.PERMISSIONS)
+    get.assert_called_once_with(
+        f"{merges.API}/repos/owner/name/pulls/41",
+        headers={"Authorization": "Bearer fixture", **merges.HEADERS},
+        timeout=merges.TIMEOUT,
+    )
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
