@@ -11,9 +11,9 @@ pass on a thread pool, raising its subclass `MergePending` while one still runs 
 `MergeRefused`, it raises wrapped as `MergeUnanswered` instead, so no error of a resolution ever reaches a
 caller as anything but the `MergeRefused` family. A finished resolution waits for its own head whatever other
 heads are asked meanwhile, `kept_s` after it started at most. A found merge then answers every call of its head
-until `fresh_s` after it started; an absent answer and a failed resolution are each read once and gone, so the
-next call starts a new one. `Resolver` keeps one GitHub reader per repository the lab grades, reading the
-repository's mirror through the port the scheduler gives it.
+until `fresh_s` after it started and the first call at or after that once more; an absent answer and a failed
+resolution are each read once and gone, so the next call starts a new one. `Resolver` keeps one GitHub reader
+per repository the lab grades, reading the repository's mirror through the port the scheduler gives it.
 """
 
 import subprocess
@@ -178,8 +178,8 @@ class Background:
     resolution waits for the head it was started for: calls for other heads leave it alone until that head
     reads it, and one no head reads is forgotten `kept_s` after a thread began it, so its head asking later
     starts a new one. A resolution that found a merge then answers every call of its head until `fresh_s` after
-    a thread began it, so no merge is reused longer; an absent answer is read once and then gone, so the next
-    call starts a new resolution and so reads GitHub again."""
+    a thread began it and the first call at or after that once more, so no merge is reused longer; an absent
+    answer is read once and then gone, so the next call starts a new resolution and so reads GitHub again."""
 
     def __init__(
         self,

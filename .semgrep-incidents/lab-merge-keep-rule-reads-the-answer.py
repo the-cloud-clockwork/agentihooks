@@ -46,6 +46,13 @@ def drops_every_failed_answer(table: Any, key: Key) -> None:
             del table.resolutions[each]
 
 
+def drops_every_answer_past_its_window(table: Any, now: float) -> None:
+    for each, (began, future) in list(table.resolutions.items()):
+        # ok: lab-merge-keep-rule-reads-the-answer
+        if future.done() and now - began[0] >= (table.fresh_s if each in table.read else table.kept_s):
+            del table.resolutions[each]
+
+
 def prunes_by_age_and_whether_its_head_read_it(table: Any, now: float) -> dict[Key, Entry]:
     return {
         each: (began, future)
