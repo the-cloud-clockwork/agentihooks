@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import slice_check
-from scripts.swarm.thin_task import section_complete, thin
+from scripts.swarm.thin_task import exempt, section_complete, thin
 from tests.swarm.generated_release import generated_release
 
 pytestmark = pytest.mark.unit
@@ -285,6 +285,11 @@ def test_a_task_that_is_not_the_ops_release_task_of_its_own_phase_is_still_thin(
         f"Task {tid} names no territory.",
         *seamless,
     ]
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+def test_exempt_answers_a_plain_boolean_for_the_release_task_with_and_without_a_phase() -> None:
+    assert (exempt(generated_release()), exempt({**generated_release(), "phase": ""})) == (True, False)
 
 
 @pytest.mark.parametrize("mark", ["", "needed"])
