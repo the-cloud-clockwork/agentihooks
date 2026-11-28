@@ -1,0 +1,30 @@
+{
+  "id": "swarm-gitlab-change-close",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-gl-ready-done-lift",
+  "behaviour": "A swarm task whose pull request is a GitLab merge request is read through the GitLab API, so swarm ready carries it with its head, refuses it while it is a draft, swarm done closes it once merged and refuses it while open, and a lift binds its head; without a token or on a failed or malformed read it reads nothing and never asks GitHub. The read carries state, head, merge time, draft flag and description only: GitLab pipeline results are not mapped to the red or resolved fields yet, and a GitHub rate limit hold does not hold a GitLab read.",
+  "seam": "the swarm pull request view and the intent gate head and merged reads, which send a GitLab merge request link to the GitLab pull adapter over the forge merge request state read",
+  "tests": [
+    "tests/swarm/test_gitlab_pull.py::test_a_gitlab_link_without_a_token_reads_no_pull_request",
+    "tests/swarm/test_gitlab_pull.py::test_a_link_of_no_forge_reads_no_pull_request",
+    "tests/swarm/test_gitlab_pull.py::test_an_unreadable_gitlab_merge_time_reads_no_pull_request",
+    "tests/swarm/test_gitlab_pull.py::test_the_view_reads_an_opened_gitlab_merge_request_without_github",
+    "tests/swarm/test_gitlab_pull.py::test_the_view_reads_a_merged_gitlab_merge_request_with_its_merge_time",
+    "tests/swarm/test_gitlab_pull.py::test_the_view_reads_a_closed_gitlab_merge_request_as_closed",
+    "tests/swarm/test_gitlab_pull.py::test_the_view_carries_the_gitlab_draft_flag",
+    "tests/swarm/test_gitlab_pull.py::test_a_missing_token_reads_nothing_from_gitlab_or_github",
+    "tests/swarm/test_gitlab_pull.py::test_a_missing_gitlab_merge_request_reads_no_pull_request",
+    "tests/swarm/test_gitlab_pull.py::test_a_gitlab_server_error_reads_no_pull_request",
+    "tests/swarm/test_gitlab_pull.py::test_the_intent_head_read_answers_the_gitlab_merge_request_head",
+    "tests/swarm/test_gitlab_pull.py::test_the_intent_head_read_of_a_missing_merge_request_is_none",
+    "tests/swarm/test_gitlab_pull.py::test_the_intent_merged_read_is_true_only_for_a_merged_gitlab_merge_request",
+    "tests/swarm/test_gitlab_pull.py::test_the_adapter_reads_through_the_token_and_transport_it_is_given",
+    "tests/swarm/test_ready.py::test_ready_carries_a_gitlab_merge_request_with_its_head",
+    "tests/swarm/test_ready.py::test_ready_refuses_a_gitlab_draft_with_the_gitlab_hint",
+    "tests/swarm/test_cli_done_read.py::test_done_closes_a_task_on_its_merged_gitlab_merge_request",
+    "tests/swarm/test_cli_done_read.py::test_done_refuses_a_task_whose_gitlab_merge_request_is_open",
+    "tests/gates/test_page_lift.py::test_the_lift_binds_the_task_and_its_gitlab_merge_request_head",
+    "tests/forge/test_gitlab.py::test_the_state_read_carries_the_draft_flag_description_and_merge_time",
+    "tests/forge/test_gitlab.py::test_an_answer_without_draft_merge_time_or_description_reads_ready_unmerged_and_empty"
+  ]
+}
