@@ -2123,7 +2123,7 @@
         "tests/swarm/test_admission_view.py::test_the_view_reads_the_task_the_rows_it_names_and_the_running_rows_only",
         "tests/swarm/test_admission_view.py::test_a_task_with_nothing_named_reads_only_the_running_rows",
         "tests/swarm/test_admission_view.py::test_a_gone_task_leaves_no_row_and_withdraws_its_offer",
-        "tests/swarm/test_admission_view.py::test_a_plan_task_keeps_the_whole_document_for_its_steering",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_reads_its_phase_without_the_whole_document",
         "tests/swarm/test_admission_view.py::test_the_withdrawal_asks_the_ledger_claim_gate_once_the_local_checks_pass",
         "tests/swarm/test_admission_view.py::test_a_local_refusal_never_asks_the_ledger",
         "tests/swarm/test_admission_view.py::test_the_view_counts_an_unfinished_agent_or_a_claimant_as_claimed",
@@ -2138,8 +2138,33 @@
         "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
         "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
         "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
-        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
+        "tests/hub/test_admission_gates.py::test_a_plan_task_admission_never_reads_the_full_export_when_the_revision_moves",
         "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
+      ]
+    },
+    {
+      "id": "plan-lane-admission-narrow-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2879",
+      "behaviour": "A plan task admission builds the steering evidence its claim seeds read from narrow ledger reads alone: the overview, its own phase, each phase it depends on walked breadth first with its comment thread, the tasks of those phases through a tasks selection by phase that a refusal never widens into the tasks collection, and the artifact rows when its phase holds a published plan; the steering text equals the one built from the whole export, and it never reads the export.",
+      "seam": "admission_view.Narrow over a ledger whose export is counted, ledger_workspace.steering over the view document and over the whole export, the ledger API tasks selection by phase and the ledger client tasks_in_phases, thread and artifacts reads",
+      "tests": [
+        "tests/swarm/test_admission_view.py::test_a_plan_task_steering_from_the_view_equals_the_steering_from_the_whole_export",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_reads_each_dependency_phase_and_its_comments_once_and_never_the_export",
+        "tests/swarm/test_admission_view.py::test_a_dependency_task_the_view_already_holds_keeps_its_fields_under_the_evidence_fields",
+        "tests/swarm/test_admission_view.py::test_a_dependency_phase_the_ledger_no_longer_holds_ends_the_walk_as_the_evidence_does",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_without_a_phase_gets_only_the_project_intent_without_the_export",
+        "tests/swarm/test_admission_view.py::test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phase",
+        "tests/swarm/test_admission_view.py::test_a_phase_that_names_no_dependency_list_ends_the_walk_there",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_phase_selection_returns_the_rows_of_those_phases_in_stored_order",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_the_phases_it_selects",
+        "tests/swarm/test_ledger_client_task.py::test_a_phase_read_asks_the_ledger_for_the_tasks_of_those_phases_cut_to_their_fields",
+        "tests/swarm/test_ledger_client_task.py::test_a_refused_phase_read_is_raised_and_never_widens_into_the_tasks_collection",
+        "tests/swarm/test_ledger_client_task.py::test_a_thread_read_pages_one_record_thread_by_its_quoted_id",
+        "tests/swarm/test_ledger_client_task.py::test_an_artifacts_read_pages_the_artifact_collection_alone"
+      ],
+      "rules": [
+        "hub-admission-reads-full-export"
       ]
     },
     {

@@ -2,14 +2,14 @@
 verdict it trusts and the root slots it keeps."""
 
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.swarm import admission_view, claim_hold, lab_capacity, readiness
+from scripts.swarm import admission_view, claim_hold, lab_capacity
 from scripts.swarm.health import focus_check
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.api import resources
@@ -96,6 +96,7 @@ class Recording(DocLedger):
         self.selected: list[dict[str, Any]] = []
         self.judged: list[str] = []
         self.slugs: list[str] = []
+        self.reads: list[str] = []
 
     def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
         self.slugs.append(slug)
@@ -103,7 +104,23 @@ class Recording(DocLedger):
 
     def item(self, slug: str, path: str) -> dict[str, Any] | None:
         self.slugs.append(slug)
+        self.reads.append(path)
         return super().item(slug, path)
+
+    def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
+        self.slugs.append(slug)
+        self.reads.append(f"{record}/{name}")
+        return super().thread(slug, record, name)
+
+    def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
+        self.slugs.append(slug)
+        self.reads.append(f"tasks of {','.join(phases)}")
+        return super().tasks_in_phases(slug, phases, fields)
+
+    def artifacts(self, slug: str) -> list[dict[str, Any]]:
+        self.slugs.append(slug)
+        self.reads.append("artifacts")
+        return super().artifacts(slug)
 
     def metadata(self, slug: str) -> dict[str, Any]:
         self.slugs.append(slug)
@@ -143,7 +160,7 @@ def narrow() -> Iterator[SimpleNamespace]:
         ]
     )
     ledger: Any = Recording(found)
-    view = admission_view.Narrow(lambda: store, ledger, readiness.Source(store, ledger))
+    view = admission_view.Narrow(lambda: store, ledger)
     yield SimpleNamespace(store=store, ledger=ledger, found=found, view=view)
     store.redis.close()
 
@@ -226,13 +243,212 @@ def test_a_gone_task_leaves_no_row_and_withdraws_its_offer(narrow: SimpleNamespa
 
 
 @pytest.mark.feature("hub-admission-narrow-read")
-def test_a_plan_task_keeps_the_whole_document_for_its_steering(narrow: SimpleNamespace) -> None:
+def test_a_plan_task_reads_its_phase_without_the_whole_document(narrow: SimpleNamespace) -> None:
     narrow.found["tasks"].append(task("plan-p1", kind="plan", lane="plan"))
 
     view = narrow.view.task(SLUG, "plan-p1", marks()[1])
 
-    assert view.doc["tasks"] == narrow.found["tasks"]
-    assert narrow.ledger.exports == 1
+    assert {row["id"] for row in view.doc["tasks"]} == set(view.rows)
+    assert [phase["id"] for phase in view.doc["phases"]] == ["p1"]
+    assert "artifacts" not in view.doc
+    assert narrow.ledger.reads == ["phases/p1"]
+    assert narrow.ledger.exports == 0
+
+
+PLAN_TEXT = "# Plan\n\n## Build\n\n<!-- slice: one -->\n### one\n- First slice\n"
+
+
+def comments(*texts: str, deleted: int = -1) -> list[dict[str, Any]]:
+    return [
+        {"id": f"c{n}", "by": "engineer@h-1", "at": n, "text": text, **({"deleted": True} if n == deleted else {})}
+        for n, text in enumerate(texts)
+    ]
+
+
+def planned(found: dict[str, Any]) -> None:
+    """Phase p4 holds a plan task enhancing t5 and a published plan; it depends on p3 and p2, p3 on p2 and back on
+    p4, p2 on p1 twice and on itself; dependency phases carry comments, one deleted, and tasks with proofs and pull
+    requests."""
+    phases = {phase["id"]: phase for phase in found["phases"]}
+    phases["p1"]["comments"] = comments("p1 started")
+    phases["p2"].update(
+        depends_on=["p1", "p1", "p2"], comments=comments(*(f"p2 note {n}" for n in range(7)), deleted=6)
+    )
+    found["phases"] += [
+        {"id": "p3", "title": "wire", "depends_on": ["p2", "p4"], "comments": comments("wired")},
+        {
+            "id": "p4",
+            "title": "plan",
+            "description": "plan the rest",
+            "depends_on": ["p3", "p2"],
+            "comments": comments("own phase talk"),
+            "review": {"state": "sent_back", "note": "split it"},
+            "plan_ref": {"artifact": f"https://ledger.example/artifacts/{SLUG}/plan-file", "lines": "3-7"},
+        },
+    ]
+    found["artifacts"] = [
+        {"id": "artifact_add-a1", "title": "plan", "plan": True, "file": {"id": "plan-file"}},
+        {"id": "artifact_add-a2", "title": "logo", "file": {"id": "logo-file"}},
+    ]
+    rows = {row["id"]: row for row in found["tasks"]}
+    rows["t5"].update(description="target work", territory=["scripts/x"])
+    rows["t6"].update(claimed_by="engineer@h-1", proof={"evidence": "run 9"})
+    found["tasks"] += [
+        task("d3", phase="p3", state="pr", pr_url="https://example.invalid/pull/31"),
+        task("d2", phase="p2", state="done", proof={"evidence": "run 2"}),
+        task("plan-p4", phase="p4", kind="plan", lane="plan", enhances="t5"),
+    ]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_plan_task_steering_from_the_view_equals_the_steering_from_the_whole_export(
+    narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import ledger_artifacts, ledger_workspace
+
+    monkeypatch.delenv("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", raising=False)
+    monkeypatch.setattr(ledger_artifacts, "read", lambda slug, file_id: PLAN_TEXT.encode())
+    planned(narrow.found)
+
+    view = narrow.view.task(SLUG, "plan-p4", marks()[1])
+    row = view.rows["plan-p4"]
+    steering = ledger_workspace.steering(row, view.doc)
+
+    assert steering == ledger_workspace.steering(row, narrow.found)
+    for part in (
+        "Dependency tasks for wire",
+        "Last five comments for later\np2 note 1",
+        "Dependency tasks for build",
+        "run 9",
+        "Review note\nsplit it",
+        "Slice names\nThe phase plan is already published",
+        "target work",
+    ):
+        assert part in steering
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_plan_task_reads_each_dependency_phase_and_its_comments_once_and_never_the_export(
+    narrow: SimpleNamespace,
+) -> None:
+    planned(narrow.found)
+
+    view = narrow.view.task(SLUG, "plan-p4", marks()[1])
+
+    assert narrow.ledger.exports == 0
+    assert narrow.ledger.reads == [
+        "phases/p4",
+        "phases/p3",
+        "phases/p3/comments",
+        "phases/p2",
+        "phases/p2/comments",
+        "phases/p1",
+        "phases/p1/comments",
+        "tasks of p3,p2,p1",
+        "artifacts",
+    ]
+    assert set(narrow.ledger.slugs) == {SLUG}
+    assert [phase["id"] for phase in view.doc["phases"]] == ["p4", "p3", "p2", "p1"]
+    assert [entry["text"] for entry in view.doc["phases"][1]["comments"]] == ["wired"]
+    assert [row["id"] for row in view.doc["artifacts"]] == ["artifact_add-a1", "artifact_add-a2"]
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_dependency_task_the_view_already_holds_keeps_its_fields_under_the_evidence_fields(
+    narrow: SimpleNamespace,
+) -> None:
+    planned(narrow.found)
+
+    listed = narrow.view.task(SLUG, "plan-p4", marks()[1]).doc["tasks"]
+    tasks = {row["id"]: row for row in listed}
+
+    assert len(tasks) == len(listed)
+    assert [key for key in tasks if key.startswith("d")] == ["d3", "d2"]
+    assert tasks["d3"] == {
+        "id": "d3",
+        "phase": "p3",
+        "pr_url": "https://example.invalid/pull/31",
+        "state": "pr",
+        "title": "title d3",
+    }
+    assert tasks["t5"]["description"] == "target work" and tasks["t5"]["territory"] == ["scripts/x"]
+    assert tasks["t6"]["claimed_by"] == "engineer@h-1" and tasks["t6"]["proof"] == {"evidence": "run 9"}
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_dependency_phase_the_ledger_no_longer_holds_ends_the_walk_as_the_evidence_does(
+    narrow: SimpleNamespace,
+) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    narrow.found["phases"].append({"id": "p5", "title": "orphan", "depends_on": ["gone", "p1"]})
+    narrow.found["tasks"].append(task("plan-p5", phase="p5", kind="plan", lane="plan"))
+
+    view = narrow.view.task(SLUG, "plan-p5", marks()[1])
+    row = view.rows["plan-p5"]
+
+    assert narrow.ledger.reads == ["phases/p5", "phases/gone"]
+    assert narrow.ledger.exports == 0
+    with pytest.raises(KeyError):
+        ledger_workspace.steering(row, narrow.found)
+    with pytest.raises(KeyError):
+        ledger_workspace.steering(row, view.doc)
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+@pytest.mark.parametrize(("phase", "reads"), [("", []), ("unknown", ["phases/unknown"])], ids=["no-phase", "unknown"])
+def test_a_plan_task_without_a_phase_gets_only_the_project_intent_without_the_export(
+    narrow: SimpleNamespace, phase: str, reads: list[str]
+) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    narrow.found["tasks"].append(task("plan-x", phase=phase, kind="plan", lane="plan"))
+
+    view = narrow.view.task(SLUG, "plan-x", marks()[1])
+    row = view.rows["plan-x"]
+
+    assert narrow.ledger.reads == reads
+    assert narrow.ledger.exports == 0
+    assert ledger_workspace.steering(row, view.doc) == ledger_workspace.steering(row, narrow.found)
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phase(narrow: SimpleNamespace) -> None:
+    planned(narrow.found)
+    narrow.found["tasks"].append(task("e4", phase="p4", kind="ops"))
+
+    view = narrow.view.task(SLUG, "e4", marks()[1])
+
+    assert narrow.ledger.reads == ["phases/p4"]
+    assert [phase["id"] for phase in view.doc["phases"]] == ["p4"]
+    assert "artifacts" not in view.doc
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+@pytest.mark.parametrize(
+    ("planned_task", "reads"),
+    [
+        ("plan-p6", ["phases/p6"]),
+        ("plan-p7", ["phases/p7", "phases/p6", "phases/p6/comments", "tasks of p6"]),
+    ],
+    ids=["own-phase", "dependency"],
+)
+def test_a_phase_that_names_no_dependency_list_ends_the_walk_there(
+    narrow: SimpleNamespace, planned_task: str, reads: list[str]
+) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    narrow.found["phases"] += [{"id": "p6", "title": "alone"}, {"id": "p7", "title": "after", "depends_on": ["p6"]}]
+    narrow.found["tasks"] += [
+        task("plan-p6", phase="p6", kind="plan", lane="plan"),
+        task("plan-p7", phase="p7", kind="plan", lane="plan"),
+    ]
+
+    view = narrow.view.task(SLUG, planned_task, marks()[1])
+    row = view.rows[planned_task]
+
+    assert narrow.ledger.reads == reads
+    assert ledger_workspace.steering(row, view.doc) == ledger_workspace.steering(row, narrow.found)
 
 
 @pytest.mark.feature("hub-admission-narrow-read")
@@ -371,9 +587,7 @@ def test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase
         judged.append((slug, sorted(rows)))
         return lambda task: True
 
-    view = admission_view.Narrow(
-        lambda: narrow.store, narrow.ledger, readiness.Source(narrow.store, narrow.ledger), admitting=admitting
-    ).task(SLUG, "t1", marks()[1])
+    view = admission_view.Narrow(lambda: narrow.store, narrow.ledger, admitting=admitting).task(SLUG, "t1", marks()[1])
 
     assert view.snapshot.slug == SLUG
     assert view.snapshot.fix == ""

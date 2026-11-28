@@ -246,6 +246,27 @@ class LedgerClient:
         rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
         return rows
 
+    def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
+        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection
+        that a refusal never widens into the whole tasks collection."""
+        rows: list[dict[str, Any]] = self._resource(
+            slug, f"tasks?{urlencode(where_query(phases=phases, fields=fields))}"
+        )
+        return rows
+
+    def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
+        """Every entry of one record's thread, such as a phase's comments, read page by page without the record."""
+        collection, _, item_id = record.partition("/")
+        entries: list[dict[str, Any]] = self._resource(
+            slug, f"{collection}/{quote(item_id, safe='')}/{name}", collection=True
+        )
+        return entries
+
+    def artifacts(self, slug: str) -> list[dict[str, Any]]:
+        """The ledger's artifact rows, read without the rest of the ledger."""
+        rows: list[dict[str, Any]] = self._resource(slug, "artifacts", collection=True)
+        return rows
+
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
@@ -537,6 +558,7 @@ def where_query(
     pinned: bool = False,
     branches: Iterable[str] = (),
     fields: Iterable[str] = (),
+    phases: Iterable[str] = (),
 ) -> dict[str, str]:
     """The tasks collection query naming only the filters given."""
     query = {
@@ -545,6 +567,7 @@ def where_query(
         "pinned": "1" if pinned else "",
         "branches": ",".join(branches),
         "fields": ",".join(fields),
+        "phases": ",".join(phases),
     }
     return {key: value for key, value in query.items() if value}
 
