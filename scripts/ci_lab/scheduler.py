@@ -25,7 +25,7 @@ import tempfile
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
@@ -2365,20 +2365,18 @@ class MirrorExpander:
 
     def _fetched(self, sha: str) -> Path | None:
         """Fetch a commit no store holds through the mirror of each served repository in turn, each fetch bound in
-        time, and return the store that got it, or None when no remote gives it. One request fetches at a time and
-        one that waited reads the stores again first, so requests for one commit at once fetch it once."""
+        time, and return the store that holds it, or None when no remote gave it. The stores are read again before
+        each fetch and after the last, never the fetch's own answer: a commit that arrived although its fetch
+        failed, as beside another writer's fetch of it, is found, and a fetch that brought no commit answers None.
+        One request fetches at a time, so requests for one commit at once fetch it once."""
         with self._fetching:
-            held = self._holding(sha)
-            if held is not None:
-                return held
             for repo in self.served:
-                mirror = self._mirror(repo)
-                try:
-                    mirror.fetch(sha, timeout=merges.GIT_TIMEOUT)
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                    continue
-                return mirror.store
-        return None
+                held = self._holding(sha)
+                if held is not None:
+                    return held
+                with suppress(subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    self._mirror(repo).fetch(sha, timeout=merges.GIT_TIMEOUT)
+            return self._holding(sha)
 
     def _tests(
         self,
@@ -2554,8 +2552,9 @@ def build(
     resolve_merges = merges.Background(merges.Resolver(expander.mirror))
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads(), resolve_merges, expander.bundle)
     repository = environ[REPOSITORY]
-    expander.serve(named(environ.get(contract.SERVED_REPOSITORIES, ""), repository))
-    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    listing = environ.get(contract.SERVED_REPOSITORIES, "")
+    expander.serve(named(listing, repository))
+    listed = served(listing, repository)
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)
