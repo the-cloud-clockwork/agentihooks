@@ -277,3 +277,21 @@ def test_the_state_read_sends_through_urlopen_by_default(monkeypatch: pytest.Mon
     monkeypatch.setattr(gitlab, "urlopen", answered)
     assert gitlab.merge_request_state(LINK, "fake-token").state == "open"
     assert (answered.request.get_method(), answered.request.full_url) == ("GET", f"{API}/12")
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_the_state_read_carries_the_draft_flag_description_and_merge_time() -> None:
+    merge = {**answer("merged", "success"), "draft": True, "merged_at": "2026-11-20T10:00:00.000Z"}
+    read = gitlab.merge_request_state(LINK, "fake-token", Sent(merge))
+    assert (read.draft, read.description, read.merged_at) == (
+        True,
+        "Reviewer seats read the change through the forge.",
+        "2026-11-20T10:00:00.000Z",
+    )
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_an_answer_without_draft_merge_time_or_description_reads_ready_unmerged_and_empty() -> None:
+    merge = {**answer(), "description": None}
+    read = gitlab.merge_request_state(LINK, "fake-token", Sent(merge))
+    assert (read.draft, read.description, read.merged_at) == (False, "", None)
