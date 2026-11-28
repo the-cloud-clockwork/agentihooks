@@ -101,3 +101,17 @@ class HiveLaunch:
     # ok: feature-work-folder-readers-and-launch-pointers
     def admit(self, request, selected):
         return self.store.start_execution(self.slug, request.agent, "")
+
+
+def named(slug, agent, recorded=""):
+    # ruleid: feature-work-folder-readers-and-launch-pointers
+    if ports.hive().reports.host(agent):
+        return portable(slug, agent.task)
+    return recorded or str(folder(slug, agent.task))
+
+
+def named(slug, agent, recorded=""):
+    # ok: feature-work-folder-readers-and-launch-pointers
+    if ports.hive().reports.workspace_host(agent):
+        return portable(slug, agent.task)
+    return recorded or str(folder(slug, agent.task))
