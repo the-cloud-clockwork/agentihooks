@@ -1,0 +1,17 @@
+rules:
+  - id: lab-scheduler-temp-file-outside-its-store
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler's container has a read only root and no temp folder: only its store is writable. On 28
+      November its bundle route made a temp file with no folder given, raised no usable temporary directory on every
+      request, and every unit of every pull request grade ended lost by the lab. Give the call a folder under the
+      store with dir, or write to standard output and make no file.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - /scripts/ci_lab/lease_api.py
+        - lab-scheduler-temp-file-outside-its-store.py
+    patterns:
+      - pattern: tempfile.$MAKE(...)
+      - pattern-not: tempfile.$MAKE(..., dir=$FOLDER, ...)

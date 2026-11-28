@@ -6,6 +6,7 @@ only when its second parent is the head. While GitHub has none yet, the head is 
 """
 
 import json
+import tempfile
 import threading
 from collections.abc import Callable
 from concurrent.futures import wait as wait_futures
@@ -585,6 +586,29 @@ def test_bundle_answers_a_bundle_of_the_commit_fetchable_once_its_two_parents_ar
     mirror.fetch(base)
     mirror.fetch(head)
     mirror.fetch(merge)
+    found = expander.bundle(merge)
+    assert found is not None
+    target = tmp_path / "target.git"
+    _git(tmp_path, "init", "-q", "--bare", str(target))
+    _git(target, "fetch", "--quiet", str(mirror.store), f"{base}:refs/heads/base", f"{head}:refs/heads/head")
+    bundle_file = tmp_path / "found.bundle"
+    bundle_file.write_bytes(found)
+    _git(target, "fetch", "--quiet", str(bundle_file), f"{merge}:refs/heads/merge")
+    assert _git(target, "rev-parse", "refs/heads/merge").strip() == merge
+
+
+@pytest.mark.feature("lab-serves-a-bundle-with-no-temp-folder")
+def test_bundle_answers_a_fetchable_bundle_with_no_usable_temp_folder_in_the_process(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base, head = origin
+    merge = _synthetic_merge(repo, base, head, monkeypatch)
+    expander = _expander(tmp_path, monkeypatch)
+    mirror = expander.mirror(f"file://{repo}")
+    mirror.fetch(base)
+    mirror.fetch(head)
+    mirror.fetch(merge)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "no-temp-folder"))
     found = expander.bundle(merge)
     assert found is not None
     target = tmp_path / "target.git"
