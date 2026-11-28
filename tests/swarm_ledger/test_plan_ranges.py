@@ -492,6 +492,69 @@ def test_a_phase_plan_url_grades_a_slice_task_without_its_own(monkeypatch: pytes
     assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a", "b"]) == []
 
 
+EARLIER = "# Earlier\n\n\n<!-- slice: one -->\nStep\n"
+EARLIER_URL = "http://127.0.0.1:8765/artifacts/s/f0"
+OWN = "# Plan for task a\n<!-- slice: own -->\n## Own\n"
+OWN_URL = "http://127.0.0.1:8765/artifacts/s/f2"
+ISSUE_URL = "https://github.com/acme/app/issues/7"
+PLANNED = {"id": "p1", "plan_url": SLICED_URL, "plan_ref": {"artifact": SLICED_URL, "lines": "1-3"}}
+STORED = [{"plan": True, "file": {"id": name}} for name in ("f0", "f1", "f2")]
+
+
+def read_plans(slug: str, file_id: str) -> bytes:
+    return {("s", "f0"): EARLIER.encode(), ("s", "f1"): SLICED.encode(), ("s", "f2"): OWN.encode()}[(slug, file_id)]
+
+
+@pytest.mark.feature("plan-slice-task-plan-url")
+def test_a_task_linked_to_an_earlier_phase_plan_still_takes_its_lines_from_the_phase_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_plans)
+    task = {"id": "a", "phase": "p1", "plan_url": EARLIER_URL, "plan_slice": "one", "plan_lines": "2-3"}
+    plans = [{"id": "plan-earlier", "title": "Earlier", "artifact": EARLIER_URL, "url": EARLIER_URL}]
+    doc = {"phases": [PLANNED], "plans": plans, "artifacts": STORED, "tasks": [task]}
+    assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a"]) == []
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+@pytest.mark.parametrize("link", [ISSUE_URL, OWN_URL])
+def test_a_planned_phase_grades_an_enhanced_task_by_the_plan_published_for_it(
+    monkeypatch: pytest.MonkeyPatch, link: str
+) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_plans)
+    task = {"id": "a", "phase": "p1", "plan_url": link, "plan_slice": "own", "plan_lines": "2-3"}
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": ISSUE_URL, "task": "a"}
+    doc = {"phases": [PLANNED], "plans": [plan], "artifacts": STORED, "tasks": [task]}
+    assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a"]) == []
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_same_phase_lines() -> None:
+    from scripts.swarm_ledger import plan_read
+
+    target = {"id": "a", "phase": "p1", "plan_url": ISSUE_URL, "plan_slice": "own", "plan_lines": "2-3"}
+    sibling = {"id": "b", "phase": "p1", "plan_url": SLICED_URL, "plan_slice": "one", "plan_lines": "2-3"}
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": ISSUE_URL, "task": "a"}
+    doc = {"phases": [PLANNED], "plans": [plan], "tasks": [target, sibling]}
+    assert (plan_read.sharers(doc, target), plan_read.sharers(doc, sibling)) == ([], [])
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_a_slice_lookup_naming_no_task_reads_the_phase_plan_past_a_plan_recorded_for_a_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_plans)
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": OWN_URL, "task": "XXXX"}
+    doc = {"phases": [PLANNED], "plans": [plan], "artifacts": STORED, "tasks": []}
+    assert plan_ranges.task_slice(doc, PLANNED, "one", OWN_URL) == "2-3"
+
+
 MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
 
 

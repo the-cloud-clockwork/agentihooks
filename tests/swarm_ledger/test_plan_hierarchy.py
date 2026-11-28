@@ -227,13 +227,14 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
             "plan_add needs plan, an id of letters, digits, _ and -",
         ),
         ({"op": "plan_add", "plan": "a", "title": " "}, "plan_add needs a title"),
+        ({"op": "plan_add", "plan": "a", "title": "A", "task": ""}, "plan_add task must be a task id"),
         ({"op": "plan_add", "plan": "a", "title": "A", "url": "ftp://x"}, "url must be an http or https link"),
         ({"op": "plan_add", "plan": "a", "title": "A", "artifact": 1}, "artifact must be an http or https link"),
         ({"op": "slice_add", "phase": "phases/p1", "anchor": "bad anchor"}, "slice_add needs phase and an anchor"),
         ({"op": "slice_add", "phase": 3, "anchor": "first"}, "slice_add needs phase and an anchor"),
         (
             {"op": "plan_add", "plan": "a", "title": "A", "extra": 1},
-            "plan_add takes only plan title artifact url source",
+            "plan_add takes only plan title artifact url source task",
         ),
         (
             {"op": "plan_add", "plan": "a", "title": "A", "source": {"harness": "claude"}},

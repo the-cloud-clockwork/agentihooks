@@ -1,5 +1,6 @@
 import re
 from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 ANCHOR = re.compile(r"^\s*<!--\s*slice:\s*([\w.-]+)\s*-->\s*$")
@@ -188,15 +189,16 @@ def slice_anchors(text: str, lines: str) -> list[str]:
     return [match[1] for n, _, line in sections(text) if start <= n <= end and (match := ANCHOR.fullmatch(line))]
 
 
-def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:
-    from scripts.swarm_ledger import plan_packages
+def task_slice(doc: dict[str, Any], phase: dict[str, Any], name: str, plan_url: str = "", task: str = "") -> str:
+    from scripts.swarm_ledger import ledger_plans, plan_packages
 
     if not isinstance(name, str):
         raise ValueError("plan slice must be a string")
-    ref = phase.get("plan_ref")
+    own = ledger_plans.own_artifact(doc, task, plan_url)
+    ref = None if own else phase.get("plan_ref")
     if ref is not None:
         return slice_lines(stored_text(ref, doc), name, ref["lines"])
-    url = plan_url or phase.get("plan_url")
+    url = own or plan_url or phase.get("plan_url")
     if not url:
         raise ValueError("publish a plan artifact for the phase before adding a plan slice")
     text = (
@@ -210,9 +212,9 @@ def invalid_tasks(plan: dict, doc: dict, ids: list[str]) -> list[str]:
     return [task["id"] for task in doc["tasks"] if task["id"] in ids and not _ranged(doc, phase, task)]
 
 
-def _ranged(doc: dict, phase: dict, task: dict) -> bool:
+def _ranged(doc: dict[str, Any], phase: dict[str, Any], task: dict[str, Any]) -> bool:
     plan_url = str(task.get("plan_url") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     try:
-        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"], plan_url)
+        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"], plan_url, task["id"])
     except (KeyError, ValueError):
         return False

@@ -928,7 +928,7 @@ def _set_slice(doc: dict, op: dict, ctx: OpContext) -> bool:
 
     try:
         fields["plan_lines"] = plan_ranges.task_slice(
-            doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
+            doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", "")), task_id
         )
     except ValueError as exc:
         ctx.refused.append(str(exc))

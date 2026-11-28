@@ -1,0 +1,15 @@
+{
+  "id": "enhance-publish-keeps-phase-plan",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-publish-keeps-slices",
+  "behaviour": "An enhancement planner that publishes its plan section into its target's phase while that phase already holds a plan leaves the phase plan link, the phase slices and every sibling task slice as they were, finished tasks included; the target alone carries the section from a plan recorded for it, plan read prints that section, the planner's pointing step is accepted, and done grading on the plan task reads the target from its own plan by its issue link or artifact, and the shared slice check never pairs the target's own plan lines with a sibling's phase plan lines. Into a phase with no plan the section still becomes the phase plan.",
+  "seam": "agentihooks ledger publish-plan PATH --phase ID by the holder of a claimed enhancement plan task through the ledger API server, then task set on the target and scripts.swarm_ledger.plan_ranges invalid_tasks",
+  "tests": [
+    "tests/swarm_ledger/test_enhance_publish.py::test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_sibling_slices",
+    "tests/swarm_ledger/test_enhance_publish.py::test_an_enhancement_publish_into_a_phase_without_a_plan_still_links_the_phase",
+    "tests/swarm_ledger/test_enhance_publish.py::test_only_the_claimant_of_an_enhancement_plan_task_publishes_for_its_target",
+    "tests/swarm_ledger/test_plan_ranges.py::test_a_planned_phase_grades_an_enhanced_task_by_the_plan_published_for_it",
+    "tests/swarm_ledger/test_plan_ranges.py::test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_same_phase_lines",
+    "tests/swarm_ledger/test_plan_ranges.py::test_a_slice_lookup_naming_no_task_reads_the_phase_plan_past_a_plan_recorded_for_a_task"
+  ]
+}

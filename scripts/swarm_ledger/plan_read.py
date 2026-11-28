@@ -97,10 +97,11 @@ def _lead(task: dict) -> str:
     return task.get("merged_into") or task["id"]
 
 
-def sharers(doc: dict, task: dict) -> list[str]:
+def sharers(doc: dict[str, Any], task: dict[str, Any]) -> list[str]:
     if not task.get("plan_lines"):
         return []
     held = _region(task)
+    own = _own(doc, task)
     return [
         other["id"]
         for other in doc.get("tasks", [])
@@ -108,7 +109,13 @@ def sharers(doc: dict, task: dict) -> list[str]:
         and other.get("state") != "done"
         and _region(other) == held
         and _lead(other) != _lead(task)
+        and _own(doc, other) == own
     ]
+
+
+def _own(doc: dict[str, Any], task: dict[str, Any]) -> str:
+    """Return the artifact of the plan published for task, the plan its lines count in, or an empty string."""
+    return _ledger("ledger_plans").own_artifact(doc, task["id"], task.get("plan_url"))
 
 
 def _region(task: dict[str, Any]) -> tuple[Any, Any]:

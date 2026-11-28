@@ -199,7 +199,9 @@ def test_task_set_unmarking_a_follow_up_keeps_its_slice(sliced):
 def test_task_set_unmarking_a_follow_up_still_computes_a_named_slice(sliced, monkeypatch):
     asked = []
     sliced["tasks"][0]["plan_lines"] = ""
-    monkeypatch.setattr(plan_ranges, "task_slice", lambda doc, phase, name, url: asked.append((name, url)) or "3-5")
+    monkeypatch.setattr(
+        plan_ranges, "task_slice", lambda doc, phase, name, url, task: asked.append((name, url)) or "3-5"
+    )
     assert ledger_tasks.apply(sliced, task_set({"follow_up": False, "plan_slice": "first"}), update_ctx()) is True
     assert asked == [("first", SLICED["plan_url"])]
     assert sliced["tasks"][0] == {**SLICED, "follow_up": False}

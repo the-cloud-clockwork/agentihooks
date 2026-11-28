@@ -535,6 +535,8 @@ def cmd_publish_plan(args: argparse.Namespace) -> None:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
     text = Path(args.path).read_text(encoding="utf-8")
     doc = call(args.slug)
+    if target := enhanced(doc, args.name, phases):
+        return publish_task_plan(args, target)
     selected = [phase for phase in doc["phases"] if phase["id"] in phases]
     if {phase["id"] for phase in selected} != set(phases):
         sys.exit("publish-plan names an unknown phase")
@@ -619,15 +621,29 @@ def plan_target(slug: str, task_id: str) -> dict[str, Any]:
     return task
 
 
+def enhanced(doc: dict[str, Any], name: str, phases: list[str]) -> dict[str, Any] | None:
+    """Return the task a claimed enhancement plan task of name enhances, when that task sits in the one named phase
+    and the phase already holds a plan link, so the section is published for that task and the phase keeps its plan."""
+    planned = {phase["id"] for phase in doc["phases"] if phase.get("plan_url")}
+    tasks: list[dict[str, Any]] = doc.get("tasks", [])
+    targets = {
+        task.get("enhances") for task in tasks if task.get("claimed_by") == name and task.get("state") == "claimed"
+    }
+    return next(
+        (task for task in tasks if task["id"] in targets and [task.get("phase")] == phases and phases[0] in planned),
+        None,
+    )
+
+
 def plan_links(slug: str) -> set[str]:
     rows: list[dict[str, Any]] = resource(slug, "plans", collection=True)  # pyright: ignore[reportAssignmentType]
     return {str(row.get("url")) for row in rows}
 
 
-def publish_task_plan(args: argparse.Namespace) -> None:
+def publish_task_plan(args: argparse.Namespace, target: dict[str, Any] | None = None) -> None:
     from scripts.swarm_ledger import plan_ranges
 
-    target = plan_target(args.slug, args.task)
+    target = target or plan_target(args.slug, args.task)
     text = Path(args.path).read_text(encoding="utf-8")
     anchors = [found[1] for _, _, line in plan_ranges.sections(text) if (found := plan_ranges.ANCHOR.fullmatch(line))]
     if len(anchors) != 1:
@@ -644,17 +660,17 @@ def publish_task_plan(args: argparse.Namespace) -> None:
         )
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
-    fields = {"plan_url": stored["url"], "plan_slice": anchors[0]}
+    fields = {"plan_url": stored["url"], "plan_slice": anchors[0], **({"slice": ""} if target.get("slice") else {})}
     ops = [
         stored["add"],
-        op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url),
-        op("task_update", args, item=f"tasks/{args.task}", fields=fields),
+        op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url, task=target["id"]),
+        op("task_update", args, item=f"tasks/{target['id']}", fields=fields),
     ]
     state = call(args.slug, ops)
     if state.get("rejected") and where == "issue" and url not in plan_links(args.slug):
         withdraw_issue(url)
     refused(state, ops)
-    print(json.dumps({"plan_url": url, "published_to": where, "task": args.task, "plan_slice": anchors[0]}))
+    print(json.dumps({"plan_url": url, "published_to": where, "task": target["id"], "plan_slice": anchors[0]}))
 
 
 def cmd_plan(args):
