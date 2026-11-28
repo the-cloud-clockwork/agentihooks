@@ -1,8 +1,8 @@
 """Live check of the lab authoritative static gates: this checkout lists lint, type-gate and test-count as lab
 authoritative, keeps their authority through the exclusion catalog, declares the lab check that replaces each job
-and skips each job behind the lab verdict, with the skip clause as one of the terms its condition joins with and.
-It prints one line per part and reads only files in the checkout; a delivery file its reader refuses fails with
-one line."""
+and skips each job behind the lab verdict, with the skip clause as one of the terms its condition joins with and,
+and reads only commit id context names its static key carries. It prints one line per part and reads only files in
+the checkout; a delivery file its reader refuses fails with one line."""
 
 import json
 import sys
@@ -10,7 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from scripts.ci_lab import delivery
+from scripts import ci_wiring
+from scripts.ci_lab import delivery, static_gates
 
 ROOT = Path(__file__).resolve().parents[2]
 GATES = ("lint", "type-gate", "test-count")
@@ -20,6 +21,7 @@ CLAUSE = "fromJSON(needs.lab-verdict.outputs.authoritative || '{{}}')['{gate}'] 
 HELD = "the checkout holds {part}"
 LACKS = "FAIL: the checkout lacks {part}"
 UNREAD = "a delivery file its reader accepts: {error}"
+COMMIT_ID_PART = "every gate of lint, type-gate and test-count reading only commit ids that its static key carries"
 
 
 def _terms(condition: object) -> list[str]:
@@ -36,13 +38,34 @@ def _terms(condition: object) -> list[str]:
     return [term.strip() for term in text.split("&&")]
 
 
-def parts(root: Path) -> list[tuple[str, bool]]:
+def _registry(root: Path) -> dict[str, object]:
+    """The input-key registry at root, empty when the checkout carries none."""
+    path = root / static_gates.REGISTRY
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def _unlisted(gate: static_gates.StaticGate) -> list[str]:
+    """Each context name the gate reads that names a commit id outside static_gates.COMMIT_ID_FIELDS: equal to
+    github.sha or ending in sha, and not an earlier step's output, outcome or conclusion (steps.<id>.outputs.*
+    is a produced value, shaped like static_gates.STEP_READ, never a commit id context of the grade)."""
+    return [
+        name
+        for name in gate.reads
+        if name not in static_gates.COMMIT_ID_FIELDS
+        and name.endswith("sha")
+        and static_gates.STEP_READ.fullmatch(name) is None
+    ]
+
+
+def parts(root: Path, workflow_text: str, registry: dict[str, object]) -> list[tuple[str, bool]]:
     """Each part of the feature with whether the checkout holds it: the list itself, then for each gate its kept
-    authority, the lab check that replaces its job and the skip clause of that job."""
+    authority, the lab check that replaces its job and the skip clause of that job, then the commit id read of
+    every static gate of lint, type-gate and test-count, discovered from workflow_text with registry and the
+    reusable workflows at root."""
     listed = list(delivery.lab(root)["authoritative"])
     kept = delivery.authoritative(root)
     checks = json.loads((root / WIRING).read_text())["lab_gates"]
-    jobs = yaml.safe_load((root / WORKFLOW).read_text())["jobs"]
+    jobs = yaml.safe_load(workflow_text)["jobs"]
     found = [("exactly lint, type-gate and test-count in the lab authoritative list", listed == list(GATES))]
     for gate in GATES:
         job = jobs.get(gate, {})
@@ -53,12 +76,17 @@ def parts(root: Path) -> list[tuple[str, bool]]:
             (f"the lab check that replaces the {gate} job", replaced),
             (f"the lab skip clause of the {gate} job", skipped),
         ]
+    gates = static_gates.discover(workflow_text, registry, ci_wiring.load(root))
+    unlisted = [name for gate in gates if gate.job.partition("/")[0] in GATES for name in _unlisted(gate)]
+    found.append((COMMIT_ID_PART, not unlisted))
     return found
 
 
 def main(root: Path | None = None) -> int:
+    root = ROOT if root is None else root
     try:
-        found = parts(ROOT if root is None else root)
+        workflow_text = (root / WORKFLOW).read_text()
+        found = parts(root, workflow_text, _registry(root))
     except delivery.DeliveryError as error:
         print(LACKS.format(part=UNREAD.format(error=error)))
         return 1

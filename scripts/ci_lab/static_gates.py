@@ -18,6 +18,7 @@ from scripts.ci_lab import expressions, grader
 
 __all__ = [
     "CI_ONLY",
+    "COMMIT_ID_FIELDS",
     "LEASE_FIELDS",
     "RUN_FOLDER",
     "STATIC_JOBS",
@@ -26,10 +27,17 @@ __all__ = [
     "Producer",
     "StaticGate",
     "ci_only",
+    "commit_ids",
     "discover",
+    "gate_commit_ids",
     "main",
 ]
 
+COMMIT_ID_FIELDS: tuple[str, ...] = (
+    "github.sha",
+    "github.event.pull_request.head.sha",
+    "github.event.pull_request.base.sha",
+)
 LEASE_FIELDS: frozenset[str] = frozenset(
     {
         "inputs.base",
@@ -286,6 +294,19 @@ def discover(
                     raise ValueError(f"{gate.name} names two gate steps")
                 gates[gate.name] = gate
     return tuple(gates.values())
+
+
+def commit_ids(graded_commit: str, head: str, base: str) -> dict[str, str]:
+    """Return the value of each name of COMMIT_ID_FIELDS for a grade: the graded commit when one is named, else
+    head, for github.sha; head for the pull request head sha; base for the pull request base sha."""
+    return dict(zip(COMMIT_ID_FIELDS, (graded_commit or head, head, base), strict=True))
+
+
+def gate_commit_ids(gate: StaticGate, graded_commit: str, head: str, base: str) -> dict[str, str]:
+    """Return the commit id values the gate reads, as an ordered mapping restricted to the names of
+    COMMIT_ID_FIELDS it reads; empty for a gate that reads none."""
+    resolved = commit_ids(graded_commit, head, base)
+    return {name: resolved[name] for name in COMMIT_ID_FIELDS if name in gate.reads}
 
 
 def ci_only(workflow_text: str, reusable: Mapping[str, Any] | None = None) -> tuple[CiOnly, ...]:

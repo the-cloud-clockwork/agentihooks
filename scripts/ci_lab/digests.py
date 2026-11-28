@@ -8,7 +8,7 @@ docs/reference/ci-lab.md holds the digest specification.
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.ci_mutation import stats_cache
 from scripts.profiles.sources import blob as blob_id
@@ -49,13 +49,15 @@ class Toolchain:
 
 @dataclass(frozen=True)
 class StaticInputs:
-    """The inputs of one static gate: the files it grades at head and base and the grader tree."""
+    """The inputs of one static gate: the files it grades at head and base, the grader tree, and the commit id
+    context values it reads, empty for a gate that reads none."""
 
     gate: str
     head: Mapping[str, str]
     base: Mapping[str, str]
     grader: str
     toolchain: Toolchain
+    commit_ids: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
@@ -131,17 +133,18 @@ def _toolchain(toolchain: Toolchain) -> dict[str, object]:
 
 
 def static_key(inputs: StaticInputs) -> str:
-    """Return the key of one static gate's verdict."""
-    return _key(
-        "static",
-        {
-            "gate": inputs.gate,
-            "head": dict(inputs.head),
-            "base": dict(inputs.base),
-            "grader": inputs.grader,
-            "toolchain": _toolchain(inputs.toolchain),
-        },
-    )
+    """Return the key of one static gate's verdict; a gate that reads no commit id hashes exactly as one with no
+    commit_ids field would, since an empty mapping is left out of the record."""
+    record: dict[str, object] = {
+        "gate": inputs.gate,
+        "head": dict(inputs.head),
+        "base": dict(inputs.base),
+        "grader": inputs.grader,
+        "toolchain": _toolchain(inputs.toolchain),
+    }
+    if inputs.commit_ids:
+        record["commit_ids"] = dict(inputs.commit_ids)
+    return _key("static", record)
 
 
 def test_key(inputs: TestInputs) -> str:
