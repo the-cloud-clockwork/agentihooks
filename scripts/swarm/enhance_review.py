@@ -63,7 +63,7 @@ def close(slug: str, row: dict[str, Any], autonomy: str) -> Closing | None:
     try:
         text = plan_read.exact(doc, target, load)
     except ValueError as error:
-        raise SwarmError(INCOMPLETE.format(target=target_id, problems=str(error)))
+        raise SwarmError(INCOMPLETE.format(target=target_id, problems=str(error))) from error
     problems = thin_task.section_complete(text)
     if problems:
         raise SwarmError(INCOMPLETE.format(target=target_id, problems=" ".join(problems)))

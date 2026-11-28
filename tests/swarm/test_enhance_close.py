@@ -273,14 +273,14 @@ def test_done_refuses_an_enhancement_whose_target_plan_lines_hold_no_text(
 ) -> None:
     store, ledger = thin
     autonomy(store, "full")
-    sliced(ledger, section())
-    blank = {"plan_lines": "900-901"}
+    sliced(ledger, "\n\n" + section())
+    blank = {"plan_lines": "4-5"}
     fetching(
         monkeypatch, lambda doc: {**doc, "tasks": [{**t, **blank} if t["id"] == TARGET else t for t in doc["tasks"]]}
     )
     code, err = cli(capsys, PLANNER, "done", "--slice", TARGET)
     assert code == 1
-    assert enhance_review.INCOMPLETE.format(target=TARGET, problems="plan lines 900-901 hold no text") in err
+    assert enhance_review.INCOMPLETE.format(target=TARGET, problems="plan lines 4-5 hold no text") in err
     assert (task(ENHANCE)["state"], task(TARGET)["enhancement"]) == ("claimed", "needed")
     assert hold(TARGET) == HELD
 
