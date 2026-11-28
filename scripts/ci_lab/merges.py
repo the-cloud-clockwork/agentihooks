@@ -176,10 +176,10 @@ class Background:
     instead, counting as one try, and keeps running orphaned; a later call starts it again. One still waiting
     for a thread has read nothing, so it stays pending and spends no try however long it waits. A finished
     resolution waits for the head it was started for: calls for other heads leave it alone until that head
-    reads it, and one no head reads is forgotten `kept_s` after a thread began it. A resolution that found a
-    merge then answers every call of its head until `fresh_s` after a thread began it, so no merge is reused
-    longer; an absent answer is read once and then gone, so the next call starts a new resolution and so reads
-    GitHub again."""
+    reads it, and one no head reads is forgotten `kept_s` after a thread began it, so its head asking later
+    starts a new one. A resolution that found a merge then answers every call of its head until `fresh_s` after
+    a thread began it, so no merge is reused longer; an absent answer is read once and then gone, so the next
+    call starts a new resolution and so reads GitHub again."""
 
     def __init__(
         self,
@@ -207,7 +207,7 @@ class Background:
         self.resolutions = {
             each: entry
             for each, entry in self.resolutions.items()
-            if each == key or self._fresh(now, entry, read=each in self.read)
+            if self._fresh(now, entry, read=each in self.read) or (each == key and each in self.read)
         }
         self.read.intersection_update(self.resolutions)
         if key not in self.resolutions:
@@ -240,8 +240,7 @@ class Background:
         return self.resolve(repo, number, head)
 
     def _fresh(self, now: float, entry: tuple[list[float], Future[tuple[str, str] | None]], *, read: bool) -> bool:
-        """Return whether a resolution the call was not made for stays, whatever it answered: not yet finished,
-        or finished inside the fresh window when its head has read its merge, inside the kept window when no
-        head has read it."""
+        """Return whether a resolution stays, whatever it answered: not yet finished, or finished inside the fresh
+        window when its head has read its merge, inside the kept window when no head has read it."""
         began, future = entry
         return not future.done() or now - began[0] < (self.fresh_s if read else self.kept_s)
