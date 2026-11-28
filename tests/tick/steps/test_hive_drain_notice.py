@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.hive import master_notice, registry
+from scripts.hive import master_notice, registry, sweep
 from scripts.inbox.store import InboxStore, Item
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.tick import registry as tick_registry
@@ -90,6 +90,7 @@ def _member_stop(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> dict[str
     for name in MEMBER:
         monkeypatch.delenv(name)
     assert [_texts(store, slug) for slug in SWARMS] == [[], [], []]
+    assert sweep.indexed(store.redis) == [HIVE]
     return names
 
 
