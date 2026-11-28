@@ -329,6 +329,7 @@ def test_a_raising_step_is_held_and_the_rest_of_its_site_runs(monkeypatch: pytes
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
+        ("call", sweep.notify_drains, STORE),
     ]
     assert list(box) == ["raised", "fallen"]
     assert box["fallen"] == {"host pressure"}
