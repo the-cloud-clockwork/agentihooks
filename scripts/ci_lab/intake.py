@@ -80,10 +80,15 @@ def slug(repo: str) -> str:
     return urlsplit(repo).path.strip("/").casefold().removesuffix(".git")
 
 
+def named(listed: str, repository: str) -> list[str]:
+    """Return the repositories a scheduler serves as its environment names them, in its order: those a list of URLs
+    separated by commas or white space names, and when it names none, the one repository the service is set up for."""
+    return listed.replace(",", " ").split() or [repository]
+
+
 def served(listed: str, repository: str) -> frozenset[str]:
-    """Return the slugs of the repositories a scheduler serves: those a list of URLs separated by commas or white
-    space names, and when it names none, the one repository the service is set up for."""
-    return frozenset(slug(name) for name in listed.replace(",", " ").split() or [repository])
+    """Return the slugs of the repositories a scheduler serves: those its environment names."""
+    return frozenset(slug(name) for name in named(listed, repository))
 
 
 def serves(repositories: Collection[str] | None, repo: str) -> bool:
