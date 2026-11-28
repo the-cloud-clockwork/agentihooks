@@ -246,6 +246,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_NODE_NAME` | no | yes | Name of the node the worker runs on; it labels the worker's `ci_lab_node_mirror_age_seconds` sample, and a worker without it exports no mirror age |
 | `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
 | `CI_LAB_MANIFEST` | no | yes | Legacy manifest path accepted by worker settings; test batches carry their selected dependency records in the lease and do not read this file |
 | `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
@@ -308,6 +309,7 @@ the token from `CI_LAB_CONTROL_TOKEN` on its host.
 | `ci_lab_cache_hits_total` | `cache` | `CACHE_HITS_TOTAL` |
 | `ci_lab_cache_misses_total` | `cache` | `CACHE_MISSES_TOTAL` |
 | `ci_lab_mirror_age_seconds` | | `MIRROR_AGE_SECONDS` |
+| `ci_lab_node_mirror_age_seconds` | `node` | `NODE_MIRROR_AGE_SECONDS` |
 | `ci_lab_core_seconds_total` | `class` | `CORE_SECONDS_TOTAL` |
 | `ci_lab_heads_graded_total` | `class`, `conclusion` | `HEADS_GRADED_TOTAL` |
 | `ci_lab_budget_fraction` | | `BUDGET_FRACTION` |
@@ -711,10 +713,15 @@ description: The lab cannot add workers for pull request heads because the KEDA 
 
 ### Lab series the rules read
 
-Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
-`metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
-the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
-scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
+The scheduler sets every lab series but one. The worker serves `/metrics` on 9108 through
+`metrics.serve_registry` from a registry of its own whose only observer, run before each answer of
+`/metrics`, sets `ci_lab_node_mirror_age_seconds` when the pod names its node in
+`CI_LAB_NODE_NAME`: `metrics.observe_mirror` with that node name, at the scrape's wall clock, from
+the `fetched-at` stamp under its `CI_LAB_GIT_MIRROR`, never below zero, with no sample while the
+stamp is missing or holds no whole number. Its exposition holds the `HELP` and `TYPE` lines and at
+most that sample, so a worker scrape target never doubles the scheduler's series, which already
+count every unit from its report. Every worker on one node reports that node's mirror, so read the
+series with `max by (node)`; a node that runs no worker has no series. `scripts.ci_lab.scheduler.listen`
 serves the `Scheduler`'s own `metrics.Registry` on the metrics port, so one exposition carries the
 gauges each scrape sets and the counters the scheduler's passes keep. Every `GET /metrics` sets
 these through `metrics.observe_load` from the last load snapshot the port holds, which its serve
@@ -742,6 +749,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them | `Scheduler._reap`, one for each expired lease it requeues or marks lost |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
+| `ci_lab_node_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror` with the worker's `CI_LAB_NODE_NAME`, on every worker scrape, from the node mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample; a worker without a node name sets none |
 | `ci_lab_load_age_seconds` | No alert or panel | `metrics.observe_age`, on every scheduler scrape, from the start of the build of the load snapshot the port serves |
 | `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response and `Dispatches._request` with each dispatch response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
@@ -1199,9 +1207,10 @@ or from trees they already hold.
 
 ### Limitations
 
-- The worker's `/metrics` on 9108 serves its own empty registry, so a scrape holds no samples, and
-  the chart defines no PodMonitor or ServiceMonitor for the worker pods. The policy admits the
-  monitoring Prometheus to 9108 for when one exists.
+- The chart sets no `CI_LAB_NODE_NAME`, so the worker's `/metrics` on 9108 holds no
+  `ci_lab_node_mirror_age_seconds` sample yet, and the chart defines no PodMonitor or ServiceMonitor
+  for the worker pods. The policy admits the monitoring Prometheus to 9108 for when one exists. Once
+  both are deployed, the series covers only the nodes that run a worker.
 - The scheduler sets `ci_lab_mirror_age_seconds` from the `fetched-at` stamp under its own
   `CI_LAB_GIT_MIRROR`, which its fetch never writes, so the series has a sample only when that
   path is a mirror the node cache refreshes, and it shows no other node's mirror.
@@ -4060,10 +4069,11 @@ Change chart values through that repository's delivery process. Pod recreation a
 restarts below retain the deployed code.
 
 The scheduler supports startup reindexing. The node recovery steps use the deployment's
-node-cache DaemonSet. The mirror age gauge is one unlabelled series read from the `fetched-at`
-stamp under the scheduler's own `CI_LAB_GIT_MIRROR`, as listed in [Metrics](#metrics), so it
-shows no other node's mirror; a successful fetch log alone does not prove the fresh-node metric
-requirement.
+node-cache DaemonSet. The scheduler's mirror age gauge is one unlabelled series read from the
+`fetched-at` stamp under its own `CI_LAB_GIT_MIRROR`, as listed in [Metrics](#metrics), so it
+shows no other node's mirror. A worker with `CI_LAB_NODE_NAME` reports its own node's stamp as
+`ci_lab_node_mirror_age_seconds{node}`, so a fresh node has a series only once a worker runs
+there; a successful fetch log alone does not prove the fresh-node metric requirement.
 
 ### Deployment recovery runbook
 

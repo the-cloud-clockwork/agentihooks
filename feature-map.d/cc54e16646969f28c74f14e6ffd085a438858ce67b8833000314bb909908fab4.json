@@ -1,0 +1,15 @@
+{
+  "id": "lab-worker-node-mirror-age",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2750",
+  "behaviour": "agentihooks ci-lab-worker answers each GET /metrics scrape with ci_lab_node_mirror_age_seconds labelled with the node name from CI_LAB_NODE_NAME: the seconds from the epoch second in the node cache's fetched-at stamp under CI_LAB_GIT_MIRROR to the scrape's wall clock, never below zero, with no sample while the stamp is missing or holds no whole number; a worker without a node name exports no mirror age sample, even when the stamp exists. A bad stamp drops only the node gauge's sample, never another series, and the scheduler's unlabelled ci_lab_mirror_age_seconds keeps its own reading. The worker's metrics server runs its observers before each 200 answer of /metrics and for no 404 or 405.",
+  "seam": "scripts.ci_lab.executors main serving the worker registry through scripts.ci_lab.metrics serve_registry and expose with observe callables, scripts.ci_lab.metrics observe_mirror with a node name, and the scripts.ci_lab.contract node gauge and node name",
+  "tests": [
+    "tests/ci_lab/test_executors.py::test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name",
+    "tests/ci_lab/test_executors.py::test_main_exports_no_mirror_age_without_a_node_name",
+    "tests/ci_lab/test_executors.py::test_main_exports_no_mirror_age_while_its_node_stamp_is_missing_or_unparseable",
+    "tests/ci_lab/test_metrics.py::test_a_registry_server_runs_its_observers_before_each_metrics_answer_and_for_no_other_route",
+    "tests/ci_lab/test_metrics.py::test_a_node_mirror_age_is_labelled_with_its_node_and_never_below_zero",
+    "tests/ci_lab/test_metrics.py::test_a_node_mirror_without_a_readable_stamp_drops_only_its_own_sample"
+  ]
+}

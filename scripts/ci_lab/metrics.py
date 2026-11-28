@@ -70,6 +70,7 @@ HELP = {
     contract.CACHE_HITS_TOTAL: "Cache hits per cache.",
     contract.CACHE_MISSES_TOTAL: "Cache misses per cache.",
     contract.MIRROR_AGE_SECONDS: "Age of the git mirror.",
+    contract.NODE_MIRROR_AGE_SECONDS: "Age of the node cache git mirror per node.",
     contract.CORE_SECONDS_TOTAL: "Core seconds spent per class.",
     contract.HEADS_GRADED_TOTAL: "Heads graded per class and conclusion.",
     contract.BUDGET_FRACTION: "Fraction of the daily core budget left.",
@@ -230,15 +231,17 @@ def observe_unit(registry: Registry, priority: str, kind: str, slots: int, repor
         registry.inc(contract.CACHE_MISSES_TOTAL, misses, {"cache": cache})
 
 
-def observe_mirror(registry: Registry, mirror: Path, now_ms: int) -> None:
+def observe_mirror(registry: Registry, mirror: Path, now_ms: int, node: str = "") -> None:
     """Set the mirror age to the seconds since the epoch second the node mirror's fetched-at stamp holds, never
-    below zero, and drop the sample while the stamp is missing or holds no whole number."""
+    below zero, and drop the sample while the stamp is missing or holds no whole number; with a node name the
+    reading goes to the node mirror age labelled with that node instead, and only that gauge is dropped."""
+    name, labels = (contract.NODE_MIRROR_AGE_SECONDS, {"node": node}) if node else (contract.MIRROR_AGE_SECONDS, {})
     try:
         fetched = int((mirror / FETCHED_AT).read_text())
     except (OSError, ValueError):
-        registry.clear(contract.MIRROR_AGE_SECONDS)
+        registry.clear(name)
         return
-    registry.set(contract.MIRROR_AGE_SECONDS, max(0.0, now_ms / 1000 - fetched))
+    registry.set(name, max(0.0, now_ms / 1000 - fetched), labels)
 
 
 def observe_age(registry: Registry, built_ms: int, now_ms: int) -> None:
@@ -460,15 +463,21 @@ def serve(
     return _bind(host, port, partial(respond, snapshot, registry), actions)
 
 
-def expose(registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
-    """Answer GET /metrics with the registry's exposition alone, observing no capacity snapshot."""
+def expose(
+    registry: Registry, method: str, target: str, observe: tuple[Callable[[], None], ...] = ()
+) -> tuple[int, str, bytes]:
+    """Answer GET /metrics with the registry's exposition alone, observing no capacity snapshot; each observe
+    callable runs first, for that answer only."""
     if urlsplit(target).path != "/metrics":
         return 404, JSON, b'{"error": "not found"}'
     if method != "GET":
         return 405, JSON, b'{"error": "method not allowed"}'
+    for update in observe:
+        update()
     return 200, EXPOSITION, registry.render().encode()
 
 
-def serve_registry(host: str, port: int, registry: Registry) -> ThreadingHTTPServer:
-    """Bind only the metrics route over registry on host and port; the caller runs serve_forever."""
-    return _bind(host, port, partial(expose, registry))
+def serve_registry(host: str, port: int, registry: Registry, *observe: Callable[[], None]) -> ThreadingHTTPServer:
+    """Bind only the metrics route over registry on host and port, running each observe callable before every
+    exposition it answers; the caller runs serve_forever."""
+    return _bind(host, port, partial(expose, registry, observe=observe))
