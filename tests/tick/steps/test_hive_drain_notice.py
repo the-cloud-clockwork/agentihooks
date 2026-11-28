@@ -1,4 +1,4 @@
-"""The hive drain notice tick step tells the master of each swarm on a draining hive of that drain, once, from the tick."""
+"""The hive drain notice tick step tells each master serving a draining hive of that drain once, from the tick."""
 
 from dataclasses import replace
 from importlib import import_module
@@ -131,6 +131,20 @@ def test_a_second_pass_over_the_same_drain_sends_no_new_master_item(
     _pass(store)
 
     assert [_texts(store, slug) for slug in SWARMS] == [[_drained(names["sw"])], [_drained(names["other"])], []]
+
+
+@pytest.mark.feature("hive-stop-drain-notice")
+def test_a_drain_whose_agents_all_ended_before_the_pass_tells_no_master(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _member_stop(store, monkeypatch)
+    for slug in SWARMS:
+        for agent in store.agents(slug):
+            store.put_agent(slug, replace(agent, state="finished"))
+
+    _pass(store)
+
+    assert [_texts(store, slug) for slug in SWARMS] == [[], [], []]
 
 
 @pytest.mark.feature("hive-stop-drain-notice")

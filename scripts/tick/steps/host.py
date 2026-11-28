@@ -357,15 +357,14 @@ registry.register(
 
 
 def _hive_drain_notice(cli: Any, get: Get) -> list[str]:
-    """Tell the master of each swarm with a live agent on a draining hive of that drain, once per drain, from the
-    tick, which is no hive member, so a member's stop drain reaches the masters its own send could not."""
+    """Tell the master of each swarm with a live agent on a draining hive of that drain, once per drain."""
     from scripts.hive import hive_state, master_notice, sweep
 
     store = get("store")
     for hive_id in sweep.indexed(store.redis):
         record: dict[str, Any] | None = hive_state.read(hive_state.records(store.redis, hive_id), hive_id)
         if record is not None:
-            master_notice.drained(store, hive_id, record)
+            timing.call(master_notice.drained, store, hive_id, record)  # pyright: ignore[reportUnknownMemberType]
     return []
 
 

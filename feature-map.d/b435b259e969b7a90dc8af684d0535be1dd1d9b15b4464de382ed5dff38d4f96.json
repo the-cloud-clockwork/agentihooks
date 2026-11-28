@@ -8,6 +8,7 @@
     "tests/tick/steps/test_hive_drain_notice.py::test_hive_drain_notice",
     "tests/tick/steps/test_hive_drain_notice.py::test_a_worker_member_stop_drain_reaches_each_served_master_once_from_the_tick",
     "tests/tick/steps/test_hive_drain_notice.py::test_a_second_pass_over_the_same_drain_sends_no_new_master_item",
+    "tests/tick/steps/test_hive_drain_notice.py::test_a_drain_whose_agents_all_ended_before_the_pass_tells_no_master",
     "tests/tick/steps/test_hive_drain_notice.py::test_a_hive_whose_newest_drain_entry_no_longer_reads_draining_tells_no_master"
   ]
 }
