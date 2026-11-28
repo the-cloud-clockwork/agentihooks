@@ -42,6 +42,8 @@ python3 - <<'PY'
 import json, os, re, subprocess
 from pathlib import Path
 
+from scripts.hive.repo_maintenance import recover
+
 root = Path(os.environ['HIVE_REPO_ROOT'])
 for repo in json.loads(os.environ.get('HIVE_REPOSITORIES', '[]')):
     name = repo['name']
@@ -50,6 +52,8 @@ for repo in json.loads(os.environ.get('HIVE_REPOSITORIES', '[]')):
     target = root / name
     if not (target / '.git').is_dir():
         subprocess.run(['git', 'clone', '--branch', repo.get('ref', 'dev'), '--', repo['url'], str(target)], check=True)
+    else:
+        recover(target)
 PY
 bundle_dir="$HIVE_REPO_ROOT/agentihooks-bundle"
 if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
@@ -191,7 +195,7 @@ supervise_writer() {
   trap 'kill "$(jobs -pr)" 2>/dev/null || true; wait 2>/dev/null || true' EXIT
   trap 'exit 0' TERM INT
   while true; do
-    agentihooks ledger writer serve &
+    MALLOC_ARENA_MAX=2 agentihooks ledger writer serve &
     wait "$!" || true
     python3 -c 'from scripts.swarm_ledger.ledger_server import scheduled_wait; scheduled_wait(5, timeout=5)' &
     wait "$!" || true

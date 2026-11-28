@@ -11,6 +11,7 @@ from scripts.hub import admission
 from scripts.swarm import admission_view, readiness
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.helpers.narrow_ledger import DocLedger
+from tests.swarm.test_admission_view import lab_behind
 from tests.swarm.test_readiness import doc, task
 
 SLUG = "sw"
@@ -82,6 +83,34 @@ def test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing(
     assert reason in err
     assert gates.store.claimant(SLUG, "t1") is None
     assert gates.ledger.writes == []
+
+
+@pytest.mark.feature("hub-admission-composed-admits-gate")
+def test_the_production_admits_gate_refuses_an_eng_task_behind_a_slow_lab_and_admits_a_ci_task(
+    gates: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lab_behind(gates.store, SLUG, monkeypatch)
+
+    held = gates.admitter.admit(SLUG, ask())
+    admitted = gates.admitter.admit(SLUG, ask(task="t2", lane="ci"))
+
+    err = capsys.readouterr().err
+    assert held is None
+    assert "task=t1 hive=hive-a refused: the offer is withdrawn" in err
+    assert gates.store.claimant(SLUG, "t1") is None
+    assert admitted is not None and admitted["task"]["id"] == "t2"
+    assert gates.store.claimant(SLUG, "t2") == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-composed-admits-gate")
+def test_a_paused_swarm_admits_neither_lane_through_the_production_admission(gates: SimpleNamespace) -> None:
+    gates.store.update(SLUG, state="paused")
+
+    eng = gates.admitter.admit(SLUG, ask())
+    ci = gates.admitter.admit(SLUG, ask(task="t2", lane="ci"))
+
+    assert (eng, ci) == (None, None)
+    assert (gates.store.claimant(SLUG, "t1"), gates.store.claimant(SLUG, "t2")) == (None, None)
 
 
 @pytest.mark.feature("hub-admission-narrow-read")

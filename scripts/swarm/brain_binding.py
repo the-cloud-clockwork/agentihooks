@@ -140,7 +140,15 @@ def apply(servers: dict, environ: Mapping[str, str]) -> dict:
         return kept
     value = f"${{{binding['mcp_env']}}}"
     header = f"{binding['mcp_scheme']} {value}" if binding["mcp_scheme"] else value
-    return {**kept, SERVER: {"type": "http", "url": binding["mcp"], "headers": {binding["mcp_header"]: header}}}
+    return {
+        **kept,
+        SERVER: {
+            "type": "http",
+            "url": binding["mcp"],
+            "headers": {binding["mcp_header"]: header},
+            "default_tools_approval_mode": "approve",
+        },
+    }
 
 
 def exports(environ: Mapping[str, str]) -> str:

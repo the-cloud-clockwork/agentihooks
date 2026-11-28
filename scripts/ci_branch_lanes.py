@@ -37,6 +37,12 @@ TESTS_GROUPS = tuple(
     + promotion
     + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+) + (
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE.replace("hosted-lane", "tests-dispatch-lane")
+    + " || github.event_name == 'push' && "
+    + LANE.replace("hosted-lane", "promotion-dev")
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
 )
 PATH_FILTERS = ("paths", "paths-ignore")
 DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"

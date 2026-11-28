@@ -1,4 +1,5 @@
 import base64
+import errno
 import os
 import stat
 import subprocess
@@ -130,6 +131,25 @@ def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
         mirror.fetch("1" * 40)
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_remote_fetch(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    mirror = _mirror(tmp_path, origin, base)
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_lab_remote_fallback_too(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "origin.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
 def _graded(tmp_path: Path, origin: Path, lab: Path) -> str:
     _git(tmp_path, "init", "-q", "--bare", str(lab))
     side = tmp_path / "side"
@@ -205,9 +225,41 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
         **os.environ,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "http.https://lab.example/origin.git.extraheader",
-        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
+
+
+def test_fetch_passes_the_same_timeout_to_the_lab_remote_fallback_fetch(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _commit(origin, "a", "a")
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
+    assert mirror.fetch(base) is False
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs))
+        if mirror.remote in argv:
+            raise subprocess.CalledProcessError(128, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worktrees.subprocess, "run", run)
+    mirror.fetch("1" * 40, timeout=7.5)
+    assert mirror.lab is not None
+    [primary] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.remote in argv]
+    [fallback] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.lab.url in argv]
+    assert primary["timeout"] == 7.5
+    assert fallback["timeout"] == 7.5
+
+
+@pytest.mark.feature("lab-remote-basic-scheme")
+def test_a_lab_fetch_header_is_the_exact_basic_credential_the_lab_remote_accepts() -> None:
+    environ = worktrees.Lab("http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git", "lab-token").environ()
+    name, _, value = environ["GIT_CONFIG_VALUE_0"].partition(": ")
+    assert environ["GIT_CONFIG_KEY_0"] == "http.http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git.extraheader"
+    assert name.lower() == "authorization"
+    assert value.encode() == b"Basic " + base64.b64encode(b"lab:lab-token")
 
 
 @pytest.mark.feature("lab-remote-heads")
@@ -415,6 +467,72 @@ def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
     worktrees.empty(tmp_path / "absent")
+
+
+def _recorded_chmod(monkeypatch: pytest.MonkeyPatch, refused: Path | None = None) -> list[tuple[Path, int]]:
+    changed: list[tuple[Path, int]] = []
+    chmod = Path.chmod
+
+    def record(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if path == refused:
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+        changed.append((path, stat.S_IMODE(mode)))
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", record)
+    return changed
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_removes_every_entry_of_an_open_folder_whose_mode_change_the_system_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    sealed = folder / "trees" / "head"
+    sealed.mkdir(parents=True)
+    (sealed / "file").write_text("x")
+    sealed.chmod(0o555)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("y")
+    locked.chmod(0)
+    (folder / "plain.txt").write_text("z")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    folder.chmod(0o777)
+    _recorded_chmod(monkeypatch, refused=folder)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o777
+    assert outside.read_text() == "kept"
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_changes_the_mode_only_of_a_folder_that_lacks_an_owner_bit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    open_folder = folder / "open"
+    open_folder.mkdir(parents=True)
+    modes = {"no-read": 0o355, "no-write": 0o555, "no-search": 0o655, "none": 0}
+    for name, mode in modes.items():
+        (folder / name).mkdir()
+        (folder / name).chmod(mode)
+    folder.chmod(0o700)
+    changed = _recorded_chmod(monkeypatch)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert sorted(changed) == [
+        (folder / "no-read", 0o755),
+        (folder / "no-search", 0o755),
+        (folder / "no-write", 0o755),
+        (folder / "none", 0o700),
+    ]
 
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")

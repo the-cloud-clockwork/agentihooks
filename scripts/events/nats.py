@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import functools
 import hashlib
 import logging
 import sys
@@ -28,7 +29,17 @@ from nats.js.errors import (
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nats_replicas, nkey
-from .bus import SERVE_WAITED_MS, Bus, Delivery, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from .bus import (
+    SERVE_WAITED_MS,
+    Bus,
+    Delivery,
+    EventLog,
+    NoStream,
+    PayloadTooLarge,
+    StateConflict,
+    StateEntry,
+    WorkQueue,
+)
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -173,10 +184,17 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
 
 
 async def _pull(
-    js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool, legacy: str | None = None
-):
+    js: JetStreamContext,
+    stream: str,
+    durable: str,
+    subject: str,
+    policy: QueuePolicy,
+    provision: bool,
+    legacy: str | None = None,
+) -> tuple[JetStreamContext.PullSubscription, int | None]:
     durable = await existing_consumer(js, stream, durable, durable if legacy is None else legacy)
     wanted = legacy_filters(subject) if stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"} else [subject]
+    info: api.ConsumerInfo | None = None
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
@@ -192,8 +210,9 @@ async def _pull(
             config.filter_subject, config.filter_subjects = None, wanted
         if stream.endswith(("-DEAD", "_DEAD")):
             config.max_deliver = policy.max_deliver
-        await js.add_consumer(stream, config=config)
-    return await js.pull_subscribe_bind(durable=durable, stream=stream)
+        info = await js.add_consumer(stream, config=config)
+    subscription = await js.pull_subscribe_bind(durable=durable, stream=stream)
+    return subscription, None if info is None else int(info.created.timestamp() * 1000)
 
 
 def _attempt(message: Msg) -> int:
@@ -254,7 +273,7 @@ class NatsConsumer:
         identity: str,
         swarm: str | None = None,
         credentials: str | None = None,
-    ):
+    ) -> None:
         self._loop = loop
         self._subscription = subscription
         self._js = js
@@ -262,6 +281,7 @@ class NatsConsumer:
         self._identity = identity
         self._swarm = swarm
         self._credentials = credentials
+        self.created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         return self._loop.run(self._fetch(batch, timeout_ms))
@@ -415,17 +435,14 @@ class NatsEventLog:
         policy = policy or self._policy
         if self._policies.setdefault(durable, policy) != policy:
             raise ValueError(f"durable consumer {durable!r} already has another policy")
-        return NatsConsumer(
-            self._loop,
-            self._loop.run(
-                _pull(self._js, self._stream, consumer_name(durable), subject, policy, self._provision, durable)
-            ),
-            self._js,
-            policy,
-            f"events.{durable}",
-            self._swarm,
-            self._credentials,
+        subscription, created = self._loop.run(
+            _pull(self._js, self._stream, consumer_name(durable), subject, policy, self._provision, durable)
         )
+        consumer = NatsConsumer(
+            self._loop, subscription, self._js, policy, f"events.{durable}", self._swarm, self._credentials
+        )
+        consumer.created = created
+        return consumer
 
 
 @dataclass(frozen=True)
@@ -501,7 +518,7 @@ class NatsWorkQueue:
         policy: QueuePolicy,
         config: BusConfig,
         swarm: str | None = None,
-    ):
+    ) -> None:
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
         names = queue_names(name, swarm)
         legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
@@ -518,15 +535,10 @@ class NatsWorkQueue:
             loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
             require_migrated(loop.run(js.stream_info(self._stream)))
-        self._consumer = NatsConsumer(
-            loop,
-            loop.run(_pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)),
-            js,
-            policy,
-            f"queue.{name}",
-            swarm,
-            config.credentials,
+        subscription, _ = loop.run(
+            _pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)
         )
+        self._consumer = NatsConsumer(loop, subscription, js, policy, f"queue.{name}", swarm, config.credentials)
 
     def offer(self, event: Envelope) -> bool:
         if self._swarm is not None:
@@ -801,12 +813,19 @@ class NatsBus:
             return store
 
     def serve(
-        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+        self,
+        subject: str,
+        queue: str,
+        handler: Callable[[str, bytes], bytes],
+        wait_ms: int | None = None,
+        refusal: Callable[[str, bytes, PayloadTooLarge], bytes] | None = None,
     ) -> None:
         """Answer each request on one of the bus's SERVE_WORKERS serve threads, because nats-py awaits the callbacks of
         one subscription one at a time and an awaited handler would hold every later request on the subject behind a
         slow one; with wait_ms, a request that waited that long since it arrived is dropped unanswered, because its
-        requester stopped waiting and its handler would claim for nobody."""
+        requester stopped waiting and its handler would claim for nobody. A reply over the server limit goes
+        compressed, and one that does not fit even so is answered by refusal with the request's subject and data, or
+        logged and dropped with no refusal."""
 
         def answer(msg: Msg, received_ns: int) -> None:
             waited = (time.monotonic_ns() - received_ns) // 1_000_000
@@ -821,8 +840,8 @@ class NatsBus:
                 token = SERVE_WAITED_MS.set(waited)
                 try:
                     reply = handler(msg.subject, msg.data)
-                    nats_payload.validate(self._nc, msg.reply, reply)
-                    self._loop.run(msg.respond(reply))
+                    refused = functools.partial(refusal, msg.subject, msg.data) if refusal else None
+                    self._loop.run(msg.respond(nats_payload.fitted(self._nc, msg.reply, reply, refused)))
                 except Exception as error:
                     self._loop.run(_unreported(error))
                 finally:
@@ -837,7 +856,9 @@ class NatsBus:
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
         nats_payload.validate(self._nc, subject, data)
         try:
-            return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
+            return nats_payload.expanded(
+                self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
+            )
         except NoRespondersError:
             raise TimeoutError(f"no responders for {subject!r}") from None
         except FetchTimeout:

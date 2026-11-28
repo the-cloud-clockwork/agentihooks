@@ -1,6 +1,6 @@
 import { OFFLINE, PAGE } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
-import { readClosed, readMetadata, writeLedger } from "./api.js";
+import { readClosed, writeLedger } from "./api.js";
 import { applyChecks, applyOp, hiddenDone, itemOf, lsRead, lsWrite, setState, settlePending, withDefaults } from "./state.js";
 import { attaching } from "./media.js";
 import { composing, editing } from "./threads.js";
@@ -122,10 +122,16 @@ export function closedLeftIn(name, key) {
 
 function keepDropped(previous, next) {
   for (const name of Object.keys(pulled)) {
-    const gone = hiddenDone(next, name);
-    const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
-    const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
-    older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    const closed = (next.closed || {})[name] || {};
+    if (closed.ids && closed.ids.length === closed.hidden) {
+      const gone = hiddenDone(next, name);
+      const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
+      const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
+      older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    } else {
+      const open = new Set(next[name].map((i) => i.id));
+      older[name] = (older[name] || []).filter((i) => !i.deleted && !open.has(i.id) && closedRow(name, i));
+    }
     pulled[name] = older[name].length;
   }
   for (const name of new Set([...touchedPaged(seenRev), ...unsettled])) refreshClosed(name).catch(() => null);
@@ -282,7 +288,7 @@ export function receiveLedger(state) {
   if (inflight) return;
   if (staleAndIdle(state._meta.page_version)) return location.reload();
   applyServer(state);
-  resume();
+  if (ops.length || Object.keys(checks).length) flush(false);
 }
 
 export function loadSaved() {
@@ -296,13 +302,12 @@ export function loadSaved() {
   }
 }
 
-export async function loadMetadata() {
-  try {
-    const resp = await readMetadata();
-    if (!resp.ok || rev >= 0) return;
-    const { data } = await resp.json();
-    if (rev >= 0) return;
-    Object.assign(doc, { title: data.title || doc.title, overview: data.overview || doc.overview });
-    render();
-  } catch (e) { return; }
+const CLOSED = "done";
+const CLOSING = ["phases", "tasks", "questions", "followups", "alerts"];
+
+export function closedRow(name, row) {
+  if (!CLOSING.includes(name) || row.out_of_scope) return false;
+  if (name === "questions") return (row.answers || []).some((a) => !a.deleted);
+  if (name === "alerts") return row.state === CLOSED;
+  return !!row.done || row.state === CLOSED;
 }

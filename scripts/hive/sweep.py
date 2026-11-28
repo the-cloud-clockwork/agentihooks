@@ -35,3 +35,11 @@ def sweep(store: Any, now_ms: int) -> list[str]:
             continue
         lines += purge.forget(store.redis, hive_id)
     return lines
+
+
+def notify_drains(store: Any) -> None:
+    """Tell the master of each swarm with a live agent on an indexed draining hive of that drain, once per drain."""
+    for hive_id in indexed(store.redis):
+        record: dict[str, Any] | None = hive_state.read(hive_state.records(store.redis, hive_id), hive_id)
+        if record is not None:
+            master_notice.drained(store, hive_id, record)

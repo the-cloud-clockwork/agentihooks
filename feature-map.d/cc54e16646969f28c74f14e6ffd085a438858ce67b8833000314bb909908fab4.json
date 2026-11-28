@@ -1,0 +1,11 @@
+{
+  "id": "lab-worker-node-mirror-age",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2750",
+  "behaviour": "agentihooks ci-lab-worker answers each GET /metrics scrape with ci_lab_node_mirror_age_seconds labelled with the node name from CI_LAB_NODE_NAME: the seconds from the epoch second in the node cache's fetched-at stamp under CI_LAB_GIT_MIRROR to the scrape's wall clock, never below zero, with no sample while the stamp is missing or holds no whole number; a worker without a node name exports no mirror age sample, even when the stamp exists.",
+  "seam": "scripts.ci_lab.executors main serving the worker registry through scripts.ci_lab.metrics serve_registry and expose, with scripts.ci_lab.metrics observe_mirror and the scripts.ci_lab.contract node gauge and node name",
+  "tests": [
+    "tests/ci_lab/test_executors.py::test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name",
+    "tests/ci_lab/test_executors.py::test_main_exports_no_mirror_age_without_a_node_name"
+  ]
+}

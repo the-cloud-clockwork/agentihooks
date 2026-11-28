@@ -150,6 +150,13 @@ def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
 
 
+def codex_skills_home() -> Path:
+    """Where Codex skills go: a CODEX_HOME of its own keeps them, so they stay out of every other Codex on the machine."""
+    if os.environ.get("CODEX_HOME"):
+        return codex_home() / "skills"
+    return agents_skills_home()
+
+
 def _stale_catalog_files() -> tuple[Path, Path]:
     from hooks.config import AGENTIHOOKS_HOME
 
@@ -235,7 +242,8 @@ def _is_ours(group: object, wrapper: Path) -> bool:
 
 
 def _runs_wrapper(command: str, wrapper: Path) -> bool:
-    """True for a hook command that runs our wrapper, quoted or not, or the bash wrapper an earlier install wrote."""
+    """True for a hook command that runs our wrapper, quoted, bare or through cmd.exe, or the bash wrapper an earlier install wrote."""
+    command = command.removeprefix(WINDOWS_RUNNER)
     bare = command.strip('"')
     return _command_is_wrapper(bare, wrapper) or _command_is_wrapper(bare, wrapper.with_name(LEGACY_WRAPPER))
 
@@ -245,9 +253,12 @@ def wrapper_name() -> str:
     return "agentihooks-hook.cmd" if WINDOWS else LEGACY_WRAPPER
 
 
+WINDOWS_RUNNER = "cmd.exe /d /c "
+
+
 def hook_command(wrapper: Path) -> str:
-    """The hooks.json command for the wrapper; quoted on Windows so cmd.exe keeps a path with spaces whole."""
-    return f'"{wrapper}"' if WINDOWS else str(wrapper)
+    """The hooks.json command for the wrapper; on Windows a cmd.exe call, because Codex runs a quoted command not at all."""
+    return f'{WINDOWS_RUNNER}"{wrapper}"' if WINDOWS else str(wrapper)
 
 
 def restore_hook_order(home: Path) -> list[str]:
@@ -628,7 +639,7 @@ class CodexAdapter:
         _i = _install_module()
         local = claude_local_entries(subdir, layers, filter_fn)
         if subdir == "skills":
-            dst = agents_skills_home()
+            dst = codex_skills_home()
             reap_translated_commands(skill_names_in(layers, filter_fn), reason="a real skill now owns the name")
             for label, src in layers:
                 _i._symlink_dir_contents(src, dst, label=f"codex {label}", filter_fn=filter_fn)
@@ -665,7 +676,7 @@ class CodexAdapter:
         _i = _install_module()
         link: Callable[..., None] = getattr(_i, "_symlink_dir_contents")
         skills = Path(getattr(_i, "CLAUDE_HOME")) / "skills"
-        link(skills, agents_skills_home(), label="codex local skill", filter_fn=is_local)
+        link(skills, codex_skills_home(), label="codex local skill", filter_fn=is_local)
 
     def _reap_prompts(self) -> None:
         """Remove the prompts an earlier install translated; Codex 0.160 no longer reads ~/.codex/prompts."""
@@ -722,7 +733,7 @@ class CodexAdapter:
         skips a symlinked SKILL.md and one without frontmatter. Its own manifest, apart from the copilot translations.
         """
         say: Callable[[str], None] = getattr(_install_module(), "_cprint")
-        dst_dir = agents_skills_home()
+        dst_dir = codex_skills_home()
         manifest_path = dst_dir / _LOCAL_COMMANDS_MANIFEST
         previous = load_manifest(manifest_path)
         written: list[str] = []

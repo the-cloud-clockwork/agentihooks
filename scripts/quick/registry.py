@@ -27,6 +27,9 @@ class Seat:
     name: str
     session_id: str = ""
     state: str = READY
+    auth: str = "routed"
+    account: str = ""
+    command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -51,8 +54,13 @@ def path(folder: Path) -> Path:
     return folder / FILE
 
 
+def _seat(data: Any) -> Seat:
+    found = Seat(**data)
+    return dataclasses.replace(found, command=tuple(found.command))
+
+
 def _decode(data: Any) -> Swarm:
-    seats = tuple(Seat(**seat) for seat in data["seats"])
+    seats = tuple(_seat(seat) for seat in data["seats"])
     return Swarm(str(data["quick_id"]), str(data["directory"]), seats)
 
 

@@ -1,0 +1,30 @@
+rules:
+  - id: gate-registry-lookup-skips-import-report
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A gate is looked up in the gate registry outside entry._resolve. The lookup runs the gate's lazy import, so a
+      gate whose module or one of its dependencies cannot be imported escapes as a traceback and the call fails open
+      with no gate log row and no alert, as every gate did on 16 November when an editable install pointed at a
+      removed worktree. Look gates up through entry._resolve, which writes the fail-open row, raises the hourly setup
+      alert and lets the call through.
+    paths:
+      include:
+        - /scripts/gates/entry.py
+        - gate-registry-lookup-skips-import-report.py
+    patterns:
+      - pattern-either:
+          - pattern: GATES[$NAME]
+          - pattern: HOST_GATES[$NAME]
+          - pattern: GATES.get(...)
+          - pattern: HOST_GATES.get(...)
+          - patterns:
+              - pattern-inside: |
+                  $NAMED = ChainMap(...)
+                  ...
+              - pattern-either:
+                  - pattern: $NAMED[$NAME]
+                  - pattern: $NAMED.get(...)
+      - pattern-not-inside: |
+          def _resolve(...):
+              ...

@@ -11,12 +11,16 @@ import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 import yaml
 from coverage import CoverageData
+
+from scripts import ci_budget
+from tests.contracts.ci_tiers.test_workflow import enabled
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +30,7 @@ def test_sonar_uses_all_shards_without_running_tests_again() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
+    assert scan["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
@@ -75,6 +79,58 @@ def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lan
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     patterns = [str((step.get("with") or {}).get("pattern", "")) for step in steps]
     assert not [pattern for pattern in patterns if "coverage-3.12" in pattern]
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_a_dev_push_analyses_sonar_only_after_every_unit_leg() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    sonar, after = jobs["sonar"], jobs["sonar-after-unit"]
+    assert after["needs"] == [*sonar["needs"], "unit"]
+    assert after["steps"] == sonar["steps"]
+    shared = ("runs-on", "timeout-minutes", "outputs", "permissions")
+    assert {key: after[key] for key in shared} == {key: sonar[key] for key in shared}
+    assert after["env"] == {key: value for key, value in sonar["env"].items() if key != "SONAR_HAND_OFF"}
+    assert "||" not in after["if"]
+    select = SimpleNamespace(result="success", outputs=SimpleNamespace(sonar="", scope="full"))
+    needs = {"select": select, "unit": SimpleNamespace(result="failure")}
+    events = ("push", "pull_request", "merge_group", "workflow_dispatch")
+    assert [event for event in events if enabled(after["if"], event, needs)] == ["push"]
+    assert after["name"] == (
+        "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar' || 'sonar-after-unit' }}"
+    )
+    assert sonar["name"] == (
+        "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar hand off' || 'sonar' }}"
+    )
+    assert ci_budget.BUDGETS["sonar-after-unit"] == ci_budget.BUDGETS["sonar"]
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_sonar_hands_a_dev_push_off_and_keeps_starting_beside_the_shards() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert not {"unit", "unit-selected"} & set(jobs["sonar"]["needs"])
+    assert (
+        jobs["sonar"]["env"]["SONAR_HAND_OFF"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
+    )
+    steps, names = _sonar_steps()
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[0]["if"] == "env.SONAR_HAND_OFF != 'true'"
+    upload = steps[names.index("Upload coverage and analysis evidence")]
+    assert upload["if"] == "always() && env.SONAR_HAND_OFF != 'true'"
+
+
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_promotion_reads_the_dev_push_analysis_after_the_unit_legs() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    for name in ("promotion-ready", "promote"):
+        job = jobs[name]
+        assert {"sonar", "sonar-after-unit"} <= set(job["needs"])
+        graded = {
+            need: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis="", promote="false"))
+            for need in job["needs"]
+        }
+        assert not enabled(job["if"], "push", graded)
+        graded["sonar-after-unit"].outputs.analysis = "A1"
+        assert enabled(job["if"], "push", graded)
 
 
 def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -> None:

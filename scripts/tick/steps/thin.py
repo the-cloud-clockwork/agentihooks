@@ -1,5 +1,6 @@
 """The thin task pass: queue one planner enhancement task for each open engineer or ci task whose text is too thin
-to build from, mark the task as needing enhancement in the same ledger write and tell the master once."""
+to build from, mark the task as needing enhancement in the same ledger write and tell the master once. A thin task with
+no phase first gets, in that write, a manual planning phase of its own that holds it and its enhancement task."""
 
 from collections.abc import Callable
 from itertools import takewhile
@@ -23,6 +24,8 @@ LANES = ("eng", "ci")
 NEEDED = {"enhancement": "needed"}
 TITLE = "Plan a thin task before an engineer claims it"
 DISTINCT = "Each thin task gets its own enhancement plan task, keyed by the task it enhances."
+OWN = "Each thin task with no phase gets a phase of its own for its enhancement plan."
+HOLDS = "Holds task {} and its enhancement plan, so the planner publishes that plan into this phase."
 
 
 def _thin_task_pass(tick: Any, get: Get) -> list[str]:
@@ -67,12 +70,46 @@ def enhance(
     """Add the enhancement task of the thin ``task`` unless ``ids`` holds it and mark the task as needing enhancement,
     both in one ledger write; return the action line and whether the write landed."""
     tid, enhancement = task["id"], thin_task.ENHANCE.format(task["id"])
-    added = [] if enhancement in ids else [_addition(task, problems)]
+    added = [] if enhancement in ids else _additions(task, problems, enhancement)
     try:
         ledger.mutate([*added, _marking(task)], deadline=deadline)
     except LedgerRefused as exc:
         return f"refused the enhancement of {tid}: {exc}", False
     return f"queued {enhancement} for thin task {tid}", True
+
+
+def _additions(task: dict[str, Any], problems: list[str], enhancement: str) -> list[dict[str, object]]:
+    """Return the operations that add the ``enhancement`` task of ``task`` in its phase; a task with no phase first
+    gets a manual planning phase of its own, named like its enhancement task, and moves into it."""
+    phase = task.get("phase")
+    if phase:
+        return [_addition(task, problems, phase)]
+    return [_own_phase(task, enhancement), _move(task, enhancement), _addition(task, problems, enhancement)]
+
+
+def _own_phase(task: dict[str, Any], phase: str) -> dict[str, object]:
+    """Return the add operation of the manual planning ``phase`` that holds ``task`` and its enhancement task."""
+    return {
+        "op": "phase_add",
+        "id": f"thin-phase-{task['id']}",
+        "by": SENDER,
+        "phase": phase,
+        "title": _title(task),
+        "description": HOLDS.format(task["id"]),
+        "planning": "manual",
+        "not_duplicate": OWN,
+    }
+
+
+def _move(task: dict[str, Any], phase: str) -> dict[str, object]:
+    """Return the update operation that moves ``task`` into ``phase``."""
+    return {
+        "op": "task_update",
+        "id": f"thin-move-{task['id']}",
+        "by": SENDER,
+        "item": f"tasks/{task['id']}",
+        "fields": {"phase": phase},
+    }
 
 
 def _marking(task: dict[str, Any]) -> dict[str, object]:
@@ -88,9 +125,9 @@ def _marking(task: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
-    """Return the task add operation of the plan lane task that enhances ``task``, in its phase when it has one."""
-    operation: dict[str, object] = {
+def _addition(task: dict[str, Any], problems: list[str], phase: str) -> dict[str, object]:
+    """Return the task add operation of the plan lane task that enhances ``task``, in ``phase``."""
+    return {
         "op": "task_add",
         "id": f"thin-add-{task['id']}",
         "by": SENDER,
@@ -98,11 +135,11 @@ def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
         "title": _title(task),
         "lane": "plan",
         "kind": "plan",
+        "phase": phase,
         "description": _brief(task, problems),
         "enhances": task["id"],
         "not_duplicate": DISTINCT,
     }
-    return operation | ({"phase": task["phase"]} if task.get("phase") else {})
 
 
 def _title(task: dict[str, Any]) -> str:

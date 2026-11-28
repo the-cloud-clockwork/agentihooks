@@ -191,6 +191,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_input_key.py",
         "scripts/ci_lab/__main__.py",
         "scripts/ci_lab/scheduler.py",
+        "scripts/ci_lab_smoke.py",
         "scripts/ci_lab_verdict.py",
         "scripts/ci_launch_hotfix.py",
         "scripts/ci_marker_vectors.py",
@@ -232,6 +233,8 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/packaging/hive-launch-attestation-proof.sh",
         "scripts/packaging/hive-launch-smoke.sh",
         "scripts/packaging/pull-runtime-image.sh",
+        "scripts/packaging/scheduler-cache-smoke.sh",
+        "tests/ci_lab/scheduler_cache_probe.py",
         "scripts/packaging/stability-smoke.sh",
         "scripts/packaging/swarm-image-clients.sh",
         "scripts/packaging/swarm-init-smoke.sh",
@@ -320,6 +323,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
+        "scripts/ci_lab/discovery_parity.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
@@ -596,7 +600,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_upload_it() -> None:
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "collect"]
     steps = sonar["steps"]
     arrivals = next(step for step in steps if step.get("name") == "Take each shard's coverage as it lands")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")

@@ -68,7 +68,7 @@ MOVED = {
     ("docs-sanity.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
-    ("swarm-image.yml", "release"): STANDARD,
+    ("swarm-image.yml", "release"): LIGHT,
     ("swarm-node-base.yml", "copy"): STANDARD,
     ("swarm-node-image.yml", "image"): STANDARD,
     ("swarm-node-image.yml", "hive"): STANDARD,
@@ -83,12 +83,14 @@ MOVED = {
     ("test-leaks.yml", "followup"): LIGHT,
     ("test-leaks.yml", "one-process"): BATCH,
     ("test.yml", "admission"): LIGHT,
+    ("test.yml", "collect"): QUEUED,
     ("test.yml", "coverage-baseline"): LIGHT,
     ("test.yml", "coverage-ratchet"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "gate-required"): LIGHT,
     ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
+    ("test.yml", "lint-actions"): QUEUED,
     ("test.yml", "mutation"): LIGHT,
     ("test.yml", "mutation-plan"): QUEUED,
     ("test.yml", "mutation-refine"): LIGHT,
@@ -102,10 +104,12 @@ MOVED = {
     ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "type-gate"): QUEUED,
+    ("test.yml", "type-gate-tree"): QUEUED,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "lab-verdict"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): QUEUED,
+    ("test.yml", "sonar-after-unit"): QUEUED,
     ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
     ("test.yml", "launch-hotfix"): LIGHT,
@@ -126,6 +130,8 @@ if (WORKFLOWS / "actions-storage.yml").exists():
     MOVED[("actions-storage.yml", "prune")] = LIGHT
 if (WORKFLOWS / "ci-minutes.yml").exists():
     MOVED[("ci-minutes.yml", "measure")] = LIGHT
+if (WORKFLOWS / "lab-check.yml").exists():
+    MOVED[("lab-check.yml", "post")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 if (WORKFLOWS / "hive-join.yml").exists():

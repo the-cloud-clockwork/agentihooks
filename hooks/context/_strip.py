@@ -11,6 +11,8 @@ import re
 import tree_sitter_bash
 from tree_sitter import Language, Parser, Query, QueryCursor
 
+from hooks.context.credential_guard import BODY_SUBSTITUTION_OPEN, substitutions
+
 _BASH = Language(tree_sitter_bash.language())
 _HEREDOCS = Query(_BASH, "(heredoc_redirect (heredoc_start) @start (heredoc_body) @body (heredoc_end) @end) @redirect")
 
@@ -18,7 +20,9 @@ _HEREDOCS = Query(_BASH, "(heredoc_redirect (heredoc_start) @start (heredoc_body
 def _without_heredocs(command: str) -> str:
     """Cut each terminated heredoc the bash parse finds: its opener, and its body through the terminator line.
 
-    The rest of the delimiter line stays. An arithmetic shift never parses as a heredoc. A heredoc counts as terminated
+    The rest of the delimiter line stays. An unquoted delimiter's body leaves the command substitutions bash runs in
+    it, each on a line of its own with its heredocs cut the same way; the parse yields a heredoc after the ones nested
+    in it, so the enclosing cut wins. An arithmetic shift never parses as a heredoc. A heredoc counts as terminated
     only when its terminator holds the delimiter word, because the parse can end an unterminated body holding an
     expansion with a terminator made of the rest of the text. A double quoted delimiter never matches its terminator,
     so the guards still read its body. A parse with an error keeps every heredoc, as prod
@@ -28,15 +32,25 @@ def _without_heredocs(command: str) -> str:
     tree = Parser(_BASH).parse(source)
     if tree.root_node.has_error:
         return command
-    kept = [True] * len(source)
+    pieces = [source[index : index + 1] for index in range(len(source))]
     for _, match in QueryCursor(_HEREDOCS).matches(tree.root_node):
         redirect, start, body, end = (match[name][0] for name in ("redirect", "start", "body", "end"))
-        delimiter = source[start.start_byte : start.end_byte].strip(b"'")
+        opener = source[start.start_byte : start.end_byte]
+        delimiter = opener.strip(b"'")
         if delimiter and source[end.start_byte : end.end_byte] == delimiter:
             line_end = source.rfind(b"\n", 0, body.start_byte)
             for first, last in ((redirect.start_byte, start.end_byte), (line_end, end.end_byte)):
-                kept[first:last] = [False] * (last - first)
-    return bytes(byte for byte, keep in zip(source, kept, strict=True) if keep).decode("utf-8", "surrogatepass")
+                pieces[first:last] = [b""] * (last - first)
+            if opener == delimiter:
+                pieces[line_end] = _substitution_lines(source[line_end : end.start_byte])
+    return b"".join(pieces).decode(errors="surrogatepass")
+
+
+def _substitution_lines(body: bytes) -> bytes:
+    """Each command substitution bash runs in an unquoted heredoc body, on a line of its own, its heredocs cut."""
+    text = body.decode(errors="surrogatepass")
+    lines = (f"\n{_without_heredocs(inner)}" for inner in substitutions(text, BODY_SUBSTITUTION_OPEN))
+    return "".join(lines).encode(errors="surrogatepass")
 
 
 def strip_non_command_content(command: str) -> str:

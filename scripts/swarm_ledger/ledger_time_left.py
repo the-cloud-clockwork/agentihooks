@@ -1,11 +1,8 @@
 """The tick's time left write: live slots and the CI median, with the calculation kept beside them."""
 
-from typing import TYPE_CHECKING
-
 import ledger_stats
 
-if TYPE_CHECKING:
-    from ledger_core import Context
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("time_left",)
 FIELDS = {"op", "id", "by", "slots", "ci_minutes"}
@@ -32,7 +29,7 @@ def check(op: dict) -> None:
         raise ValueError("ci_minutes must be a nonnegative number or null")
 
 
-def apply(doc: dict, op: dict, ctx: "Context") -> bool:
+def apply(doc: dict, op: dict, ctx: OpContext) -> bool:
     inputs = {"slots": op["slots"], "ci_minutes": op["ci_minutes"], **{key: op[key] for key in OPTIONAL if key in op}}
     result = ledger_stats.calculate(doc, ctx.meta["events"] + ctx.events, ctx.at, inputs)
     ctx.meta["time_left"] = {"at": ctx.at, "inputs": inputs, "calculation": result}

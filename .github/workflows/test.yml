@@ -38,16 +38,16 @@ jobs:
 
   promotion-ready:
     name: Promotion ready
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, launch-hotfix]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, type-gate-tree, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.type-gate-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
       - run: echo 'All promotion dependencies graded this development revision.'
 
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, promotion-ready, launch-hotfix]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && !(!(needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '') && needs.launch-hotfix.outputs.promote != 'true') }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, sonar-after-unit, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, type-gate-tree, promotion-ready, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && !(!(needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.type-gate-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar-after-unit.outputs.analysis != '') && needs.launch-hotfix.outputs.promote != 'true') }}
     uses: ./.github/workflows/promote.yml
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -940,7 +940,8 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - &count-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -1005,7 +1006,8 @@ jobs:
         name: Use the test environment
         run: echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"
 
-      - name: Check out the base revision
+      - &count-base
+        name: Check out the base revision
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         # swarm merge queue reads the graded base from this log line.
@@ -1024,7 +1026,8 @@ jobs:
           key: ${{ steps.day.outputs.key }}-counts-v1-${{ github.sha }}
           restore-keys: ${{ steps.day.outputs.key }}-counts-v1-
 
-      - name: Mint the token that reads the dev count record
+      - &count-token
+        name: Mint the token that reads the dev count record
         id: app-token
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/create-github-app-token@v3.2.0
@@ -1052,13 +1055,56 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
           python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
 
-      - name: Read the pull request reviews
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+      # The base revision's copy grades, so a pull request cannot loosen its own floor.
+      - name: Hold the base revision's test count
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PULL: ${{ github.event.pull_request.number }}
+          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
+          TEST_COUNT_ENVIRONMENT: ${{ steps.day.outputs.key }}
+          TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
         run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL/reviews?per_page=100" --jq '.[] | {user: .user.login, state, commit_id}' > "$RUNNER_TEMP/pull-reviews.jsonl" || rm -f "$RUNNER_TEMP/pull-reviews.jsonl"
+          if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
+            echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
+      - name: Save exact count collections
+        if: steps.counts.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: ${{ steps.counts.outputs.cache-primary-key }}
+
+  collect:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 16
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - *count-checkout
+
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+
+      - *count-base
+
+      - *count-token
 
       # The protected grader plans, so a queued change cannot widen what it reuses.
       - name: Plan the tests whose inputs did not change
@@ -1115,26 +1161,10 @@ jobs:
           ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status.tmp"; mv "$RUNNER_TEMP/plan.status.tmp" "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/plan.pid"
 
-      # The base revision's copy grades, so a pull request cannot loosen its own floor.
-      - name: Hold the base revision's test count
+      - name: Collect the head's tests
         env:
-          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
-          TEST_COUNT_ENVIRONMENT: ${{ steps.day.outputs.key }}
-          TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
-          TEST_COUNT_HEAD_COLLECTION: ${{ runner.temp }}/collected.json
-          TEST_COUNT_REVIEWS: ${{ runner.temp }}/pull-reviews.jsonl
-          TEST_COUNT_REVIEWED_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
-            echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
-            exit 1
-          fi
-          cd "$RUNNER_TEMP/base"
-          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then
-            cd "$GITHUB_WORKSPACE"
-            python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))'
-          fi
+          COLLECTED: ${{ runner.temp }}/collected.json
+        run: python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; Path(os.environ["COLLECTED"]).write_text(json.dumps(collected_tests(Path.cwd())))'
 
       - name: Wait for the test plan
         id: plan
@@ -1221,12 +1251,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Save exact count collections
-        if: steps.counts.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/count-collections
-          key: ${{ steps.counts.outputs.cache-primary-key }}
+      - name: Read the pull request reviews
+        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL/reviews?per_page=100" --jq '.[] | {user: .user.login, state, commit_id}' > "$RUNNER_TEMP/pull-reviews.jsonl" || rm -f "$RUNNER_TEMP/pull-reviews.jsonl"
+
+      # The base revision's copy grades, so a pull request cannot approve its own retirement.
+      - name: Hold each new retirement to a code owner's approval
+        if: github.event_name == 'pull_request'
+        env:
+          TEST_COUNT_REVIEWS: ${{ runner.temp }}/pull-reviews.jsonl
+          TEST_COUNT_REVIEWED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! grep -q -- --approvals "$RUNNER_TEMP/base/tests/count_floor.py" 2>/dev/null; then
+            echo "::error::The base carries no count floor approvals mode, so nothing trusted can grade the retirements; merge dev."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --approvals --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
@@ -1315,7 +1360,7 @@ jobs:
         if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          COLLECTION_JOB: test-count (${{ matrix.python-version }})
+          COLLECTION_JOB: collect (${{ matrix.python-version }})
           COLLECTION_STEP: Upload the early collection
         run: |
           while :; do
@@ -2381,8 +2426,9 @@ jobs:
         run: python3 -m tests.shard_budget $REPORT shard-reports/durations-*/durations.json
 
   sonar:
+    name: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar hand off' || 'sonar' }}
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
-    needs: [select, reuse, admission, lab-verdict, test-count]
+    needs: [select, reuse, admission, lab-verdict, collect]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
     outputs:
@@ -2393,10 +2439,12 @@ jobs:
       GIT_CONFIG_VALUE_0: "false"
       SONAR_SCANNER_VERSION: 7.2.0.5079
       SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
+      SONAR_HAND_OFF: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
     permissions:
       contents: read
-    steps:
+    steps: &sonar-steps
       - uses: actions/checkout@v4
+        if: env.SONAR_HAND_OFF != 'true'
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -2409,7 +2457,10 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           test_only=false
-          if [[ "$EVENT" == pull_request ]]; then
+          if [[ "${SONAR_HAND_OFF:-}" == true ]]; then
+            test_only=true
+            echo "::notice::A dev push analyses Sonar in sonar-after-unit, which starts once every unit leg has finished."
+          elif [[ "$EVENT" == pull_request ]]; then
             git diff --no-ext-diff --no-renames --name-only -z "$BASE" "$HEAD" > "$RUNNER_TEMP/sonar-paths"
             test_only=true
             count=0
@@ -2664,7 +2715,7 @@ jobs:
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
 
       - name: Upload coverage and analysis evidence
-        if: always()
+        if: always() && env.SONAR_HAND_OFF != 'true'
         uses: ./.github/actions/retry-upload
         with:
           name: sonar-report
@@ -2684,6 +2735,7 @@ jobs:
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
         run: |
           [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           set -o pipefail
@@ -2711,7 +2763,23 @@ jobs:
           dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
           if [[ "$gate" != OK ]]; then
             echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
-            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '(.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"), (select(.total > (.issues | length)) | "\(.total - (.issues | length)) more not shown")'; } 2> /dev/null || true
+            findings() {
+              local url="$1/search?$2" page=1 shown=0 total=0 body counts
+              while body=$(api "$url") && counts=$(jq -er --arg name "$1" '"\(.[$name] // [] | length) \(.paging.total // .total // 0 | floor)"' <<<"$body"); do
+                jq -r --arg name "$1" '.[$name] // [] | .[] | "\(.component):\(.line // 0) \(.rule // .ruleKey) \(.message)"' <<<"$body"
+                total=${counts#* }
+                shown=$((shown + ${counts% *}))
+                [[ "${counts% *}" -gt 0 && "$shown" -lt "$total" ]] || break
+                page=$((page + 1))
+                url="$1/search?$2&p=$page"
+              done
+              [[ "$shown" -ge "$total" ]] || echo "$((total - shown)) more $3not shown"
+            }
+            export -f api findings
+            scope=${dashboard#*\?id=}
+            GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 SONAR_TOKEN="$SONAR_READ_TOKEN" timeout 30s bash -c 'findings issues "$1" ""; findings hotspots "$2" "hotspots "' _ \
+              "componentKeys=$scope&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" \
+              "project=$scope&inNewCodePeriod=true&status=TO_REVIEW&ps=100" 2> /dev/null || true
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"
@@ -2756,6 +2824,24 @@ jobs:
         env:
           PROXY_PID: ${{ steps.proxy.outputs.pid }}
         run: kill "$PROXY_PID"
+
+  sonar-after-unit:
+    name: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'sonar' || 'sonar-after-unit' }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.select.result == 'success' && needs.select.outputs.sonar != 'skip' }}
+    needs: [select, reuse, admission, lab-verdict, collect, unit]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
+    outputs:
+      analysis: ${{ steps.gate.outputs.analysis }}
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      SONAR_SCANNER_VERSION: 7.2.0.5079
+      SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
+    permissions:
+      contents: read
+    steps: *sonar-steps
 
   dep-manifest:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -2841,7 +2927,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/dep-manifest"
           shopt -s nullglob
-          python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
+          python -m coverage combine --rcfile=.github/coverage/coverage.ini --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
             .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
           python -m scripts.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
             --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
@@ -2923,17 +3009,18 @@ jobs:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
-      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - &lint-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       # A failed cache download leaves the segment timer holding the step open until it fires.
-      - name: Set up Python
+      - &lint-python
+        name: Set up Python
         uses: actions/setup-python@v5
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -2942,20 +3029,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # The dashboard query step waits on both status files, so its setup overlaps the lint steps before it.
-      - name: Prepare the dashboard query checker in the background
-        env:
-          CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
-          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet --constraint .github/ci-tools/parser.lock --constraint .github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0 packaging==26.3; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
-          (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
-
       - name: Install ruff
         run: python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
 
-      - name: Install PyYAML
+      - &lint-pyyaml
+        name: Install PyYAML
         run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Install vulture
@@ -2964,40 +3042,19 @@ jobs:
       - name: Install the comment gate grammars
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter==0.26.0 tree-sitter-bash==0.25.1 tree-sitter-javascript==0.25.0 tree-sitter-css==0.25.0
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.23"
-          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
-          enable-cache: false
-
-      - name: Check out the base revision
+      - &lint-base
+        name: Check out the base revision
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
 
-      - name: Check out the protected grader
+      - &lint-grader
+        name: Check out the protected grader
         env:
           GRADER: ${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}
         run: |
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
-
-      - name: Check out kernel marker vector authority
-        if: ${{ !cancelled() }}
-        uses: actions/checkout@v4
-        with:
-          repository: the-cloud-clockwork/agentibrain-kernel
-          ref: dev
-          path: .marker-kernel
-          persist-credentials: false
-
-      - name: Refuse marker key vector drift from kernel dev
-        if: ${{ !cancelled() }}
-        run: |
-          vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
-          cd "$RUNNER_TEMP/grader"
-          python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
 
       # Each control grades even after an earlier one is red, so one run reports every red control.
       - name: Lint check
@@ -3053,14 +3110,6 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
-
-      - name: Refuse changelog fragments named off the branch or opening without a section heading
-        if: ${{ !cancelled() }}
-        env:
-          BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: |
-          cd "$RUNNER_TEMP/grader"
-          python -m scripts.ci_changelog_fragments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"
 
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}
@@ -3201,6 +3250,85 @@ jobs:
           fi
           python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+  lint-actions:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    permissions:
+      contents: read
+    steps:
+      - *lint-checkout
+
+      # A failed cache download leaves the segment timer holding the step open until it fires.
+      - *lint-python
+
+      # The dashboard query step waits on both status files, so its setup overlaps the lint steps before it.
+      - name: Prepare the dashboard query checker in the background
+        env:
+          CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
+          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet --constraint .github/ci-tools/parser.lock --constraint .github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0 packaging==26.3; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
+          (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
+
+      - *lint-pyyaml
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - *lint-base
+
+      - *lint-grader
+
+      - name: Check out kernel marker vector authority
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/agentibrain-kernel
+          ref: dev
+          path: .marker-kernel
+          persist-credentials: false
+
+      - name: Refuse marker key vector drift from kernel dev
+        if: ${{ !cancelled() }}
+        run: |
+          vectors="$GITHUB_WORKSPACE/.marker-kernel/tests/fixtures/marker-idempotency-vectors.json"
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
+
+      - name: Refuse changelog fragments named off the branch or opening without a section heading
+        if: ${{ !cancelled() }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_changelog_fragments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"
+
+      # The lab scheduler reads a head with the discovery code of main until the next release, so main's copy reads it here too.
+      # Only the pull request that introduces the check meets a grader without it; its own copy grades.
+      - name: Hold the static gates the released lab reads equal to the gates the head reads
+        if: ${{ !cancelled() }}
+        run: |
+          git fetch --no-tags origin main
+          mkdir "$RUNNER_TEMP/released"
+          git archive --output "$RUNNER_TEMP/released.tar" FETCH_HEAD scripts
+          tar -x -f "$RUNNER_TEMP/released.tar" -C "$RUNNER_TEMP/released"
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_lab/discovery_parity.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_lab.discovery_parity --released "$RUNNER_TEMP/released" --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
@@ -3316,7 +3444,7 @@ jobs:
 
       - name: Install Playwright for artifact checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
-        run: python -m pip install --constraint .github/ci-tools/browser-crypto.lock playwright==1.63.0 orjson==3.13.0
+        run: python -m pip install --constraint .github/ci-tools/browser-crypto.lock --constraint .github/ci-tools/lint-tools.lock playwright==1.63.0 orjson==3.13.0 jsonschema==4.25.1
 
       - name: Install the artifact viewer browser
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
@@ -3418,6 +3546,8 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
       - name: Hold the strict type checker's errors per file to the base baseline
+        env:
+          TYPE_GATE_DIRECT_IMPORTERS: "1"
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/type_gate.py" ]]; then
             cd "$RUNNER_TEMP/grader"
@@ -3434,6 +3564,33 @@ jobs:
           name: type-baseline
           path: ${{ runner.temp }}/type-baseline/TYPE_BASELINE.json
           retention-days: 7
+
+  type-gate-tree:
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && !(github.event_name != 'push' && needs.admission.result != 'success') && !(github.event_name == 'push' && github.ref != 'refs/heads/dev') }}
+    needs: [admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *save-venv
+      - *use-venv
+      - name: Hold the strict type checker's whole tree errors to its own baseline
+        run: python -m scripts.type_gate --tree
 
   coverage-ratchet:
     needs: [select, unit, reuse]
@@ -3683,7 +3840,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse, lab-verdict]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse, lab-verdict]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -3756,7 +3913,7 @@ jobs:
 
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -3794,9 +3951,9 @@ jobs:
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope
               | (if $event == "merge_group" then
-                ["select", "split", "shard-check", "test-count"]
+                ["select", "split", "shard-check", "test-count", "collect"]
               else
-                ["select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
+                ["select", "collect", "test-count", "lint", "lint-actions", "type-gate", "docs", "semgrep", "sonar", "writer-lock"]
                 - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
@@ -3819,7 +3976,7 @@ jobs:
             echo "::error::A push or dispatch run never reuses a queue result."
             exit 1
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "type-gate" or .key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "type-gate" or .key == "lint" or .key == "lint-actions" or .key == "collect" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi

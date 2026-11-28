@@ -91,10 +91,10 @@ def _resolve_claude_home() -> Path:
 CLAUDE_HOME = _resolve_claude_home()
 ROUTE_LAUNCHERS = {
     "interactive": "scripts.routing.interactive",
+    "native-default": "scripts.routing.native_default",
     "master-login": "scripts.master_claude_login",
     "claude-ai": "scripts.routing.claude_ai",
 }
-
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
 AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
@@ -5329,6 +5329,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     )
     from scripts.hive.account_slots import execute
     from scripts.master_claude_login import _token_lock
+    from scripts.quick.recipe import execute_native as _exec
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5374,7 +5375,7 @@ def cmd_claude(extra_args: list[str]) -> None:
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
+            execute("claude", "unrouted", os.environ, lambda env: _exec("claude", cmd, env, execvpe=os.execvpe))
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
@@ -5385,12 +5386,11 @@ def cmd_claude(extra_args: list[str]) -> None:
         f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
     execute(
         "claude",
         decision.account,
         launch_environment(decision, os.environ),
-        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+        lambda env: _exec("claude", _claude_command(claude_bin, extra_args), env, execvpe=os.execvpe),
     )
 
 

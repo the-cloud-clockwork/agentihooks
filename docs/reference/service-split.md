@@ -68,8 +68,9 @@ creates the schema; only this service's `migrate()` does, at start.
 
 ### API
 
-- Transport: HTTP JSON under `/api/v1`, served by its own process and deployment. The only process holding
-  `AGENTIHOOKS_SWARM_DATABASE_URL`.
+- Transport: HTTP JSON under `/api/v1`, served by its own process and deployment. In the target, the API is the only
+  process holding `AGENTIHOOKS_SWARM_DATABASE_URL`. Today the chart also gives it to the ledger, controller, hub and
+  worker containers, which reach the database in process.
 - Reads: `ledgers`, `ledgers/{slug}`, collection and item paths through `resources.read`, `hierarchy/*`, `tasks`
   pages, done-row paging, `export`, events since a cursor, media and artifact files.
 - Writes: one route, `POST ledgers/{slug}/operations`, that applies already-ruled ops. It keeps the two guards that
@@ -255,7 +256,9 @@ repository backend as Anton.
 | `frontend` | Static file server with path routing to `api` and `app` | `${SWARM_PORT:-8765}`, published on `${SWARM_BIND:-127.0.0.1}` | api, app, auth |
 
 - One published port keeps today's address for the browser and the `agentihooks ledger` client.
-- `AGENTIHOOKS_SWARM_DATABASE_URL` is set only on `api`, as the chart's `ledger.secretEnv` does today.
+- `AGENTIHOOKS_SWARM_DATABASE_URL` is set only on `api` in the target. Today the chart gives it from
+  `ledger.secretEnv` to the ledger and `api` containers, and through `swarm.databaseEnv` to the controller, hub and
+  worker containers.
 - The command names are created by the tasks of each step; until a step lands, its service runs today's ledger
   server or hub command.
 

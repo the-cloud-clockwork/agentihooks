@@ -1,0 +1,15 @@
+{
+  "id": "codex-planner-write-grants",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-worktree",
+  "behaviour": "A Codex planner launched in the plan lane may write its launch checkout's git common dir, the worktree root wt.sh uses and the launch temp folder, while the checkout working tree stays read only, and the managed agentibrain entry auto approves its tools for Codex while the Claude render drops that key.",
+  "seam": "scripts.swarm.runtime.codex_plan_mode output, HerdrRuntime.spawn plan lane mode and scripts.swarm.brain_binding.apply managed entry",
+  "tests": [
+    "tests/swarm/test_codex_planner_write_grants.py::test_a_planner_writes_its_checkout_git_metadata_but_not_its_working_tree",
+    "tests/swarm/test_codex_planner_write_grants.py::test_a_planner_writes_the_common_git_dir_of_a_linked_worktree_checkout",
+    "tests/swarm/test_codex_planner_write_grants.py::test_a_planner_writes_the_worktree_root_wt_sh_uses",
+    "tests/swarm/test_codex_planner_write_grants.py::test_a_planner_writes_the_launch_temp_folder",
+    "tests/swarm/test_codex_planner_write_grants.py::test_spawn_grants_a_codex_planner_the_git_dir_of_its_local_checkout",
+    "tests/swarm/test_codex_planner_write_grants.py::test_the_managed_brain_auto_approves_its_tools_for_codex_only"
+  ]
+}

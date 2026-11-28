@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 from hooks._async import fork_and_call
 from hooks.common import inject_context, log
@@ -154,7 +155,7 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
 
 def _finish(path: Path, row: dict) -> None:
     ledger = LedgerClient(service=True) if row["swarm"] else None
-    source = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
+    source: dict[str, Any] = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
     if ledger and row["task"] and not source:
         row.update(status="complete", verdict=dict(UNKNOWN_TASK))
         _write(path, row)
@@ -168,8 +169,11 @@ def _finish(path: Path, row: dict) -> None:
         verdict = dict(NO_CHANGES)
     if not verdict or verdict["needs_documentation"] is None:
         verdict = documentation.classify(evidence)
-    if source.get("profile") == "documentation" or (
-        not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"])
+    if (
+        source.get("profile") == "documentation"
+        or source.get("lane") == "plan"
+        or source.get("kind") == "plan"
+        or (not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"]))
     ):
         verdict["needs_documentation"] = False
     row.update(verdict=verdict)

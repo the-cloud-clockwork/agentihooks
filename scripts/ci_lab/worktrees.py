@@ -19,8 +19,8 @@ WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 OWNED = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
 
 
-def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
+def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None, timeout: float | None = None) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, env=env, timeout=timeout)
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class Lab:
             **os.environ,
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": f"http.{self.url}.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {secret}",
             "GIT_TERMINAL_PROMPT": "0",
         }
 
@@ -51,10 +51,13 @@ def lab(environ: Mapping[str, str]) -> Lab | None:
 
 def empty(folder: Path) -> None:
     """Remove every entry of the folder, sealed trees and folders without owner access included, leaving the folder
-    itself in place; a symlink's target stays untouched, and a missing folder is not an error."""
+    itself in place; a symlink's target stays untouched, and a missing folder is not an error. A folder's mode is
+    changed only when it lacks an owner bit, so an open folder of another user is emptied as it is."""
     if not folder.is_dir():
         return
-    folder.chmod(folder.stat().st_mode | OWNED)
+    mode = folder.stat().st_mode
+    if mode & OWNED != OWNED:
+        folder.chmod(mode | OWNED)
     for entry in folder.iterdir():
         if entry.is_symlink():
             entry.unlink()
@@ -89,11 +92,12 @@ class Mirror:
     remote: str
     lab: Lab | None = None
     repository: str | None = None  # pragma: no mutate
+    environ: Mapping[str, str] | None = field(default=None, repr=False)
 
-    def fetch(self, sha: str) -> bool:
+    def fetch(self, sha: str, timeout: float | None = None) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
         when it serves the repository, or the remote's repository when the repository is None; True when anything was
-        fetched."""
+        fetched. A caller bounding the network fetch in time passes timeout; every other caller leaves it unbound."""
         if not self.store.exists():
             _git(self.store.parent, "init", "--quiet", "--bare", str(self.store))
             if (self.node / "objects").is_dir():
@@ -103,12 +107,30 @@ class Mirror:
             return False
         ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
+            _git(
+                self.store,
+                "fetch",
+                "--quiet",
+                "--no-write-fetch-head",
+                self.remote,
+                ref,
+                env=self.environ,
+                timeout=timeout,
+            )
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
-            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
+            _git(
+                self.store,
+                "fetch",
+                "--quiet",
+                "--no-write-fetch-head",
+                self.lab.url,
+                ref,
+                env=self.lab.environ(),
+                timeout=timeout,
+            )
         return True
 
 

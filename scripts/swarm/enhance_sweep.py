@@ -4,8 +4,10 @@ writes."""
 
 import argparse
 import json
+import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm import ledger_client, thin_task
@@ -17,6 +19,18 @@ from scripts.tick.steps import thin
 BUDGET = 30.0
 PAUSE = 3.0
 Unfrozen = Callable[[dict[str, Any]], bool]
+
+
+@dataclass(frozen=True)
+class SweepResult:
+    lines: tuple[str, ...]
+    queued: int
+    failed: int
+    skipped: int
+
+    @property
+    def counts(self) -> dict[str, int]:
+        return {"queued": self.queued, "failed": self.failed, "skipped": self.skipped}
 
 
 def _thin(tasks: list[dict[str, Any]], unfrozen: Unfrozen) -> list[tuple[dict[str, Any], list[str]]]:
@@ -36,25 +50,49 @@ def thin_by_lane(tasks: list[dict[str, Any]], unfrozen: Unfrozen) -> dict[str, l
 
 
 def sweep(
-    tasks: list[dict[str, Any]], unfrozen: Unfrozen, ledger: Ledger, *, pause: Callable[[float], None]
-) -> list[str]:
-    """Queue enhancement for every thin task through the thin task pass writer; return its action lines."""
+    tasks: list[dict[str, Any]],
+    unfrozen: Unfrozen,
+    ledger: Ledger | None,
+    *,
+    pause: Callable[[float], None],
+    emit: Callable[[str], None] | None = None,
+) -> SweepResult:
     ids = {task["id"] for task in tasks}
     lines: list[str] = []
-    for index, (task, problems) in enumerate(_thin(tasks, unfrozen)):
-        if index:
-            pause(PAUSE)
-        lines.append(thin.enhance(ledger, Deadline.after(BUDGET), task, problems, ids)[0])
-    return lines
+    counts = {"queued": 0, "failed": 0, "skipped": 0}
+    writes = 0
+    for task, problems in _thin(tasks, lambda _: True):
+        if not unfrozen(task):
+            line = f"skipped thin task {task['id']}: held by a freeze"
+            outcome = "skipped"
+        elif ledger is None:
+            continue
+        else:
+            if writes:
+                pause(PAUSE)
+            writes += 1
+            try:
+                line, landed = thin.enhance(ledger, Deadline.after(BUDGET), task, problems, ids)
+            except (OSError, ledger_client.LedgerUnreachable) as error:
+                line = f"failed the enhancement of {task['id']}: {type(error).__name__} {error}"
+                landed = False
+            outcome = "queued" if landed else "failed"
+        lines.append(line)
+        counts[outcome] += 1
+        if emit is not None:
+            emit(line)
+    return SweepResult(tuple(lines), counts["queued"], counts["failed"], counts["skipped"])
+
+
+def _emit(line: str) -> None:
+    print(line, file=sys.stderr, flush=True)
 
 
 def command(store: Any, args: argparse.Namespace) -> None:
-    """Print the thin tasks per lane of swarm ``args.slug`` that no freeze holds and, unless a dry run, queue their
-    enhancement."""
     client = ledger_client.LedgerClient()
     tasks = client.tasks(args.slug)
     unfrozen = thin.unfrozen({"tasks": tasks, "freezes": client.freezes(args.slug), **client.work_tree(args.slug)})
     lanes = {lane: {"count": len(ids), "ids": ids} for lane, ids in thin_by_lane(tasks, unfrozen).items()}
     ledger = None if args.dry_run else ClientLedger(args.slug, resource_client(args.slug))
-    actions = [] if ledger is None else sweep(tasks, unfrozen, ledger, pause=time.sleep)
-    print(json.dumps({"dry_run": args.dry_run, "lanes": lanes, "actions": actions}))
+    result = sweep(tasks, unfrozen, ledger, pause=time.sleep, emit=_emit)
+    print(json.dumps({"dry_run": args.dry_run, "lanes": lanes, "actions": result.lines, "counts": result.counts}))

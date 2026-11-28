@@ -1,15 +1,18 @@
 import argparse
 import os
-import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
 import tomlkit
+from tomlkit import TOMLDocument
+from tomlkit.items import Table
 
 INSTALL_COMMAND = "curl -fsSL https://herdr.dev/install.sh | sh"
 INTEGRATIONS = ("claude", "codex")
+RESUME_ENV = "AGENTIHOOKS_HERDR_RESUME"
 
 
 def _install_module():
@@ -20,7 +23,9 @@ def _install_module():
 
 
 def binary() -> str | None:
-    return shutil.which("herdr")
+    from scripts import herdr_host
+
+    return herdr_host.binary()
 
 
 def choice() -> bool | None:
@@ -31,7 +36,8 @@ def choice() -> bool | None:
 def record(enabled: bool) -> None:
     _i = _install_module()
     state = _i._load_state()
-    state["herdr"] = {"enabled": enabled, "decided_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    decided = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state["herdr"] = {**_herdr_state(), "enabled": enabled, "decided_at": decided}
     _i._save_state(state)
 
 
@@ -75,24 +81,65 @@ def config_path() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "herdr" / "config.toml"
 
 
-def _table(doc, name: str):
+def _table(doc: TOMLDocument, name: str) -> Table:
     table = doc.get(name)
     if table is None:
         table = doc[name] = tomlkit.table()
     return table
 
 
+def resume_off(environ: Mapping[str, str] | None = None) -> bool:
+    if environ is None:
+        from scripts import mcp_daemon
+
+        scan: Callable[[str], str | None] = getattr(mcp_daemon, "_scan_env_file")
+        value = os.environ.get(RESUME_ENV) or scan(RESUME_ENV)
+    else:
+        value = environ.get(RESUME_ENV)
+    return value is not None and value.strip().lower() in ("off", "false", "0", "no")
+
+
+def _herdr_state() -> dict[str, object]:
+    state: dict[str, object] = getattr(_install_module(), "_load_state")()
+    herdr = state.get("herdr")
+    return herdr if isinstance(herdr, dict) else {}
+
+
+def _released() -> bool:
+    return bool(_herdr_state().get("resume_released"))
+
+
+def _mark_released() -> None:
+    install = _install_module()
+    state: dict[str, object] = getattr(install, "_load_state")()
+    released = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state["herdr"] = {**_herdr_state(), "resume_released": released}
+    getattr(install, "_save_state")(state)
+
+
+def _resume(doc: TOMLDocument, changed: list[str]) -> None:
+    session = doc.get("session")
+    if resume_off():
+        if not isinstance(session, Table) or session.get("resume_agents_on_restore") is not False:
+            _table(doc, "session")["resume_agents_on_restore"] = False
+            changed.append("resume_agents_on_restore = false")
+        return
+    if _released():
+        return
+    _mark_released()
+    if isinstance(session, Table) and session.unwrap() == {"resume_agents_on_restore": False}:
+        del doc["session"]
+        changed.append("resume_agents_on_restore restored to the herdr default")
+
+
 def apply_config(path: Path) -> list[str]:
     doc = tomlkit.parse(path.read_bytes().decode()) if path.exists() else tomlkit.document()
-    changed = []
+    changed: list[str] = []
     ui = _table(doc, "ui")
     if "copy_on_select" not in ui:
         ui["copy_on_select"] = False
         changed.append("copy_on_select = false")
-    session = _table(doc, "session")
-    if session.get("resume_agents_on_restore") is not False:
-        session["resume_agents_on_restore"] = False
-        changed.append("resume_agents_on_restore = false")
+    _resume(doc, changed)
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(tomlkit.dumps(doc).encode())
@@ -127,24 +174,22 @@ def configure() -> int:
 
 
 def init_step(flag: str, interactive: bool) -> None:
-    """Ask once whether agentihooks should use herdr, remember it, then install or configure it."""
+    """Configure herdr wherever it is installed; a missing herdr is installed when the flag or the one-time answer
+    says so."""
     if flag in ("yes", "no"):
         record(flag == "yes")
-    elif choice() is None and interactive:
+    elif binary() is None and choice() is None and interactive:
         answer = input("Install herdr, the terminal runtime agentihooks opens agents in? [Y/n] ").strip().lower()
         record(answer not in ("n", "no"))
-    if choice() is not True:
-        return
-    if binary() is None and install() != 0:
+    if binary() is None and (choice() is not True or install() != 0):
         return
     configure()
 
 
 def status() -> int:
     exe = binary()
-    decided = choice()
     print(f"binary={exe or 'missing'}")
-    print(f"enabled={'unset' if decided is None else str(decided).lower()}")
+    print(f"enabled={str(exe is not None).lower()}")
     for name, state in integration_status().items():
         if name in INTEGRATIONS:
             print(f"integration.{name}={state}")
@@ -153,15 +198,12 @@ def status() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks herdr", description="Install and configure herdr")
-    parser.add_argument("action", nargs="?", choices=("status", "install", "configure", "enable", "disable"))
+    parser.add_argument("action", nargs="?", choices=("status", "install", "configure", "enable"))
     args = parser.parse_args(argv)
     if args.action is None:
         if binary() is None and sys.stdin.isatty():
             answer = input("herdr is not installed. Install it now? [Y/n] ").strip().lower()
             init_step("no" if answer in ("n", "no") else "yes", interactive=False)
-        return status()
-    if args.action == "disable":
-        record(False)
         return status()
     if args.action == "status":
         return status()

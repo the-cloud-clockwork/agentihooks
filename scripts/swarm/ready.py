@@ -24,14 +24,16 @@ from scripts.swarm import (
     linked_issues,
     merge_queue,
     outage,
+    pull_head,
     queue_exit,
     queue_record,
     stack,
     staged_compatibility,
     waits,
 )
+from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_alerts, ledger_kinds
 from scripts.tick.deadline import Deadline
 
 AWAITING = "merge"
@@ -56,7 +58,7 @@ UNREAD_EXIT = "left the merge queue green and its merge group runs could not all
 DROPPED_GREEN = "left the merge queue green and was dropped again after {tries} requeues"
 BACKOFF_MS = 60_000
 RECOVER = "recover"
-ALERT_SOURCE = "requeue"
+ALERT_SOURCE = ledger_alerts.MERGE
 TRANSIENT = "unmergeable without a conflict; the unchanged head is queued again once it reads mergeable and green"
 STUCK = "stayed unmergeable after leaving the merge queue"
 MOVED = "changed its head after leaving the merge queue"
@@ -124,6 +126,24 @@ def _git(*args):
     return done.stdout.strip()
 
 
+def _draft_refusal(url: str, pull: PullRequest) -> str:
+    """Return why swarm ready refuses ``pull`` as a draft, or an empty string when it is ready for review.
+
+    A GitLab merge request carries its draft flag in its own read; a GitHub pull request is asked through its
+    source control port.
+    """
+    if pull_head.gitlab_link(url):
+        return f"pull request {url} is a draft; mark it ready for review in GitLab first" if pull.draft else ""
+    try:
+        provider, reference = stack.source_control(url)
+        draft = provider.change(reference, deadline=Deadline.after(stack.PORT_SECONDS)).draft
+    except stack.PORT_ERRORS as exc:
+        raise SwarmError(
+            f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers"
+        ) from exc
+    return f"pull request {url} is a draft; mark it ready for review with gh pr ready first" if draft else ""
+
+
 def check(
     row: dict, agent: AgentRecord, autonomy: str, github: Callable, now_ms: int, previous: dict | None = None
 ) -> dict:
@@ -143,15 +163,9 @@ def check(
         raise SwarmError(f"pull request {url} is merged; close the task with swarm done")
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
-    try:
-        provider, reference = stack.source_control(url)
-        draft = provider.change(reference, deadline=Deadline.after(stack.PORT_SECONDS)).draft
-    except stack.PORT_ERRORS as exc:
-        raise SwarmError(
-            f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers"
-        ) from exc
-    if draft:
-        raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
+    refusal = _draft_refusal(url, pull)
+    if refusal:
+        raise SwarmError(refusal)
     staged_compatibility.require(url, pull.head, pull.body)
     top = _checkout(url, pull.head, previous)
     found = held_record(url, pull.head, top, agent.name, now_ms)

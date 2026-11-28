@@ -7,12 +7,14 @@ import json
 import secrets
 import sqlite3
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm_ledger import ledger_core
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from scripts.swarm_ledger.storage_migration import hosted
 from tests.swarm_ledger.api_fakes import as_services
@@ -188,7 +190,7 @@ def test_frozen_uploads_and_cleanup_preserve_fallback_files(stores, monkeypatch)
         "artifact_trash": [{"file": {"id": existing.name}, "deleted_at": 0}],
     }
     before = copy.deepcopy(doc)
-    ledger_artifacts.sweep("migration-proof", doc, SimpleNamespace(at=10**12, dropped=[], dirty=False))
+    ledger_artifacts.sweep("migration-proof", doc, cast(OpContext, SimpleNamespace(at=10**12, dropped=[], dirty=False)))
     assert doc == before
     assert existing.read_bytes() == b"An artifact kept with its ledger."
     ledger_media.write_file(source.directory / "another-ledger.media" / ("b" * 64 + ".md"), b"allowed")

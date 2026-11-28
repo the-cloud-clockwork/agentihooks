@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__generation:ee87be3a7318c215254b079ddd167fba2a618a801bda032063fea3faef55761f": {
+    "reader": "standards_reader",
+    "reason": "Capitalization changes only the human-readable wording of the same current-generation ownership refusal. The exception type, refusal, lack of consumer startup and meaningful ownership reason remain unchanged; no exact-text consumer is introduced."
+  }
+}

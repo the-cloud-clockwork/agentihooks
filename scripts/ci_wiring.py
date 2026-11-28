@@ -98,7 +98,12 @@ def _outside_problems(
     jobs = [
         f"{file}/{job_id}"
         for file, workflow in workflows.items()
-        if file != gate_file and any(event in triggers(workflow) for event in PULL_REQUEST_EVENTS)
+        if file != gate_file
+        and any(
+            event != "pull_request_target" or config.get("types") != ["dequeued"]
+            for event, config in triggers(workflow).items()
+            if event in PULL_REQUEST_EVENTS
+        )
         for job_id, job in (workflow.get("jobs") or cast(dict[str, Any], {})).items()
         if on_pull_requests(job)
     ]

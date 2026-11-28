@@ -2,13 +2,35 @@
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from http import HTTPStatus
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from scripts.forge.model import ChangeRequest, Check
+from scripts.forge.model import ChangeRequest, Check, ForgeError
+
+__all__ = [
+    "CONCLUSIONS",
+    "HTTP_TIMEOUT_SEC",
+    "PAGE_SIZE",
+    "PIPELINE_APP",
+    "STATES",
+    "FetchError",
+    "GitLabForge",
+    "MergeRequestState",
+    "Transport",
+    "merge_request_state",
+    "pipeline_suites",
+    "unified",
+    "urlopen_transport",
+]
 
 HTTP_TIMEOUT_SEC = 60
 PAGE_SIZE = 100
+STATES = {"opened": "open", "closed": "closed", "merged": "merged"}
+CONCLUSIONS = {"success": "success", "failed": "failure", "canceled": "cancelled", "skipped": "skipped"}
+PIPELINE_APP = "gitlab-ci"
 Transport = Callable[[str, str, Mapping[str, str], bytes | None], bytes]
 
 
@@ -21,6 +43,31 @@ def unified(item: dict[str, Any]) -> str:
     old = "/dev/null" if item["new_file"] else f"a/{item['old_path']}"
     new = "/dev/null" if item["deleted_file"] else f"b/{item['new_path']}"
     return f"diff --git a/{item['old_path']} b/{item['new_path']}\n--- {old}\n+++ {new}\n{item['diff']}"
+
+
+class FetchError(ForgeError):
+    """A GitLab merge request state could not be read: no token, no GitLab link, a 404 or a state outside STATES."""
+
+
+@dataclass(frozen=True)
+class MergeRequestState:
+    """A merge request's tracker state; its description is read with it but kept out of equality, so a body edit
+    leaves two reads of one state equal."""
+
+    url: str
+    state: str
+    head: str
+    queued: bool
+    checks_head: str
+    suites: dict[str, dict[str, str]]
+    draft: bool = False
+    merged_at: str | None = None
+    description: str = field(default="", compare=False)
+
+
+def pipeline_suites(pipeline: dict[str, Any]) -> dict[str, dict[str, str]]:
+    conclusion = CONCLUSIONS.get(pipeline["status"])
+    return {} if conclusion is None else {str(pipeline["id"]): {"app": PIPELINE_APP, "conclusion": conclusion}}
 
 
 class GitLabForge:
@@ -45,6 +92,9 @@ class GitLabForge:
                 return found
             page += 1
 
+    def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
+        raise ForgeError("GitLab merge requests have no merge queue groups")
+
     def read(self, number: int) -> ChangeRequest:
         raw = self._call("GET", f"{self.api}/{number}")
         diffs = self._diffs(number)
@@ -63,3 +113,48 @@ class GitLabForge:
     def post(self, number: int, body: str) -> str:
         note = self._call("POST", f"{self.api}/{number}/notes", {"body": body})
         return f"{self.web}/-/merge_requests/{number}#note_{note['id']}"
+
+    def release_pull(self, tag: str) -> int:
+        raise ForgeError(f"GitLab has no promotion pull request for tag {tag}")
+
+    def state(self, number: int) -> MergeRequestState:
+        url = f"{self.web}/-/merge_requests/{number}"
+        try:
+            raw = self._call("GET", f"{self.api}/{number}")
+        except HTTPError as error:
+            if error.code == HTTPStatus.NOT_FOUND:
+                raise FetchError(f"GitLab has no merge request at {url}") from error
+            raise
+        if raw["state"] not in STATES:
+            raise FetchError(f"GitLab merge request {url} is {raw['state']}")
+        pipeline = raw["head_pipeline"]
+        return MergeRequestState(
+            url=url,
+            state=STATES[raw["state"]],
+            head=raw["sha"],
+            queued=False,
+            checks_head=pipeline["sha"] if pipeline else raw["sha"],
+            suites=pipeline_suites(pipeline) if pipeline else {},
+            draft=bool(raw.get("draft")),
+            merged_at=raw.get("merged_at"),
+            description=raw.get("description") or "",
+        )
+
+
+def merge_request_state(url: str, token: str | None, send: Transport = urlopen_transport) -> MergeRequestState:
+    """Read the tracker state of the GitLab merge request at ``url``.
+
+    The link parser is imported here because the remote module imports this one. A link that is no GitLab merge request
+    link or a missing token raises FetchError before any request, so the GitLab token never goes to a GitHub host.
+    """
+    from scripts.forge.remote import change_link
+
+    try:
+        link = change_link(url)
+    except ValueError as error:
+        raise FetchError(f"not a GitLab merge request link: {url}") from error
+    if link.kind != "gitlab":
+        raise FetchError(f"not a GitLab merge request link: {url}")
+    if not token:
+        raise FetchError("GITLAB_TOKEN is not set")
+    return GitLabForge(link.host, link.path, token, send).state(link.number)

@@ -118,6 +118,7 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_MUTATION_BUDGET",
     "CI_LAB_MUTATION_CAP",
     "CI_LAB_REPOSITORY",
+    "CI_LAB_SERVED_REPOSITORIES",
     "AGENTIHOOKS_LAB_REMOTE",
     "AGENTIHOOKS_LAB_REMOTE_TOKEN",
 )
@@ -149,6 +150,7 @@ def test_environment_names() -> None:
     assert contract.SECRET_PREFIX == "CI_LAB_SECRET_"
     assert contract.GITHUB_APP_PREFIX == "GITHUB_APP_"
     assert contract.REDIS_URL == "CI_LAB_REDIS_URL"
+    assert contract.SERVED_REPOSITORIES == "CI_LAB_SERVED_REPOSITORIES"
     assert contract.SCHEDULER_URL == "CI_LAB_SCHEDULER_URL"
     assert contract.SLOTS == "CI_LAB_SLOTS"
     assert contract.GIT_MIRROR == "CI_LAB_GIT_MIRROR"

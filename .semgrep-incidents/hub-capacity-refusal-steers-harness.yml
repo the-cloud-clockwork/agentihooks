@@ -1,0 +1,16 @@
+rules:
+  - id: hub-capacity-refusal-steers-harness
+    languages: [python]
+    severity: ERROR
+    message: Classify account refusals before recording a failed harness so temporary account limits do not steer later task launches.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - hub-capacity-refusal-steers-harness.py
+    patterns:
+      - pattern-inside: |
+          def failed(self, ...):
+              ...
+      - pattern: |
+          $TASK, $HARNESS, $REASON = $REQUEST["task"], $REQUEST["harness"], $REQUEST["reason"]
+          self.store.note_launch_failure($SLUG, $TASK, $REASON, $HARNESS)

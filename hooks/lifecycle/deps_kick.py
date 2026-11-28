@@ -6,6 +6,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -16,7 +17,9 @@ WAIT_SECONDS = 1.0
 
 
 def kick(home: Path | None = None) -> bool:
-    """Run a stale `agentihooks deps ensure` for up to WAIT_SECONDS, then kill its process group."""
+    """Run a stale `agentihooks deps ensure` for up to WAIT_SECONDS, then kill its process group; never on Windows."""
+    if sys.platform == "win32":
+        return False
     try:
         ok_at = json.loads(((home or _home()) / "deps.stamp").read_text()).get("ok_at", 0)
     except (OSError, ValueError):

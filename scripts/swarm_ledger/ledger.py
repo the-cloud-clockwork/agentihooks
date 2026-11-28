@@ -107,6 +107,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +143,16 @@ NOT_HIS = "refused: the quote is not in an operator prompt or answer any master 
 ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+ITEM_ID = "[A-Za-z0-9][A-Za-z0-9._-]*"
+FOCUS_TARGET = f"(?:(?:plans|phases|slices|tasks)/{ITEM_ID}|(?:lane|kind):{ITEM_ID})"
+FOCUS_TASKS = re.compile(f"focus/{FOCUS_TARGET}/tasks")
+LEDGER_ITEM = re.compile(
+    f"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/{ITEM_ID}|focus/{FOCUS_TARGET}(?:/tasks)?"
+)
+ITEM_FORMS = (
+    "tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, focus/<target>, focus/<target>/tasks, "
+    "tasks, freezes, focus or orders"
+)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -221,10 +231,11 @@ def launch_token(slug: str, name: str) -> str:
 
 
 def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
-    """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
-    from scripts.tick.adapters import database_ledger
+    """The ledger API client for slug: this host's warm writer first, else the ledger API route code run in this
+    process over the shared database."""
+    from scripts.tick.adapters import writer_client
 
-    return database_ledger.client(base(slug), timeout)
+    return writer_client.client(base(slug), timeout)
 
 
 def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
@@ -417,7 +428,8 @@ def cmd_tree(args):
 
 
 def cmd_get(args: argparse.Namespace) -> None:
-    print(SHOW_JSON(resource(args.slug, args.item, collection="/" not in args.item)))
+    listed = "/" not in args.item or bool(FOCUS_TASKS.fullmatch(args.item))
+    print(SHOW_JSON(resource(args.slug, args.item, collection=listed)))
 
 
 def cmd_tasks(args):
@@ -513,9 +525,11 @@ def cmd_artifact(args):
     refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
-def cmd_publish_plan(args):
+def cmd_publish_plan(args: argparse.Namespace) -> None:
     from scripts.swarm_ledger import plan_ranges
 
+    if args.task:
+        return publish_task_plan(args)
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
@@ -530,19 +544,12 @@ def cmd_publish_plan(args):
     except ValueError as exc:
         sys.exit(str(exc))
     title = args.title or ledger_publish.title_of(text, phases)
-    stored = {}
-
-    def artifact(path, title):
-        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
-        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
-        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
-        stored["plan"] = ledger_plans.plan_id(file["id"])
-        return stored["url"]
-
+    stored: dict[str, Any] = {}
     try:
         issue_title = ", ".join(phase["title"] for phase in selected)
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=issue_title
+        )
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = [stored["add"], op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
@@ -572,14 +579,82 @@ def cmd_publish_plan(args):
     state = call(args.slug, ops)
     linked = {row.get("url") for row in doc.get("plans", [])} | {phase.get("plan_url") for phase in doc["phases"]}
     if state.get("rejected") and where == "issue" and url not in linked:
-        try:
-            ledger_publish.close_issue(url)
-        except ledger_publish.PublishError as exc:
-            print(exc, file=sys.stderr)
+        withdraw_issue(url)
     refused(state, ops)
     tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
+
+
+def plan_artifact(args: argparse.Namespace, stored: dict[str, Any]) -> Callable[[str, str], str]:
+    def artifact(path: str, title: str) -> str:
+        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
+        stored["add"] = op("artifact_add", args, task=task, title=title, file=file, plan=True)
+        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
+        return stored["url"]
+
+    return artifact
+
+
+def withdraw_issue(url: str) -> None:
+    try:
+        ledger_publish.close_issue(url)
+    except ledger_publish.PublishError as exc:
+        print(exc, file=sys.stderr)
+
+
+def plan_target(slug: str, task_id: str) -> dict[str, Any]:
+    try:
+        task: dict[str, Any] = resource(slug, f"tasks/{task_id}")  # pyright: ignore[reportAssignmentType]
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        sys.exit("publish-plan names an unknown task")
+    if phase := task.get("phase"):
+        sys.exit(
+            f"publish-plan --task takes a task with no phase: task {task_id} is in phase {phase}, use --phase {phase}"
+        )
+    return task
+
+
+def plan_links(slug: str) -> set[str]:
+    rows: list[dict[str, Any]] = resource(slug, "plans", collection=True)  # pyright: ignore[reportAssignmentType]
+    return {str(row.get("url")) for row in rows}
+
+
+def publish_task_plan(args: argparse.Namespace) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    target = plan_target(args.slug, args.task)
+    text = Path(args.path).read_text(encoding="utf-8")
+    anchors = [found[1] for _, _, line in plan_ranges.sections(text) if (found := plan_ranges.ANCHOR.fullmatch(line))]
+    if len(anchors) != 1:
+        sys.exit(
+            "publish-plan --task needs exactly one slice marker, <!-- slice: name --> on its own line above the "
+            "task's section"
+        )
+    heading = ledger_publish.HEADING_RE.search(text)
+    title = args.title or (heading[1].strip() if heading else str(target["title"]))
+    stored: dict[str, Any] = {}
+    try:
+        url, where = ledger_publish.publish(
+            args.path, title, args.repo, plan_artifact(args, stored), issue_title=str(target["title"])
+        )
+    except ledger_publish.PublishError as exc:
+        sys.exit(str(exc))
+    fields = {"plan_url": stored["url"], "plan_slice": anchors[0]}
+    ops = [
+        stored["add"],
+        op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url),
+        op("task_update", args, item=f"tasks/{args.task}", fields=fields),
+    ]
+    state = call(args.slug, ops)
+    if state.get("rejected") and where == "issue" and url not in plan_links(args.slug):
+        withdraw_issue(url)
+    refused(state, ops)
+    print(json.dumps({"plan_url": url, "published_to": where, "task": args.task, "plan_slice": anchors[0]}))
 
 
 def cmd_plan(args):
@@ -800,9 +875,7 @@ def _duration(value):
 
 def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
-        raise argparse.ArgumentTypeError(
-            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders"
-        )
+        raise argparse.ArgumentTypeError(f"name {ITEM_FORMS}")
     return value
 
 
@@ -1083,12 +1156,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser(
         "get",
-        help="print one task, phase, follow up or priority, or every task, freeze or focus, through the ledger API",
-    ).add_argument(
-        "item",
-        type=_ledger_item,
-        help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders",
-    )
+        help=(
+            "print one task, phase, follow up, priority or focus target, the tasks of a focus target, "
+            "or every task, freeze or focus, through the ledger API"
+        ),
+    ).add_argument("item", type=_ledger_item, help=ITEM_FORMS)
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
         tasks.add_argument(flag)
@@ -1183,7 +1255,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
-    publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
+    target = publish.add_mutually_exclusive_group(required=True)
+    target.add_argument("--phase", help="comma separated ids of the phases the plan fills")
+    target.add_argument("--task", help="id of one task with no phase the plan fills; the plan carries one slice marker")
     publish.add_argument("--title", default="", help="default the plan's first heading")
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
     plan = sub.add_parser("plan")

@@ -39,7 +39,12 @@ def pull_request(
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": sender},
-        "pull_request": {"head": {"sha": HEAD}, "base": {"sha": BASE}, "user": {"login": author}},
+        "pull_request": {
+            "number": 7,
+            "head": {"sha": HEAD, "ref": "feature", "label": "acme:feature"},
+            "base": {"sha": BASE, "label": "acme:dev"},
+            "user": {"login": author},
+        },
     }
 
 
@@ -65,12 +70,31 @@ def check_run(action: str = "rerequested", name: str = "lab / unit", pulls: bool
     }
 
 
-def head(event: str, actor: str, action: str, base: str = BASE) -> HeadEvent:
-    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action)
+def head(event: str, actor: str, action: str, base: str = BASE, lane: str = "", pull_number: int = 0) -> HeadEvent:
+    return HeadEvent(
+        event=event,
+        repo=REPO,
+        head=HEAD,
+        base=base,
+        actor=actor,
+        action=action,
+        lane=lane,
+        pull_number=pull_number,
+    )
 
 
-def test_a_push_to_a_branch_is_a_head_event() -> None:
-    assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed")]
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_a_push_to_dev_is_a_head_event_on_the_dev_lane() -> None:
+    assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed", lane="dev")]
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+@pytest.mark.parametrize(
+    "ref",
+    ["refs/heads/feature", "refs/heads/main", "refs/heads/devel", "refs/heads/feature/dev", "refs/heads/a-dev"],
+)
+def test_a_push_to_a_branch_other_than_dev_names_no_head(ref: str) -> None:
+    assert webhooks.head_events("push", push(ref=ref)) == []
 
 
 @pytest.mark.feature("lab-plant-push-intake")
@@ -91,12 +115,12 @@ def test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_b
     ],
 )
 def test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push(ref: str) -> None:
-    assert webhooks.head_events("push", push(ref=ref)) == [head("push", "nestorcolt", "pushed")]
+    assert webhooks.head_events("push", push(ref=ref)) == []
 
 
 @pytest.mark.feature("lab-zero-base-push")
 def test_a_new_branch_push_with_a_zero_before_names_no_head() -> None:
-    payload = push(ref="refs/heads/new-branch")
+    payload = push()
     payload["before"] = "0" * 40
     assert webhooks.head_events("push", payload) == []
 
@@ -117,11 +141,11 @@ def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) ->
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened"])
 def test_a_pull_request_that_moves_its_head_is_a_head_event(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == [
-        head("pull_request", "agenticore-app[bot]", action)
+        head("pull_request", "agenticore-app[bot]", action, lane="feature", pull_number=7)
     ]
 
 
-@pytest.mark.parametrize("action", ["closed", "enqueued", "dequeued", "edited", "labeled"])
+@pytest.mark.parametrize("action", ["enqueued", "dequeued", "edited", "labeled"])
 def test_other_pull_request_actions_name_no_head(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == []
 
@@ -134,15 +158,60 @@ def test_a_merge_group_asking_for_checks_is_a_head_event() -> None:
 
 
 def test_a_rerequested_lab_check_is_a_head_event() -> None:
-    assert webhooks.head_events("check_run", check_run()) == [head("check_run", "nestorcolt", "rerequested")]
+    assert webhooks.head_events("check_run", check_run()) == [
+        head("check_run", "nestorcolt", "rerequested", pull_number=7)
+    ]
     assert webhooks.head_events("check_run", check_run(pulls=False)) == [
         head("check_run", "nestorcolt", "rerequested", base="")
     ]
 
 
-@pytest.mark.parametrize("payload", [check_run("created"), check_run("completed"), check_run(name="unit (3.12)")])
+@pytest.mark.parametrize("payload", [check_run("created"), check_run(name="unit (3.12)")])
 def test_other_check_runs_name_no_head(payload: dict[str, Any]) -> None:
     assert webhooks.head_events("check_run", payload) == []
+
+
+def completed(name: str = "lint", conclusion: str | None = "success", summary: str | None = None) -> dict[str, Any]:
+    payload = check_run("completed", name)
+    run = {
+        **payload["check_run"],
+        "id": 11,
+        "conclusion": conclusion,
+        "app": {"slug": "github-actions", "name": "GitHub Actions"},
+        "output": {"title": "done", "summary": summary, "text": "log"},
+    }
+    return {**payload, "check_run": run}
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_completed_check_run_rides_its_own_subject_with_the_fields_the_shadow_comparison_reads() -> None:
+    (event,) = webhooks.head_events("check_run", completed(summary="Grader revision: g2"))
+    before = time.time_ns() // 1_000_000
+    envelope = webhooks.envelope(event)
+    after = time.time_ns() // 1_000_000
+    assert envelope.type == "ci.lab.head.check_completed"
+    assert (envelope.swarm, envelope.entity, envelope.key, envelope.author, envelope.version) == (
+        "ci-lab",
+        "head",
+        f"{REPO}@{HEAD}",
+        "nestorcolt",
+        0,
+    )
+    assert before <= envelope.time <= after
+    assert envelope.data == {
+        "action": "completed",
+        "repository": {"html_url": REPO},
+        "check_run": {
+            "name": "lint",
+            "head_sha": HEAD,
+            "conclusion": "success",
+            "app": {"slug": "github-actions"},
+            "output": {"summary": "Grader revision: g2"},
+        },
+    }
+    assert envelope.id == hashlib.sha256(json.dumps(envelope.data).encode()).hexdigest()
+    (failed,) = webhooks.head_events("check_run", completed(conclusion="failure"))
+    assert webhooks.envelope(failed).id != envelope.id
 
 
 @pytest.mark.parametrize("name", [None, "ping", "check_suite", "issues"])
@@ -152,7 +221,12 @@ def test_other_events_name_no_head(name: str | None) -> None:
 
 @pytest.mark.parametrize(
     ("name", "payload"),
-    [("push", {"ref": "refs/heads/dev"}), ("pull_request", {"action": "opened"}), ("merge_group", [])],
+    [
+        ("push", {"ref": "refs/heads/dev"}),
+        ("pull_request", {"action": "opened"}),
+        ("merge_group", []),
+        ("check_run", {"action": "completed", "check_run": {"name": "lint", "head_sha": HEAD}}),
+    ],
 )
 def test_a_malformed_head_payload_raises(name: str, payload: Any) -> None:
     with pytest.raises((KeyError, TypeError)):
@@ -298,8 +372,14 @@ def test_only_a_trusted_actors_head_becomes_a_grade_request() -> None:
     assert intake.admit(head("push", "stranger[bot]", "pushed"), trusted) is None
 
 
+def test_request_from_carries_the_pull_request_number_onto_the_grade_request() -> None:
+    event = head("pull_request", "agenticore-app[bot]", "opened", pull_number=41)
+    assert intake.request_from(event).pull_number == 41
+
+
 def test_a_trusted_sender_reopening_an_untrusted_authors_pull_request_admits_nothing() -> None:
     (event,) = webhooks.head_events("pull_request", pull_request("reopened", author="stranger", sender="nestorcolt"))
+    assert isinstance(event, HeadEvent)
     assert event.actor == "stranger"
     assert intake.admit(event, intake.trusted_actors(ROOT)) is None
 
@@ -319,8 +399,13 @@ def test_a_cached_negative_answers_a_request_unless_it_is_a_rerequested_check() 
     assert seen == [(REPO, HEAD)]
 
 
-def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:
-    return {"head": {"sha": sha}, "base": {"sha": BASE, "repo": {"html_url": REPO}}, "user": {"login": author}}
+def open_pull(sha: str, author: str = "agenticore-app[bot]", number: int = 41) -> dict[str, Any]:
+    return {
+        "number": number,
+        "head": {"sha": sha, "ref": "feature", "label": "acme:feature"},
+        "base": {"sha": BASE, "label": "acme:dev", "repo": {"html_url": REPO}},
+        "user": {"login": author},
+    }
 
 
 def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
@@ -331,13 +416,23 @@ def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
         seen.append((repo, sha))
         return (repo, sha) in graded
 
-    pulls = [open_pull(HEAD), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt")]
+    pulls = [open_pull(HEAD, number=7), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt", number=9)]
     assert intake.reconcile(pulls, has_grade) == [
-        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile"),
-        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile"),
+        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile", "feature", 7),
+        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile", "feature", 9),
     ]
     assert seen == [(REPO, HEAD), (REPO, "c" * 40), (REPO, "d" * 40)]
     assert intake.reconcile([], has_grade) == []
+
+
+def test_reconcile_of_a_pull_with_no_number_key_keeps_no_pull_request_number() -> None:
+    pull = {
+        "head": {"sha": HEAD, "ref": "feature", "label": "acme:feature"},
+        "base": {"sha": BASE, "label": "acme:dev", "repo": {"html_url": REPO}},
+        "user": {"login": "agenticore-app[bot]"},
+    }
+    (event,) = intake.reconcile([pull], lambda repo, sha: False)
+    assert event.pull_number == 0
 
 
 def test_a_reconciled_head_is_graded_in_the_pull_request_tier() -> None:

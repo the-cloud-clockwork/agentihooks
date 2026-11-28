@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hooks.context import injection_trace, profile_chain, quarantine, tool_matcher
+from hooks.context import gate_import, injection_trace, profile_chain, quarantine, tool_matcher
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop", "start": "SessionStart"}
 _NO_MATCHER_STEPS = frozenset({"stop", "start"})
@@ -522,6 +522,7 @@ def merge(step: str, payload: dict, runs: list[tuple[dict, dict]]) -> StepResult
         label = entry["file"]
         code = run.get("returncode")
         if run.get("error") or code not in (0, 2):
+            gate_import.report(entry, run, payload)  # pyright: ignore[reportUnknownArgumentType]
             _failed(entry, run.get("error") or f"exit {code}: {(run.get('stderr') or '').strip()[:300]}", result)
             continue
         if code == 2:

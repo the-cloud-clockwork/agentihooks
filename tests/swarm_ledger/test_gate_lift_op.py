@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from typing import cast
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -8,6 +9,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_agent_ops  # noqa: E402
+from scripts.swarm_ledger.op_context import OpContext  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "gate-lift-2026-01-01"
@@ -60,7 +62,7 @@ class GateLiftOp(unittest.TestCase):
             def record(self, *args, **extra):
                 recorded.append((args, extra))
 
-        self.assertIs(ledger_agent_ops.HANDLERS["gate_lift"]({}, lift(), Ctx()), True)
+        self.assertIs(ledger_agent_ops.HANDLERS["gate_lift"]({}, lift(), cast(OpContext, Ctx())), True)
         self.assertEqual(
             recorded,
             [

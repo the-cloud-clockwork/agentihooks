@@ -1,10 +1,12 @@
 import json
 import uuid
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm_ledger import ledger_agent_ops, ledger_duplicates, ledger_task_duplicates
+from scripts.swarm_ledger.op_context import OpContext
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, send
 from tests.swarm_ledger.test_task_duplicate_check import REPEAT, Judge, authority_live, judged
 from tests.swarm_ledger.test_task_duplicate_check import live as _task_live
@@ -226,7 +228,7 @@ def test_a_follow_up_repeating_one_that_landed_during_its_check_is_refused():
     screen = ledger_task_duplicates.Screen(seen=frozenset({"followups/f9"}))
     gate = ledger_task_duplicates.Gate(screen, Inner(accepted=False))
     landed = {"id": "f4", "text": f"  {AGAIN.upper()} "}
-    assert gate.apply({"followups": [landed]}, followup("f9", AGAIN), None, "apply") is False
+    assert gate.apply({"followups": [landed]}, followup("f9", AGAIN), cast(OpContext, None), "apply") is False
     (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
     assert applied_id == "f9" and refuse({}, {}, ctx) is False
     assert ctx.refused == [
@@ -247,7 +249,7 @@ def test_a_follow_up_names_the_open_follow_ups_that_landed_while_its_check_ran()
             {"id": "f5", "text": "Closed", "done": True},
         ],
     }
-    assert gate.apply(doc, followup("f9", AGAIN), None, "apply") is True
+    assert gate.apply(doc, followup("f9", AGAIN), cast(OpContext, None), "apply") is True
     assert screen.warnings == {
         "f9": "the duplicate check did not compare follow up f9 with f4, added while it ran, so check them for repeats"
     }

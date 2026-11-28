@@ -12,6 +12,10 @@ from scripts.gates import entry, lift, log
 from scripts.gates.base import Who
 from scripts.swarm import cli, status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from tests.forge.fakes import API, Sent
+from tests.forge.test_gitlab import HEAD as GITLAB_HEAD
+from tests.forge.test_gitlab import LINK as GITLAB
+from tests.forge.test_gitlab import answer
 from tests.gates.test_runtime import SID, Stub
 
 SLUG, ME, TASK = "sw", "engineer@1-1", "t1"
@@ -378,6 +382,24 @@ class TestCommand:
     def test_the_parser_takes_agent_then_gate(self):
         args = cli.build_parser().parse_args([SLUG, "lift", ME, "watch"])
         assert (args.command, args.agent, args.gate) == ("lift", ME, "watch")
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_the_lift_binds_the_task_and_its_gitlab_merge_request_head(monkeypatch, capsys):
+    store = saved()
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    ledger = SimpleNamespace(
+        task=lambda slug, task: {"id": task, "pr_url": GITLAB} if (slug, task) == (SLUG, TASK) else None
+    )
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
+    monkeypatch.setenv("GITLAB_TOKEN", "fake-token")
+    sent = Sent(answer(), answer())
+    monkeypatch.setattr("scripts.swarm.gitlab_pull.TRANSPORT", sent)
+    cli.cmd_lift(store, SimpleNamespace(slug=SLUG, agent=ME, gate="watch"))
+    assert capsys.readouterr().out == json.dumps({"agent": ME, "gate": "watch", "head": GITLAB_HEAD}) + "\n"
+    assert lift.task_lifted(SLUG, TASK, "watch", now=time.time() + 2 * lift.LIFT_SECONDS)
+    assert [call[1] for call in sent.calls] == [f"{API}/12", f"{API}/12"]
 
 
 class TestServerRoute:

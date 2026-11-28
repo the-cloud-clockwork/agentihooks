@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack, timing
+from scripts.swarm import github_reads, gitlab_pull, idle, merge_queue, outage, pull_head, run_wait, stack, timing
 from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
@@ -334,6 +334,8 @@ def _gate_files(tree):
 def view(
     url: str, source: SourceControl | None = None, required_checks: dict[str, int] | None = None
 ) -> "PullRequest | None":
+    if pull_head.gitlab_link(url):
+        return gitlab_pull.pull(url)
     number = _number(url)
     if run_wait.backing_off():
         return None
