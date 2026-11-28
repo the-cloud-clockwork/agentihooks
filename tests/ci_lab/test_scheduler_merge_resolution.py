@@ -577,7 +577,7 @@ def test_expand_reads_the_tree_and_diffs_against_the_first_parent_of_a_resolved_
     assert found.tree == _tree(repo, head)
 
 
-def test_expand_keys_a_gate_reading_commit_ids_on_the_lease_head_and_the_graded_commit(
+def test_expand_keys_a_gate_reading_commit_ids_on_the_graded_commit_the_lease_head_and_the_event_base(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, fork, head = origin
@@ -591,7 +591,7 @@ def test_expand_keys_a_gate_reading_commit_ids_on_the_lease_head_and_the_graded_
         "",
         ("src",),
         ("src",),
-        reads=(static_gates.COMMIT_ID_FIELDS[0], static_gates.COMMIT_ID_FIELDS[1]),
+        reads=static_gates.COMMIT_ID_FIELDS,
     )
     expander = _expander(tmp_path, monkeypatch)
     monkeypatch.setattr(scheduler, "discover", lambda workflow, registry, reusable: [reading])
@@ -601,7 +601,11 @@ def test_expand_keys_a_gate_reading_commit_ids_on_the_lease_head_and_the_graded_
     at_merge = {"src/a.py": _blob(repo, merge, "src/a.py")}
     at_fork = {"src/a.py": _blob(repo, fork, "src/a.py")}
     chain = Toolchain("3.12", {}, _blob(repo, merge, LOCK), _blob(repo, merge, "pyproject.toml"), "image", {})
-    commit_ids = {"github.sha": merge, "github.event.pull_request.head.sha": head}
+    commit_ids = {
+        "github.sha": merge,
+        "github.event.pull_request.head.sha": head,
+        "github.event.pull_request.base.sha": fork,
+    }
     expected = StaticInputs("lint/trust", at_merge, at_fork, fork, chain, commit_ids)
     assert found_unit.key == static_key(expected)
     assert found_unit.members == ("lint/trust",)
