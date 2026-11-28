@@ -2274,7 +2274,7 @@ is its dependency phases' reads, most often a long comment thread. A large `turn
   `tests/swarm_ledger/test_task_list_selecting.py` cover the phase selection, its fallback on an older ledger server,
   and the thread and artifact reads.
 - Semgrep incident rule `hub-admission-reads-full-export`, scoped to `scripts/hub/admission.py` and
-  `scripts/swarm/admission_view.py`: any `.snapshot(...)` or `.state(...)` call there is an error. Run it by hand with:
+  `scripts/swarm/admission_view.py`: any `.snapshot(...)`, `.state(...)` or `.tasks(...)` call there is an error. Run it by hand with:
 
 ```bash
 semgrep scan --config .semgrep-incidents/hub-admission-reads-full-export.yml scripts/hub/

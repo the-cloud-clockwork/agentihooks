@@ -252,8 +252,6 @@ class LedgerClient:
         A ledger server older than the phases selection refuses it as schema_invalid; only then is the whole tasks
         collection read and selected here by the server's own selection code, until that server is redeployed.
         """
-        from scripts.swarm_ledger.api import task_list
-
         query = where_query(phases=phases, fields=fields)
         try:
             rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
@@ -264,6 +262,8 @@ class LedgerClient:
             replay, error = failure(exc)
             if exc.code != 400 or error.get("code") != "schema_invalid":
                 raise replay from None
+        from scripts.swarm_ledger.api import task_list
+
         selected: list[dict[str, Any]] = task_list.selecting(self.tasks(slug), query)["data"]
         return selected
 

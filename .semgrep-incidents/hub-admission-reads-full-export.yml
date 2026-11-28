@@ -7,8 +7,8 @@ rules:
       time the revision moved, so admissions on a large ledger answered past their eight second budget and spokes gave
       up on their claims; plan task admissions kept the export for their steering evidence and spent fourteen to
       twenty two seconds on it. Read the task, the rows it names, the claim gate verdict and a plan task's phases,
-      comment threads, phase tasks and artifacts through the narrow admission view (admission_view.Narrow) instead;
-      the full export belongs to the readiness pass.
+      comment threads, phase tasks and artifacts through the narrow admission view (admission_view.Narrow) instead,
+      never the whole tasks collection; the full export belongs to the readiness pass.
     paths:
       include:
         - /scripts/hub/admission.py
@@ -17,3 +17,4 @@ rules:
     pattern-either:
       - pattern: $OBJ.snapshot(...)
       - pattern: $OBJ.state(...)
+      - pattern: $OBJ.tasks(...)
