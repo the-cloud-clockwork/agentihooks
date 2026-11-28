@@ -300,6 +300,14 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute:
             "def test_callback():\n    assert invoke(lambda: target(1)) == 2\n",
             ["test_callback"],
         ),
+        (
+            "from app import target as action\n"
+            "class Holder:\n"
+            "    action = lambda value: value\n"
+            "    callback = lambda: action(1)\n"
+            "def test_global_scope():\n    assert Holder.callback() == 2\n",
+            ["test_global_scope"],
+        ),
     ],
     ids=[
         "direct",
@@ -337,6 +345,7 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute:
         "lambda-default-initialization",
         "immediate-lambda",
         "forwarded-lambda-callback",
+        "class-lambda-global-scope",
     ],
 )
 def test_statistics_candidates_preserve_indirect_reach_and_order(

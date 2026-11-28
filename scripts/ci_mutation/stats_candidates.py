@@ -326,6 +326,8 @@ class Reach:
             key = scope[0], -len(self.lambdas) - 1
             self.lambdas[node] = key
             self.nodes[key] = node
+            while isinstance(self.nodes[scope], ast.ClassDef):
+                scope = self.parents[scope]
             self.parents[key] = scope
             self.bindings[key] = {}
             self.aliases[key] = {}
