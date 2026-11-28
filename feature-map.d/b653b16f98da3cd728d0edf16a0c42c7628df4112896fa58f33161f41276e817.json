@@ -1,0 +1,31 @@
+{
+  "id": "lab-authoritative-static-gates",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+  "behaviour": "The repository's delivery.yaml lists exactly lint, type-gate and test-count as lab authoritative, so on a pull request the Tests workflow skips those three Actions jobs and Gate Required reads the lab's check run for each in their place. Each of the three keeps its authority through the exclusion catalog, the kill switch variable hands all three back to Actions, and the queue list stays empty so merge groups keep the Actions test count. docs, writer-lock and the whole semgrep job are never listed: the lab has no Docker for the first two and grades only parts of the third, so each would post skipped and fail every pull request.",
+  "seam": "delivery.yaml read through scripts.ci_lab.delivery lab, authoritative, cutover and queue_cutover; the Semgrep incident rule lab-authoritative-gate-the-lab-cannot-grade over delivery.yaml; the live check scripts.feature_checks.lab_authority over the checkout's delivery.yaml, exclusion catalog, gate wiring and Tests workflow",
+  "rules": [
+    "lab-authoritative-gate-the-lab-cannot-grade"
+  ],
+  "tests": [
+    "tests/ci_lab/test_delivery.py::test_the_repository_file_lists_lint_type_gate_and_test_count_as_lab_authoritative",
+    "tests/test_lab_authority_check.py::test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed",
+    "tests/test_lab_authority_check.py::test_a_part_the_checkout_lost_fails_by_name",
+    "tests/test_lab_authority_check.py::test_a_delisted_gate_whose_job_is_gone_fails_by_name_on_the_list_its_authority_and_its_skip_clause",
+    "tests/test_lab_authority_check.py::test_a_listed_gate_whose_job_is_gone_fails_on_the_delivery_file_and_never_raises",
+    "tests/test_lab_authority_check.py::test_a_job_whose_whole_condition_is_the_skip_clause_holds_it",
+    "tests/test_lab_authority_check.py::test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delivery_fault",
+    "tests/test_lab_authority_check.py::test_a_checkout_with_a_malformed_wiring_file_raises_and_is_never_reported_as_a_delivery_fault",
+    "tests/test_lab_authority_check.py::test_a_step_reading_an_earlier_steps_output_shaped_like_a_commit_id_holds_the_part",
+    "tests/test_lab_authority_check.py::test_a_step_reading_a_context_name_that_is_not_a_commit_id_holds_the_part",
+    "tests/test_lab_authority_check.py::test_the_check_holds_whatever_the_input_key_registry_file_is_since_it_never_reads_it",
+    "tests/test_lab_authority_check.py::test_a_job_of_a_workflow_a_listed_gate_calls_reading_a_commit_id_outside_the_key_fails_the_part",
+    "tests/test_lab_authority_check.py::test_a_step_whose_run_text_reads_github_sha_in_the_shell_fails_the_part",
+    "tests/test_lab_authority_check.py::test_an_earlier_steps_run_text_that_writes_git_rev_parse_to_its_output_fails_the_part"
+  ],
+  "live_check": [
+    "python",
+    "-m",
+    "scripts.feature_checks.lab_authority"
+  ]
+}

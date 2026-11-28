@@ -71,7 +71,7 @@ from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
-from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
+from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover, gate_commit_ids
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import CHECK_COMPLETED, CLOSED, HEAD_SUBJECT, PLANT, HeadEvent
@@ -2282,8 +2282,9 @@ class MirrorExpander:
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             if gate.missing or gate.name in excluded:
                 continue
+            ids = gate_commit_ids(gate, request.graded_commit, request.head, request.base)
             inputs = StaticInputs(
-                gate.name, _within(head, gate.paths), _within(diffed, gate.base_paths), grader, toolchain
+                gate.name, _within(head, gate.paths), _within(diffed, gate.base_paths), grader, toolchain, ids
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""

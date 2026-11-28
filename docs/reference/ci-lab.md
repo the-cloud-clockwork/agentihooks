@@ -2471,6 +2471,7 @@ key; the builders are pure and read no file, clock or network.
 | `static` | `base` | Path to blob id of every file the gate compares against, at the merge base of the head and its base |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
+| `static` | `commit_ids` | The commit id context values the gate reads, among `static_gates.COMMIT_ID_FIELDS`; empty for a gate that reads none |
 | `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
 | `test` | `opened` | Path to blob id of each file a test opened outside the manifest |
 | `test` | `invocation` | The pytest argument list, plugins included, in order |
@@ -2865,8 +2866,14 @@ A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS`
 else its name (or the first line of its run) in lower case words joined by `-`, such as
 `semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
 its key is `static_key` over the gate name, the head files under the gate's registry paths, the
-files under its base paths at the merge base of the head and its base, the grader revision and the
-toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that merge base, which
+files under its base paths at the merge base of the head and its base, the grader revision, the
+toolchain and the commit id values among `static_gates.COMMIT_ID_FIELDS` (`github.sha`,
+`github.event.pull_request.head.sha`, `github.event.pull_request.base.sha`) the gate reads
+(see [Inputs per kind](#inputs-per-kind)): `static_gates.gate_commit_ids` restricts
+`static_gates.commit_ids`'s resolved values to the names the gate's own `reads` carries, empty for
+a gate that reads none, so such a gate's key hashes exactly as it did before this field existed.
+`executors._context` reads the same three values from `static_gates.commit_ids`, so the key and
+the step the lab runs can never drift from each other. A grade diffs against that merge base, which
 is the delivered base whenever that base is an ancestor of the head and the head itself when the
 base descends from it: GitHub delivers a pull
 request's base with its head, and a base ahead of the fork point would read what dev gained since
@@ -2897,6 +2904,25 @@ their direct importers. A separate `type-gate-tree` job grades the whole tree ag
 committed baseline at promotion; it runs on a push to `dev`, and on a `workflow_dispatch` whose
 `admission` job succeeded (a plant proof), outside `STATIC_JOBS`, so the lab never discovers or
 runs it, and its verdict stays with Actions.
+
+Dev's `delivery.yaml` lists `lint`, `type-gate` and `test-count` under `lab.authoritative`, so on a pull
+request those three Actions jobs are skipped and `Gate — Required` reads `lab/lint`, `lab/type-gate` and
+`lab/test-count` in their place. `docs` and `writer-lock` stay on Actions because lab units have no Docker
+daemon. The `semgrep` job stays too: the lab grades only its `scan`, `feature-tests` and `charts` parts, and
+an authoritative gate with no unit posts skipped, which `Gate — Required` reads as red. The Semgrep incident
+rule `lab-authoritative-gate-the-lab-cannot-grade` refuses those three names in the list, and
+`python -m scripts.feature_checks.lab_authority` prints whether a checkout still holds the list, each
+gate's authority, its lab check and the skip clause of its job, and refuses a static gate step of those
+three jobs that reads a commit id context name outside `static_gates.COMMIT_ID_FIELDS` (one equal to
+`github.sha` or ending in `sha`, excluding an earlier step's `steps.<id>.outputs.*`, `.outcome` or
+`.conclusion`), or whose own run text or that of an earlier step whose output it reads names `GITHUB_SHA`
+or runs `git rev-parse` in the shell, invisible to `reads` and so to the static key either way, with
+`FAIL: the checkout lacks every gate of lint, type-gate and test-count reading only commit ids that its static key carries`.
+Hazard: while the lab posts no `lab/lint`,
+`lab/type-gate` or `lab/test-count` check on pull request heads, `lab-verdict` reads each missing verdict as a
+failure once its 1200 second wait ends and `Gate — Required` fails every pull request. A gate is
+listed only once its shadow report holds the acceptance rule over fifty heads. `AGENTIHOOKS_LAB_OFF=true` as a repository
+variable hands the three gates back to Actions without a merge.
 
 The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
 `github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
@@ -5181,7 +5207,8 @@ pull request cannot enter the merge queue. The check shows on the pull request a
 
 The Tests workflow skips its `writer-lock` job when `lab.authoritative` in `delivery.yaml` names
 `writer-lock`, and `Gate — Required` then reads the `lab/writer-lock` check run in its place
-(`.github/gate-wiring.json`). The list is empty on `dev`, so Actions runs the job.
+(`.github/gate-wiring.json`). The list on `dev` names `lint`, `type-gate` and `test-count` and never
+`writer-lock`, so Actions runs the job.
 
 #### Runner class
 

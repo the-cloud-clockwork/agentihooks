@@ -32,7 +32,7 @@ from scripts import ci_cpu_quota, ci_wiring
 from scripts.ci_lab import caches, contract, metrics, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, commit_ids, discover
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
@@ -200,9 +200,7 @@ def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dic
     named = {name: secrets.get(name.removeprefix(SECRETS), "") for name in found.reads if name.startswith(SECRETS)}
     return {
         INPUTS_BASE: lease.base,
-        "github.sha": lease.graded_commit or lease.head,
-        "github.event.pull_request.head.sha": lease.head,
-        "github.event.pull_request.base.sha": lease.base,
+        **commit_ids(lease.graded_commit, lease.head, lease.base),
         "github.event_name": "pull_request",
         "github.run_id": lease.job,
         "github.run_attempt": "1",

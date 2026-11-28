@@ -35,6 +35,7 @@ RECORDS = {
 }
 GOLDEN = {
     "static": "static-v1-4b187fa1f86aed0defbd09ab7e347535ff7dc1ebe68ce7632699bb2dcae59ffb",
+    "static-head-sha": "static-v1-0d05572ff3f264c1b9c4b5edd4bd8a78c36b64878ade38a16d05140e9d9b266d",
     "test": "test-v1-28f019682121264e77614e24d678af401a7a77368780a802738e2ec4ce4c0b77",
     "stats": "stats-v4-575ab5687b8d822c805980e1ad15d07559b0bf7f37e60b03e2c48ee53c714d5a",
     "mutant": "mutant-v1-d7fa3cbcb90e677e8e1844e25015e79435052a2a335515e5f8f4a4cb5519509b",
@@ -129,6 +130,8 @@ def flips(value: Any) -> list[Any]:
     if isinstance(value, str):
         return [value + "x"]
     if isinstance(value, Mapping):
+        if not value:
+            return [{"added": "value"}]
         first = next(iter(value))
         rest = {name: item for name, item in value.items() if name != first}
         return [
@@ -252,3 +255,25 @@ def test_the_specification_names_every_input_per_kind() -> None:
     for kind, name in re.findall(r"^\| `(\w+)` \| `(\w+)` \|", section, re.MULTILINE):
         listed.setdefault(kind, set()).add(name)
     assert listed == {kind: {item.name for item in fields(record)} for kind, record in RECORDS.items()}
+
+
+def test_a_gate_with_no_commit_id_read_hashes_as_it_did_before_the_commit_id_key() -> None:
+    _, inputs = cases()["static"]
+    assert inputs.commit_ids == {}
+    assert digests.static_key(inputs) == GOLDEN["static"]
+
+
+def test_golden_key_for_a_gate_reading_the_pull_request_head_sha() -> None:
+    _, inputs = cases()["static"]
+    reading = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    assert digests.static_key(reading) == GOLDEN["static-head-sha"]
+
+
+def test_two_head_shas_over_equal_trees_key_differently_and_one_head_sha_keys_once() -> None:
+    _, inputs = cases()["static"]
+    first = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    second = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "b" * 40})
+    repeated = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    assert digests.static_key(first) != digests.static_key(second)
+    assert digests.static_key(first) == digests.static_key(repeated)
+    assert digests.static_key(inputs) != digests.static_key(first)

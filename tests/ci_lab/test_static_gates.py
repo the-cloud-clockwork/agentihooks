@@ -623,6 +623,19 @@ jobs:
 """
 
 
+COMMIT_ID_SUBSET = r"""
+on: pull_request
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Head only
+        env:
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python -m scripts.head_only
+"""
+
+
 @pytest.mark.feature("lab-static-step-env")
 def test_a_gate_carries_the_earlier_steps_its_expressions_read_in_job_order() -> None:
     (gate,) = static_gates.discover(PRODUCED)
@@ -669,6 +682,28 @@ def test_a_gate_misses_every_name_outside_the_lease_fields_its_secrets_and_its_e
         "steps.pick.result",
         "vars.X",
     )
+
+
+def test_commit_ids_resolves_github_sha_to_the_graded_commit_or_the_head() -> None:
+    assert static_gates.commit_ids("m" * 40, "h" * 40, "b" * 40) == {
+        "github.sha": "m" * 40,
+        "github.event.pull_request.head.sha": "h" * 40,
+        "github.event.pull_request.base.sha": "b" * 40,
+    }
+    assert static_gates.commit_ids("", "h" * 40, "b" * 40)["github.sha"] == "h" * 40
+
+
+def test_gate_commit_ids_restricts_the_resolved_mapping_to_the_names_a_gate_reads() -> None:
+    (all_three,) = static_gates.discover(READ_ALL)
+    (one,) = static_gates.discover(COMMIT_ID_SUBSET)
+    assert static_gates.gate_commit_ids(all_three, "m" * 40, "h" * 40, "b" * 40) == {
+        "github.sha": "m" * 40,
+        "github.event.pull_request.head.sha": "h" * 40,
+        "github.event.pull_request.base.sha": "b" * 40,
+    }
+    assert static_gates.gate_commit_ids(one, "m" * 40, "h" * 40, "b" * 40) == {
+        "github.event.pull_request.head.sha": "h" * 40,
+    }
 
 
 @pytest.mark.feature("lab-static-step-env")
