@@ -21,8 +21,9 @@ LAB_USER = "swarm-ci-lab-scheduler"
 LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
 LAB_DURABLE = "ci-lab-scheduler"
 LAB_HEADS = f"{LAB_STREAM}.{LAB_DURABLE}"
-LAB_SOURCES = {"scripts/events/nats.py": "LAB_STREAM", "scripts/ci_lab/scheduler.py": "DURABLE"}
-LAB_FROM = "the agentihooks lab scheduler (scripts/events/nats.py LAB_STREAM, scripts/ci_lab/scheduler.py DURABLE)"
+LAB_LEAF = "scripts/events/lab_names.py"
+LEAF_VALUES = {"LAB_STREAM": LAB_STREAM, "LAB_CONSUMER": LAB_DURABLE}
+LAB_FROM = f"the agentihooks lab scheduler ({LAB_LEAF} LAB_STREAM, {LAB_LEAF} LAB_CONSUMER)"
 
 
 def _lab_publish(stream: str = LAB_STREAM, durable: str = LAB_DURABLE) -> list[str]:
@@ -37,10 +38,15 @@ LAB = {"publish": {"allow": _lab_publish()}, "subscribe": {"allow": SUBSCRIBE}}
 
 
 def _lab_sources(root: Path, stream: str = LAB_STREAM, durable: str = LAB_DURABLE) -> None:
-    for (source, name), value in zip(LAB_SOURCES.items(), (stream, durable), strict=True):
-        path = root / source
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{name} = {value!r}\nraise RuntimeError('the grant check ran {source}')\n")
+    path = root / LAB_LEAF
+    path.parent.mkdir(parents=True, exist_ok=True)
+    names = "".join(f"{name} = {value!r}\n" for name, value in zip(LEAF_VALUES, (stream, durable), strict=True))
+    path.write_text(f"{names}raise RuntimeError('the grant check ran {LAB_LEAF}')\n")
+
+
+def _leaf_with(name: str, body: str) -> str:
+    others = "".join(f"{other} = {value!r}\n" for other, value in LEAF_VALUES.items() if other != name)
+    return f"{others}{body}"
 
 
 def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None, controller: dict | None = None) -> Path:
@@ -639,19 +645,18 @@ def test_a_missing_lab_scheduler_user_is_red(tmp_path: Path, capsys: pytest.Capt
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")
-@pytest.mark.parametrize("source", list(LAB_SOURCES))
+@pytest.mark.parametrize("name", list(LEAF_VALUES))
 @pytest.mark.parametrize(
     "body",
     ["OTHER = 'x'\n", "{name} = 7\n", "{name} = ''\n", "{name} = 'x'\n{name} = 'x'.upper()\n"],
     ids=["absent", "number", "empty", "computed-last"],
 )
 def test_a_lab_name_without_a_string_literal_fails_closed(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, body: str
 ) -> None:
     agentihooks, antoncore = _matching(tmp_path)
-    name = LAB_SOURCES[source]
-    (agentihooks / source).write_text(body.replace("{name}", name))
-    error = f"{source} must set {name} only by top level non-empty string literal assignments"
+    (agentihooks / LAB_LEAF).write_text(_leaf_with(name, body.replace("{name}", name)))
+    error = f"{LAB_LEAF} must set {name} only by top level non-empty string literal assignments"
     assert _run(capsys, agentihooks, antoncore) == (
         1,
         [f"::error::The swarm NATS grants cannot be read (ValueError: {error})."],
@@ -699,41 +704,40 @@ def test_bindings_of_other_names_leave_a_lab_name_readable(tmp_path: Path) -> No
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")
-@pytest.mark.parametrize("source", list(LAB_SOURCES))
-@pytest.mark.parametrize("body,error", [(None, "FileNotFoundError"), ("{name} = (\n", "SyntaxError")])
+@pytest.mark.parametrize("body,error", [(None, "FileNotFoundError"), ("LAB_STREAM = (\n", "SyntaxError")])
 def test_an_unreadable_lab_source_fails_closed(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str | None, error: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str | None, error: str
 ) -> None:
     agentihooks, antoncore = _matching(tmp_path)
-    path = agentihooks / source
+    path = agentihooks / LAB_LEAF
     if body is None:
         path.unlink()
     else:
-        path.write_text(body.replace("{name}", LAB_SOURCES[source]))
+        path.write_text(body)
     status, lines = _run(capsys, agentihooks, antoncore)
     assert status == 1
     assert len(lines) == 1
     assert lines[0].startswith(f"::error::The swarm NATS grants cannot be read ({error}: ")
-    assert Path(source).name in lines[0]
+    assert Path(LAB_LEAF).name in lines[0]
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")
 @pytest.mark.parametrize(
-    "source,kept,stream,durable",
+    "name,kept,stream,durable",
     [
-        ("scripts/events/nats.py", LAB_STREAM, "renamed", LAB_DURABLE),
-        ("scripts/ci_lab/scheduler.py", LAB_DURABLE, LAB_STREAM, "renamed"),
+        ("LAB_STREAM", LAB_STREAM, "renamed", LAB_DURABLE),
+        ("LAB_CONSUMER", LAB_DURABLE, LAB_STREAM, "renamed"),
     ],
     ids=["stream", "durable"],
 )
 def test_the_last_assignment_of_a_lab_name_is_the_one_graded(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, kept: str, stream: str, durable: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, kept: str, stream: str, durable: str
 ) -> None:
     agentihooks, antoncore = _matching(tmp_path)
-    name, path = LAB_SOURCES[source], agentihooks / source
-    path.write_text(f"{name} = 'renamed'\n{name}: str = {kept!r}\n")
+    path = agentihooks / LAB_LEAF
+    path.write_text(_leaf_with(name, f"{name} = 'renamed'\n{name}: str = {kept!r}\n"))
     assert _run(capsys, agentihooks, antoncore) == (0, MATCH)
-    path.write_text(f"{name}: str = {kept!r}\nOTHER = 1\n{name} = 'renamed'\n")
+    path.write_text(_leaf_with(name, f"{name}: str = {kept!r}\nOTHER = 1\n{name} = 'renamed'\n"))
     expected = [_unnamed("publish", subject) for subject in sorted(_lab_publish(stream, durable))]
     assert _run(capsys, agentihooks, antoncore) == (1, expected)
 

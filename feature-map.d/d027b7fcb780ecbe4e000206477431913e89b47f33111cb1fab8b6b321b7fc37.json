@@ -1,0 +1,16 @@
+{
+  "id": "hub-service-credential-renewal-survives-wait-failure",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2811",
+  "rules": [
+    "renewal-wait-outside-handler"
+  ],
+  "behaviour": "A hub with a remote ledger issues its own service credential and renews it on a daemon thread for as long as it runs. When the scheduler timer wait of its renewal loop raises, with a Redis connection error, a Redis busy loading reply or an operating system error, the loop logs the failure with its traceback, waits one keep interval on the local clock and renews, and a failed renewal is logged and the next interval still renews, so the credential never expires and the hub keeps its controller authority.",
+  "seam": "scripts.hub.runner._renew_forever renewal loop over fakeredis, started by scripts.hub.runner._renewal from scripts.hub.runner.main",
+  "tests": [
+    "tests/hub/test_runner.py::test_the_renewal_loop_keeps_renewing_after_its_timer_wait_raises",
+    "tests/hub/test_runner.py::test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal",
+    "tests/hub/test_runner.py::test_the_renewal_runs_on_a_daemon_thread",
+    "tests/hub/test_runner.py::test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_credential"
+  ]
+}
