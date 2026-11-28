@@ -39,7 +39,7 @@ TARGET = {
     "phase": "p1",
     "description": "Thin.",
 }
-DONE = {"op": "task_update", "id": "enhance-done-seed", "by": "swarm", "item": "tasks/t1", "fields": {"state": "done"}}
+DONE = {"op": "task_update", "id": "enhance-done-seed", "by": "swarm", "item": "tasks/t2", "fields": {"state": "done"}}
 PLAN_TASK = [
     {
         "op": "task_add",
