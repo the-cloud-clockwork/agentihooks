@@ -22,7 +22,11 @@ a step already has. The scaffold shipped in
 | Budget row | `FLOORS` in `scripts/tick/steps/budgets.py` | `"<name>": Timing(LIGHT_S, <interval>)`, the two second light floor, as the last row of the table |
 | Test | `tests/tick/steps/test_<slug>.py` | `test_<slug>`, marked `@pytest.mark.feature("<feature>")`, asserting the step's group, lane, feature and effects |
 | Index row | `scenarios` in `tests/swarm/tick_scenarios/steps.json` | `"<name>": ["<scenario>"]`, the scenarios sorted by step name |
-| Feature entry | `feature-map.json` | The test node id added to the entry with the feature id, or a new `inventory` entry when no entry has that id |
+| Feature entry | The feature's record under `feature-map.d/`, or `feature-map.json` | With `"fragments": true` and no entry for the feature id in the root `features` list, the feature's record: a new `inventory` entry, or the existing record with the test node id added. Otherwise the test node id added to the entry in `feature-map.json`, or a new `inventory` entry there when no entry has that id |
+
+`python -m scripts.feature_map --record FEATURE_ID`, run from the repository
+root, prints a feature's record path without writing it; see
+[Feature map](feature-map.md). Root metadata stays in `feature-map.json`.
 
 `<slug>` is the step name lower cased, its runs of letters and digits joined
 by single underscores; spaces, punctuation and underscores all separate: step
@@ -49,8 +53,9 @@ Every Python file the scaffold writes is sorted for imports and formatted with
 interpreter as the scaffold, so ruff must be installed in it. Each file is
 passed on standard input under its own path, so ruff applies the settings that
 govern that path. JSON files are written as the gates read them: the scenario
-index with a one space indent, the feature map with a two space indent and non
-ASCII characters escaped, each with a trailing newline.
+index with a one space indent, the feature map or the feature record with a
+two space indent and non ASCII characters escaped, each with a trailing
+newline.
 
 ## Usage
 
@@ -73,14 +78,16 @@ python -m scripts.tick.new_step "<name>" \
 | `--lane` | Yes | `tick` or `slow`, written as `lane=Lane("<lane>")`; see [Lanes](tick-engine-steps.md#lanes) |
 | `--interval` | Yes | `60`, `120` or `600` seconds, written into the budget row as `CRITICAL_S`, `WIDE_S` or `SLOW_S` |
 | `--effects` | No | Comma separated port names the step may write through, written as `effects=frozenset({...})`; empty gives `frozenset()`. The ports are the fields of `scripts.tick.ports.tools.Tools`: `coordination`, `host`, `inbox`, `ledger`, `llm`, `metrics`, `processes`, `runtime`, `source_control`. See [Effects in a tick pass](tick-adapters.md#effects-in-a-tick-pass) |
-| `--feature` | Yes | The feature id, written as `feature=` on the step, on the test marker and in the feature map |
+| `--feature` | Yes | The feature id, written as `feature=` on the step, on the test marker and in the feature's record or its entry in `feature-map.json` |
 | `--module` | Yes | The module under `scripts/tick/steps/` the step goes into, without `.py` |
 | `--scenario` | No | The recorded tick scenario the index lists the step under. Default `running`. It must be a key of `tests/swarm/tick_scenarios/goldens.json` without its entry point prefix |
 | `--root` | No | The tree to write into. Default the working folder |
 
 On success the command prints each file it wrote, relative to the root, in the
 order step module, budgets, test, index, feature map, then
-`scripts/tick/steps/__init__.py` when it created a module, and exits 0.
+`scripts/tick/steps/__init__.py` when it created a module, and exits 0. The
+feature map line is the record path under `feature-map.d/` when the scaffold
+wrote a record, and `feature-map.json` when it edited the root map.
 
 ### Example
 
@@ -89,14 +96,21 @@ python -m scripts.tick.new_step "probe widgets" --group widgets --lane tick \
   --interval 120 --effects ledger,inbox --feature tick-step-widgets --module widgets
 ```
 
+It prints, with the record's file name shown as `<record>`:
+
 ```
 scripts/tick/steps/widgets.py
 scripts/tick/steps/budgets.py
 tests/tick/steps/test_probe_widgets.py
 tests/swarm/tick_scenarios/steps.json
-feature-map.json
+feature-map.d/<record>.json
 scripts/tick/steps/__init__.py
 ```
+
+`tick-step-widgets` is a new feature id, so the scaffold writes its record.
+`<record>` stands for the SHA256 of the id;
+`python -m scripts.feature_map --record tick-step-widgets` prints the full
+path.
 
 The new module `scripts/tick/steps/widgets.py`:
 
@@ -174,7 +188,10 @@ def test_probe_widgets() -> None:
     )
 ```
 
-With no entry for `tick-step-widgets` in the feature map, the scaffold appends:
+With no entry for `tick-step-widgets` in the feature map, the scaffold writes
+this entry as the record `feature-map.d/<record>.json`. A map without
+`"fragments": true` gets it appended to `features` in `feature-map.json`
+instead:
 
 ```json
 {
@@ -190,7 +207,8 @@ With no entry for `tick-step-widgets` in the feature map, the scaffold appends:
 
 A second step with the same `--module` appends to that module and leaves
 `MODULES` alone; one with the same `--feature` adds its test node to the
-existing entry's `tests`.
+existing entry's `tests`, in the feature's record, or in `feature-map.json`
+when the entry sits in the root `features` list.
 
 ### After scaffolding
 
@@ -201,9 +219,9 @@ and declare the keys it needs, reads and writes, following
 The `LIGHT_S` floor stays unless the step is measured heavier: the live
 budget grows from the step's recorded walls, as described in
 [Live budgets, floors and declared intervals](tick-engine-steps.md#live-budgets-floors-and-declared-intervals). Rewrite the generated `inventory`
-behaviour and seam lines of a new feature entry into the behaviour the step
-delivers, and extend the test to prove it. Commit every file the scaffold
-printed.
+behaviour and seam lines of a new feature entry, in its record, into the
+behaviour the step delivers, and extend the test to prove it. Commit every
+file the scaffold printed, the new record included.
 
 ## Checking a step's artefacts
 
@@ -230,7 +248,7 @@ artefact holds prints all five `false`. Each artefact counts as present when:
 | `budget row` | A `FLOORS` or `MEASURED` table in the budgets file holds the name |
 | `test` | `tests/tick/steps/test_<slug>.py` exists |
 | `index row` | The scenario index lists the name under `scenarios` or `unmapped` |
-| `feature entry` | Some feature map entry lists the test node id `tests/tick/steps/test_<slug>.py::test_<slug>` |
+| `feature entry` | Some feature map entry, in `feature-map.json` or a record under `feature-map.d/`, lists the test node id `tests/tick/steps/test_<slug>.py::test_<slug>` |
 
 `--check` takes `--root` too and ignores every other option.
 
@@ -288,5 +306,5 @@ identifier; and a budgets module without its `FLOORS` table is refused.
 | `No module named ruff` or a `CalledProcessError` naming ruff | Run the scaffold with the workspace venv Python, which has ruff installed |
 | The new step is missing from `registry.steps()` | `scripts.tick.steps.MODULES` must list its module; a module created outside the scaffold is added there by hand |
 | The catalogue check reports `Step <name>: no scenario lists it` | The index row was lost, often in a merge of `tests/swarm/tick_scenarios/steps.json`; run `--check` and add the row back |
-| The feature map validation reports a missing behaviour test | The test file was renamed or removed; its node id must match the feature entry |
+| The feature map validation reports a missing behaviour test | The test file was renamed or removed; its node id must match the feature entry, in its record (`python -m scripts.feature_map --record FEATURE_ID` prints the path) or in `feature-map.json` |
 | The tick pattern gate refuses the new step | Run `--check`; a step written or edited by hand may have dropped a field or the budget row |
