@@ -40,7 +40,7 @@ class Demand(dict[str, int]):
 
 def urgent_counts(demand: Mapping[str, int] | None) -> dict[str, int]:
     """The ready urgent tasks per lane that a demand carries; a plain count carries none."""
-    return demand.urgent if isinstance(demand, Demand) else {}
+    return dict(demand.urgent) if isinstance(demand, Demand) else {}
 
 
 def _held(

@@ -2,7 +2,7 @@
   "id": "swarm-urgent-lane-first",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-lane-urgent-first",
-  "behaviour": "When quota seats are scarce, a lane holding ready urgent tasks takes the next free seat before any lane without urgent ready work, ties keeping the fewest effective agents rule; the autoscale ceiling split raises that lane's ceiling to fit its urgent work before the ci or plan lanes take the remaining room; the planner floor never cuts an urgent lane's ceiling; without urgent work every result equals the plain count result.",
+  "behaviour": "When quota seats are scarce, a lane holding ready urgent tasks takes the next free seat before any lane without urgent ready work, ties keeping the fewest effective agents rule; the autoscale ceiling split raises that lane's ceiling to fit its urgent work before the ci or plan lanes take the remaining room; the planner floor never cuts an urgent lane's ceiling, and when both the eng and ci lanes hold urgent work it grants its one plan ceiling without a donor, so the ceilings may exceed the total by one while spawns stay bounded by the free seats; without urgent work every result equals the plain count result.",
   "seam": "capacity.calculate through _allocate, capacity.apply and live_inputs through ready_demand, capacity.autoscaled, autoscale.calculate through _ceilings, and plan_cap_floor.ceilings, given an autoscale.Demand carrying urgent ready counts per lane",
   "tests": [
     "tests/swarm/test_urgent_lane_first.py::test_one_free_seat_goes_to_the_urgent_engineer_lane_before_emptier_ci_and_plan_lanes",
