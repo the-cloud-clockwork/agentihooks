@@ -51,6 +51,9 @@ class FetchError(ForgeError):
 
 @dataclass(frozen=True)
 class MergeRequestState:
+    """A merge request's tracker state; its description is read with it but kept out of equality, so a body edit
+    leaves two reads of one state equal."""
+
     url: str
     state: str
     head: str

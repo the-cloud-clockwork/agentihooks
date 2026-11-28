@@ -32,7 +32,10 @@ def pull(url: str, env: Mapping[str, str] = os.environ, send: Transport | None =
     read = _state(url, env, send)
     if read is None:
         return None
-    merged_at = int(datetime.fromisoformat(read.merged_at).timestamp() * 1000) if read.merged_at else None
+    try:
+        merged_at = int(datetime.fromisoformat(read.merged_at).timestamp() * 1000) if read.merged_at else None
+    except ValueError:
+        return None
     return PullRequest(
         read.state.upper(), merged_at, None, False, head=read.head, draft=read.draft, body=read.description
     )

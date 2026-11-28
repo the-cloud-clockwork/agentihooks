@@ -53,6 +53,17 @@ def test_a_gitlab_link_without_a_token_reads_no_pull_request(monkeypatch: pytest
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
+def test_a_link_of_no_forge_reads_no_pull_request() -> None:
+    assert read_view("https://example.com/group/repo/-/merge_requests/3", github(Port())) is None
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_an_unreadable_gitlab_merge_time_reads_no_pull_request(monkeypatch: pytest.MonkeyPatch, token: None) -> None:
+    sent(monkeypatch, Sent({**answer("merged", "success"), "merged_at": "yesterday"}))
+    assert read_view(LINK, github(Port())) is None
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
 def test_the_view_reads_an_opened_gitlab_merge_request_without_github(
     monkeypatch: pytest.MonkeyPatch, token: None
 ) -> None:
