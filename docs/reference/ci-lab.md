@@ -2812,6 +2812,9 @@ read of the pull request and a git read of the merge's parents, run off the sche
 each held under `merges.Background` and reused until `FRESH_S` (30) seconds after a thread began its resolution, so
 a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
 answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again.
+The scheduler names the repository by the address its webhook carried; `merges.Resolver` reads GitHub by the
+owner and name in that address, with a token scoped to pull requests read on that one repository, and asks its
+mirror by the address itself.
 A resolution still waiting for one of the `merges.WORKERS` (4) threads has read nothing, so its head stays held
 and spends no try, and the bound of a resolution runs from when a thread began it. A head whose merge GitHub has not
 built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose

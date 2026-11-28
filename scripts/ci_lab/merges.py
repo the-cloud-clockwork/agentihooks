@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import requests
 
@@ -156,9 +157,11 @@ class Resolver:
         self.readers: dict[str, PullRequests] = {}
 
     def __call__(self, repo: str, number: int, head: str) -> tuple[str, str] | None:
-        """Return the resolved merge of a pull request of the owner/name repository and its head, or None."""
+        """Return the resolved merge of a pull request of a repository and its head, or None. The repository is
+        named as the scheduler names it, by its address or its owner/name: the reader is built for the owner/name
+        and the mirror is asked by the value given."""
         if repo not in self.readers:
-            self.readers[repo] = self.reader(repo)
+            self.readers[repo] = self.reader(urlsplit(repo).path.removeprefix("/"))
         return resolve(self.readers[repo], self.mirror(repo), number, head, timeout=GIT_TIMEOUT)
 
 
