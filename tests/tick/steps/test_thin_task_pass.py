@@ -260,10 +260,12 @@ def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(ta
 def test_the_generated_release_task_gets_no_write_on_repeated_passes() -> None:
     """The release task the phase builder generates gets no enhancement task, no mark and no master notice, on the
     first pass and on every pass after it."""
-    release = generated_release()
+    rows = [generated_release()]
     for _ in range(2):
-        found = _run([release])
+        found = _run(rows)
         assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+        rows = _applied(rows, _operations(found))
+    assert rows == [generated_release()]
 
 
 @pytest.mark.feature("thin-release-task-exempt")

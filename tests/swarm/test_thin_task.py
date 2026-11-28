@@ -265,9 +265,16 @@ def test_the_release_task_the_phase_builder_generates_is_never_thin(title: str) 
         ({"id": "t2"}, "t2", []),
         ({"id": "release-p2"}, "release-p2", []),
         ({"phase": "p2"}, "release-p1", []),
+        ({"id": "release-", "phase": ""}, "release-", []),
         ({"kind": "code"}, "release-p1", ["Task release-p1 is code work that names no seam."]),
     ],
-    ids=["ordinary ops task titled release", "release id of another phase", "moved to another phase", "code kind"],
+    ids=[
+        "ordinary ops task titled release",
+        "release id of another phase",
+        "moved to another phase",
+        "no phase",
+        "code kind",
+    ],
 )
 def test_a_task_that_is_not_the_ops_release_task_of_its_own_phase_is_still_thin(
     fields: dict[str, Any], tid: str, seamless: list[str]

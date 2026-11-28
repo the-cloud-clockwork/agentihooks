@@ -79,7 +79,8 @@ def exempt(task: dict[str, Any]) -> bool:
     """Whether the task is never thin: it carries a plan slice, is plan kind work, its enhancement is planned or
     skipped, or it is the ops release task the tick generates for its own phase."""
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
-    released = kind == "ops" and task.get("id") == RELEASE.format(task.get("phase"))
+    phase = task.get("phase")
+    released = kind == "ops" and bool(phase) and task.get("id") == RELEASE.format(phase)
     return bool(task.get("plan_slice")) or kind == "plan" or task.get("enhancement") in EXEMPT or released
 
 
