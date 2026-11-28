@@ -176,7 +176,7 @@ if [[ $arenas != 2 ]]; then
 fi
 printf 'the ledger container limits malloc arenas to two\n'
 ledger_values="$(mktemp)"
-printf 'ledger:\n  secretEnv:\n    - {name: AGENTIHOOKS_SWARM_DATABASE_URL, secretName: swarm-ledger-database, key: url}\n' >"$ledger_values"
+printf 'api:\n  enabled: true\nledger:\n  secretEnv:\n    - {name: AGENTIHOOKS_SWARM_DATABASE_URL, secretName: swarm-ledger-database, key: url}\n' >"$ledger_values"
 helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
   | python3 tests/chart_secrets.py "$chart/ci/kind-values.yaml" "$ledger_values"
 planted="$(helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \
@@ -187,7 +187,7 @@ if [[ $planted != *"container wait references the ledger only Secret swarm-ledge
   printf 'the chart check did not flag a planted shared reference to the ledger only Secret: %s\n' "$planted" >&2
   exit 1
 fi
-printf 'only the ledger container and the database readers read the ledger secret env\n'
+printf 'only the ledger container, its API mirror and the database readers read the ledger secret env\n'
 printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"

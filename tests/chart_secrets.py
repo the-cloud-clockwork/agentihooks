@@ -65,6 +65,14 @@ def is_ledger(document: dict, container: dict) -> bool:
     )
 
 
+def is_ledger_api(document: dict, container: dict) -> bool:
+    return (
+        document["kind"] == "Deployment"
+        and document["metadata"]["name"].endswith("-api")
+        and container["name"] == "api"
+    )
+
+
 def is_database_reader(document: dict, container: dict) -> bool:
     return (
         document["kind"] == "Deployment"
@@ -81,10 +89,12 @@ def entry_problems(documents: list, entry: dict, others: set[str], role: str) ->
     shared = role == "ledger" and entry["name"] == DATABASE_URL
     for document, pod, container in containers(documents):
         found = references(pod, container, secret)
+        own = [item for item in found if item.get("name") not in others]
         reader = shared and found == [expected_reference(entry)] and is_database_reader(document, container)
+        mirror = role == "ledger" and own == [expected_reference(entry)] and is_ledger_api(document, container)
         if found and OWNERS[role](document, container):
-            held += [item for item in found if item.get("name") not in others]
-        elif found and not reader:
+            held += own
+        elif found and not (reader or mirror):
             owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
             problems.append(f"{owner} references the {role} only Secret {secret}")
     if held != [expected_reference(entry)]:
