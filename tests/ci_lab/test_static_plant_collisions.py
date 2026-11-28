@@ -104,8 +104,7 @@ def test_every_static_plant_outside_the_type_gate_job_keeps_its_file_s_baseline(
 
 @pytest.mark.feature("lab-static-plants-turn-only-their-own-gate")
 def test_the_type_baseline_check_bound_outlasts_three_times_its_slowest_loaded_merge_group_run() -> None:
-    marks = pytestmark if isinstance(pytestmark, list) else [pytestmark]
-    bounds = [mark.args[0] for mark in marks if mark.name == "timeout"]
+    bounds = [mark.args[0] for mark in pytestmark if mark.name == "timeout"]
     assert bounds and bounds[0] >= 3 * SLOWEST_LOADED_MERGE_GROUP_SECONDS
 
 
