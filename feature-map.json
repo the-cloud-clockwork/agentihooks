@@ -12,6 +12,27 @@
       ]
     },
     {
+      "id": "codex-swarm-share",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-load-share",
+      "behaviour": "A new eng or ci spawn that may run on either harness goes to Codex while Codex holds under thirty percent of the live and already placed eng and ci agents and a Codex seat is placeable, so four open Claude accounts no longer leave Codex one spawn in five. With no placeable Codex seat, or only Codex seats that pinned Codex work reserves, the slot goes to Claude; a lane agent pin or a task harness requirement keeps its harness, the plan lane keeps the fewest sessions pick, and a met share leaves the fewest sessions pick unchanged.",
+      "seam": "scripts.swarm.capacity.calculate through _allocate, whose placements every launch path takes as the planned harness",
+      "tests": [
+        "tests/swarm/test_codex_share.py::test_codex_takes_thirty_percent_of_new_eng_spawns_beside_four_claude_accounts",
+        "tests/swarm/test_codex_share.py::test_the_share_counts_live_eng_and_ci_agents_and_nothing_else",
+        "tests/swarm/test_codex_share.py::test_a_met_share_leaves_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_with_two_codex_of_seven_sends_the_next_spawn_to_codex",
+        "tests/swarm/test_codex_share.py::test_ci_spawns_share_with_codex_too",
+        "tests/swarm/test_codex_share.py::test_the_plan_lane_keeps_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_falls_back_to_claude_without_a_codex_seat",
+        "tests/swarm/test_codex_share.py::test_a_claude_lane_pin_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_claude_task_requirement_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_codex_plan_spawn_never_counts_toward_the_eng_share",
+        "tests/swarm/test_codex_share.py::test_a_short_share_leaves_a_codex_seat_reserved_for_pinned_codex_work",
+        "tests/swarm/test_codex_share.py::test_a_met_share_still_leaves_a_claude_seat_reserved_for_pinned_claude_work"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
@@ -5223,6 +5244,35 @@
       ]
     },
     {
+      "id": "merge-priority-automatic-entry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "Focused or urgent tasks receive deferred priority when newly queued from the command or merge watcher, including recovery; testing entries stay in place, ordinary tasks keep FIFO order, existing entries and repositories without a queue receive no automatic move.",
+      "seam": "scripts.swarm.merge_queue.operate queue entry through cli.cmd_merge and ready initial and recovery queue paths",
+      "tests": [
+        "tests/swarm/test_queue_entry_priority.py::test_queue_entry_applies_focus_or_urgency_without_interrupting_tests",
+        "tests/swarm/test_queue_entry_priority.py::test_a_freeze_nearer_than_the_focus_keeps_the_queue_order",
+        "tests/swarm/test_queue_entry_priority.py::test_automatic_priority_tells_a_displaced_split_pull_owner_as_the_swarm",
+        "tests/swarm/test_queue_entry_priority.py::test_an_existing_queue_entry_does_not_repeat_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_a_busy_priority_leaves_the_new_entry_queued_and_names_the_refusal",
+        "tests/swarm/test_queue_entry_priority.py::test_a_repository_without_a_queue_does_not_apply_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
+      ],
+      "rules": ["merge-priority-missing-entry-callback"]
+    },
+    {
+      "id": "merge-priority-operator-lift",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "An operator lift removes merge queue entries already under test and restores them behind the priority target in their original order; ordinary priority preserves those entries.",
+      "seam": "scripts.swarm.cli.cmd_merge through queue_priority.request and merge_queue.prioritize",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
+      ],
+      "rules": ["merge-priority-swallowed-lift"]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
@@ -5556,6 +5606,24 @@
       ]
     },
     {
+      "id": "credential-guard-wrapper-option-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-wrapper-options",
+      "behaviour": "The credential guard skips sudo and env option values before judging the wrapped command, so credential file reads directly or in shell scripts remain refused through nested wrappers.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads through verb_index",
+      "tests": [
+        "tests/test_credential_guard_wrapper_options.py::test_a_credential_read_after_wrapper_option_values_is_refused",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_value_flags_preserve_the_credential_verdict",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_option_values_do_not_become_commands_or_operands",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_parser_preserves_command_boundaries"
+      ],
+      "rules": [
+        "credential-guard-wrapper-option-values"
+      ]
+    },
+    {
       "id": "ledger-hives-panel",
       "origin": "inventory",
       "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
@@ -5766,6 +5834,43 @@
         "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused",
         "tests/test_credential_guard.py::test_kubectl_commands_that_name_no_secret_type_pass",
         "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe"
+      ]
+    },
+    {
+      "id": "bundle-layer-manifest",
+      "origin": "inventory",
+      "behaviour": "A bundle root's committed bundle.yml names the directory it ships from with layer; an absent file or key keeps the root. Every reader of bundle content (rules, skills, agents, commands, settings and MCP for each harness, shared doctrine, manifestos, deps.json, enforcements, conditions, workflows, lifecycle roots, classifiers and the Serena context) reads the layer, while profiles are still found under the root. A named layer never falls back to the root CLAUDE.md, a layer outside the bundle is refused with a warning and the root ships, a chain profile that is the layer adds only its persona so every hook group, doctrine row and persona lands once, the condition index rebuilds when a bundle.yml changes, and agentihooks bundle layer prints the resolved directory.",
+      "seam": "hooks.context.profile_chain.layer_root, unlayered and doctrine read through scripts.install.install_global for claude, codex and copilot, scripts.profiles.render, scripts.swarm_v2.worker_home.materialize, hooks.context.conditions.load_index and layer_dirs, hooks.context.enforcement.load_all_enforcements, scripts.workflows.loader.layer_dirs, hooks.lifecycle.config.load_roots and scripts.profiles.bundles.cmd_bundle",
+      "tests": [
+        "tests/test_bundle_layer.py::test_a_bundle_without_a_named_layer_ships_from_its_root",
+        "tests/test_bundle_layer.py::test_a_named_layer_resolves_to_its_directory_inside_the_bundle",
+        "tests/test_bundle_layer.py::test_a_layer_outside_the_bundle_is_refused_and_the_root_ships",
+        "tests/test_bundle_layer.py::test_a_named_layer_keeps_the_root_claude_md_out_of_the_shared_doctrine",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_rules_skills_agents_and_commands_and_the_root_dot_claude_stays_behind",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_settings_mcp_and_doctrine_and_no_root_development_file",
+        "tests/test_bundle_layer.py::test_compiled_personas_take_the_layer_doctrine_and_rules_and_never_the_root_ones",
+        "tests/test_bundle_layer.py::test_codex_applies_the_layer_config_and_not_the_root_one",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_adds_only_its_persona_and_each_hook_once",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_compiles_its_doctrine_and_persona_once",
+        "tests/test_bundle_layer.py::test_doctrine_rows_name_the_layer_doctrine_once_and_the_layer_persona_once",
+        "tests/test_bundle_layer.py::test_profile_renders_read_features_settings_and_mcp_from_the_layer_once",
+        "tests/test_bundle_layer.py::test_manifestos_and_dependencies_come_from_the_layer",
+        "tests/test_bundle_layer.py::test_runtime_conditions_enforcements_workflows_and_lifecycle_read_the_layer_once",
+        "tests/test_bundle_layer.py::test_links_into_a_profile_layer_are_managed_and_reaped_when_their_source_goes",
+        "tests/test_bundle_layer.py::test_bundle_help_names_the_layer_action_and_it_prints_the_resolved_layer",
+        "tests/test_conditions.py::TestIndexCache::test_a_bundle_layer_change_invalidates",
+        "tests/test_worker_home.py::test_a_bundle_naming_a_layer_renders_the_worker_home_from_it_once"
+      ]
+    },
+    {
+      "id": "config-import-without-yaml",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ci-outage-config-yaml-import",
+      "behaviour": "Importing hooks.config never requires pyyaml at module import time: its module level CI_MANIFESTO_PATHS computation reaches hooks.context.profile_chain.layer_root, whose yaml.safe_load call imports yaml inside the function body, so a caller without pyyaml installed, such as the merge queue early collection step, can still import hooks.config and every module that imports it.",
+      "seam": "hooks.config._resolve_manifesto_paths through hooks.context.profile_chain.layer_root, parents, _manifest, overlays, wears and require_capabilities, each importing yaml locally instead of at module scope",
+      "tests": [
+        "tests/test_config_import_no_yaml.py::test_hooks_config_imports_without_pyyaml_installed",
+        "tests/test_shard_check.py::test_shard_check_installs_pyyaml_before_the_import_chain_that_needs_it"
       ]
     },
     {
@@ -7440,6 +7545,17 @@
         "tests/tick/test_placement_worker.py::test_a_call_step_that_declares_the_placement_lock_runs_its_call_holding_it",
         "tests/tick/test_placement_worker.py::test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it",
         "tests/tick/test_placement_worker.py::test_the_eight_steps_that_place_agents_declare_the_placement_lock"
+      ]
+    },
+    {
+      "id": "kept-placing-steps-first-on-the-placement-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-late",
+      "rules": ["kept-step-queues-behind-ready-sibling"],
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
+      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
+      "tests": [
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker"
       ]
     },
     {
@@ -10634,6 +10750,16 @@
       ]
     },
     {
+      "id": "lab-sandbox-group-killed-at-exit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2651",
+      "behaviour": "A lab unit's process group is killed after every exit, clean, failed or timed out, so a child the unit leaves behind, such as one started by a build hook, is gone when Sandbox.run returns and never outlives its run folder; the unit's exit code is kept and a timeout still returns no code.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run, the sandbox run boundary, through run_process in scripts.ci_mutation.runner",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
@@ -10979,6 +11105,19 @@
         "tests/swarm/test_pull_views.py::test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one",
         "tests/swarm/test_pull_views.py::test_a_pull_request_read_that_is_no_tick_view_logs_no_counts",
         "tests/swarm/test_pull_views.py::test_a_tick_view_read_that_raises_leaves_later_reads_uncounted"
+      ]
+    },
+    {
+      "id": "tick-view-side-by-side-batches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2621",
+      "behaviour": "A pull request views read of two or more batches of twenty has every batch document in flight at the same time, each read in the caller's context, then resolves the workflow gates batch by batch in batch order through the shared cache, so it makes the same GitHub calls as reading the batches one after another and a tick view of two batches waits for its slowest batch instead of their sum.",
+      "seam": "views in scripts.swarm.ledger_events over a source control port, with and without the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_views_call_reads_its_batch_documents_at_the_same_time",
+        "tests/swarm/test_pull_views.py::test_batches_make_the_sequential_github_calls_for_their_workflow_trees",
+        "tests/swarm/test_pull_views.py::test_a_failed_batch_read_leaves_the_other_batch_read_once",
+        "tests/swarm/test_pull_views.py::test_each_views_batch_reads_in_the_callers_context"
       ]
     },
     {
