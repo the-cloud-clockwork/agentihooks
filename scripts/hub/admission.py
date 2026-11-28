@@ -33,8 +33,8 @@ TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
 ACCOUNT_HOLD = "no permitted harness has a free account seat"
 NO_HARNESS = "the lane agent, required harness and profile permit no harness"
-LANE_HOLD = "lane-hold"
-LANE_HELD = "a spawn on the asking hive refused this lane"
+REFUSAL_HOLD = "spawn-refusal-hold"
+REFUSAL_HELD = "a spawn on the asking hive refused this task"
 HOLD_MS = 24 * 60 * 60 * 1000
 
 
@@ -136,7 +136,7 @@ class Admission:
         if unplaceable := (
             self._unplaceable(view.rows[task_id], request["hive"])
             or self._seatless(slug, request, view.rows[task_id])
-            or self._lane_held(slug, request, view.rows[task_id])
+            or self._refusal_held(slug, request)
         ):
             print(
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
@@ -281,37 +281,30 @@ class Admission:
             return ""
         return "no free account seat on the asking hive"
 
-    def _lane_held(self, slug: str, request: dict[str, Any], task: dict[str, Any]) -> str:
-        """The refusal holding the request's lane on the asking hive; empty once that hive's capacity changed or the
-        task permits a harness the refused task could not use."""
+    def _refusal_held(self, slug: str, request: dict[str, Any]) -> str:
+        """The spawn refusal that holds the task off the asking hive; empty once that hive's capacity changed."""
         redis: Any = cast(Any, self.store).redis
         key = self._hold_key(slug, request)
         stored = redis.get(key)
         if not stored:
             return ""
         hold = json.loads(stored)
-        if hold["capacity"] != self._capacity(request["hive"]):
+        if hold["capacity"] != self._capacity(slug, request["hive"]):
             redis.delete(key)
             return ""
-        if not set(offer_quota.permitted(self.store.config(slug), request["lane"], task)) <= set(hold["harnesses"]):
-            return ""
-        return f"{LANE_HELD}: {hold['reason']}"
+        return f"{REFUSAL_HELD}: {hold['reason']}"
 
-    def _hold(self, slug: str, request: dict[str, Any], task: dict[str, Any], refused: str) -> None:
-        """Holds the request's lane on its hive for tasks within the refused task's harnesses, until the hive's
-        capacity changes or HOLD_MS passes."""
-        hold = {
-            "reason": refused,
-            "harnesses": list(offer_quota.permitted(self.store.config(slug), request["lane"], task)),
-            "capacity": self._capacity(request["hive"]),
-        }
+    def _hold(self, slug: str, request: dict[str, Any], refused: str) -> None:
+        """Holds the request's task off its hive until the hive's capacity changes, with HOLD_MS as the key's bound."""
+        hold = {"reason": refused, "capacity": self._capacity(slug, request["hive"])}
         cast(Any, self.store).redis.set(self._hold_key(slug, request), json.dumps(hold), px=HOLD_MS)
 
     def _hold_key(self, slug: str, request: dict[str, Any]) -> str:
-        return self.store.key(slug, LANE_HOLD, request["lane"], request["hive"])
+        return self.store.key(slug, REFUSAL_HOLD, request["task"], request["hive"])
 
-    def _capacity(self, hive: str) -> list[Any]:
-        """The hive's reported account caps and session counts, which a lane hold waits to see change."""
+    def _capacity(self, slug: str, hive: str) -> list[Any]:
+        """The hive's reported account caps and session counts and the swarm's latest ended agent, which a refusal
+        hold waits to see change."""
         from scripts.hive import registry
 
         redis: Any = cast(Any, self.store).redis
@@ -320,7 +313,7 @@ class Admission:
         slots: list[dict[str, Any]] = record.get("slots") or []
         caps = sorted([slot["harness"], slot["account"], slot.get("cap")] for slot in slots)
         counts = sorted([name, count] for name, count in sessions.items() if isinstance(count, int))
-        return [caps, counts]
+        return [caps, counts, redis.lindex(self.store.key(slug, "history"), -1)]
 
     def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
         """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through
@@ -549,7 +542,7 @@ class Admission:
     def reopen(self, slug: str, request: dict[str, Any]) -> bool:
         """Reopens the task the asking hive's admission claimed and forgets that admission, answering True only then;
         with no admission held, a dead lettered offer advances its task's claim generation instead. A reopen that
-        carries the hive's spawn refusal also holds that lane on the hive until its capacity changes."""
+        carries the hive's spawn refusal also holds the task off that hive until the hive's capacity changes."""
         redis: Any = cast(Any, self.store).redis
         key = self._key(slug, request)
         held = redis.get(key)
@@ -563,7 +556,7 @@ class Admission:
         self._release(slug, request["task"], admitted["name"])
         redis.delete(key)
         if refused := request.get("refused"):
-            self._hold(slug, request, admitted["task"], refused)
+            self._hold(slug, request, refused)
         return True
 
     def _advance(self, slug: str, request: dict[str, Any]) -> None:

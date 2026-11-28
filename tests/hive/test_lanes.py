@@ -660,7 +660,7 @@ def test_the_lane_spokes_spawn_on_the_worker_claude_cap(monkeypatch: pytest.Monk
     assert runtime.herdr.quota_accounts is capacity.worker_accounts
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
 def test_a_refused_give_back_carries_its_refusal_to_the_hub(hub: SimpleNamespace) -> None:
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(), "no claude account has placeable quota seats")
 

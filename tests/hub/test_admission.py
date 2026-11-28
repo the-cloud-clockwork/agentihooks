@@ -700,7 +700,7 @@ def again(**fields: str) -> dict[str, Any]:
     return ask(generation=1, **fields)
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
 def test_a_give_back_without_a_refusal_is_admitted_again_on_the_same_hive(rig: SimpleNamespace) -> None:
     rig.admitter.admit(SLUG, ask())
     assert rig.admitter.reopen(SLUG, ask()) is True
@@ -708,8 +708,8 @@ def test_a_give_back_without_a_refusal_is_admitted_again_on_the_same_hive(rig: S
     assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
-def test_a_refused_give_back_holds_the_lane_on_that_hive_and_another_hive_takes_it(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_refused_give_back_holds_the_task_on_that_hive_and_another_hive_takes_it(rig: SimpleNamespace) -> None:
     _hive_sessions(rig, {"claude:a": 6})
     _refused_give_back(rig)
 
@@ -720,9 +720,17 @@ def test_a_refused_give_back_holds_the_lane_on_that_hive_and_another_hive_takes_
     assert rig.admitter.admit(SLUG, again(hive="hive-b"))["hive"] == "hive-b"
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
-@pytest.mark.parametrize("change", ["sessions", "caps"])
-def test_a_held_lane_is_admitted_once_the_hive_reports_changed_capacity(
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_held_task_leaves_other_tasks_admitted_on_that_hive(rig: SimpleNamespace) -> None:
+    _refused_give_back(rig)
+
+    assert "held" in rig.admitter.admit(SLUG, again())
+    assert rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))["hive"] == "hive-a"
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+@pytest.mark.parametrize("change", ["sessions", "caps", "ended"])
+def test_a_held_task_is_admitted_once_the_hive_capacity_changes(
     rig: SimpleNamespace, seat_bus: Any, change: str
 ) -> None:
     _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 10}])
@@ -732,33 +740,20 @@ def test_a_held_lane_is_admitted_once_the_hive_reports_changed_capacity(
 
     if change == "sessions":
         _hive_sessions(rig, {"claude:a": 5})
-    else:
+    elif change == "caps":
         _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 11}])
+    else:
+        rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
+        assert rig.admitter.reopen(SLUG, ask(task="t2", lane="ci")) is True
 
     assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
-def test_a_held_lane_spares_a_task_that_permits_a_harness_the_refused_task_could_not_use(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from scripts.profiles import plugins
-
-    monkeypatch.setattr(plugins, "claude_only", lambda name: False)
-    rig.rows["t1"]["requires_harness"] = "claude"
-    _refused_give_back(rig)
-    assert "held" in rig.admitter.admit(SLUG, again())
-
-    del rig.rows["t1"]["requires_harness"]
-
-    assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
-
-
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
-def test_a_lane_hold_outlives_thirty_minutes_and_still_expires(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_refusal_hold_outlives_thirty_minutes_and_still_expires(rig: SimpleNamespace) -> None:
     _refused_give_back(rig)
 
-    held = rig.store.redis.pttl(rig.store.key(SLUG, admission.LANE_HOLD, "eng", "hive-a"))
+    held = rig.store.redis.pttl(rig.store.key(SLUG, admission.REFUSAL_HOLD, "t1", "hive-a"))
 
     assert 30 * 60 * 1000 < held <= admission.HOLD_MS
 

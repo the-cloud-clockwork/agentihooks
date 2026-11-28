@@ -713,7 +713,7 @@ def test_a_launch_waiting_for_room_reports_no_failure(rig):
     rig.tasks.failed.assert_not_called()
 
 
-@pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
 def test_a_refused_spawn_gives_its_claim_back_with_the_refusal(rig: SimpleNamespace) -> None:
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
