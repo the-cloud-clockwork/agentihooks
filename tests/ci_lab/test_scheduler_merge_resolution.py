@@ -324,6 +324,40 @@ def test_two_waiting_heads_whose_merge_reads_are_refused_each_log_their_own_refu
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_two_waiting_heads_whose_merge_reads_stay_refused_each_spend_their_own_tries_and_are_graded_bare(
+    lab: Callable[..., Run],
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates), HEAD_B: scheduler.Plan(TREE, BASE, gates)})
+    release = threading.Event()
+    asked: list[int] = []
+
+    def refused(repo: str, number: int, head: str) -> tuple[str, str] | None:
+        asked.append(number)
+        release.wait(10.0)
+        raise merges.MergeRefused(f"GET pulls/{number} answered 404")
+
+    background = merges.Background(refused)
+    run.engine.ports = replace(run.engine.ports, merges=background)
+    _push(run, HEAD_A, 41)
+    _push(run, HEAD_B, 42)
+    actions: list[str] = []
+    for _ in range(scheduler.UNMERGED_TRIES):
+        release.clear()
+        run.tick(1000)
+        release.set()
+        wait_futures([future for _, future in background.resolutions.values()])
+        actions = run.tick(1000)
+        assert run.grades() == []
+    assert any(action.startswith(f"the lab gives up on a merge of {HEAD_A}") for action in actions)
+    assert any(action.startswith(f"the lab gives up on a merge of {HEAD_B}") for action in actions)
+    run.tick(1000)
+    assert run.grade(HEAD_A).merge_fallback is True
+    assert run.grade(HEAD_B).merge_fallback is True
+    assert sorted(asked) == [41] * scheduler.UNMERGED_TRIES + [42] * scheduler.UNMERGED_TRIES
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_refused_pull_request_read_holds_the_required_frame_regrade(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:

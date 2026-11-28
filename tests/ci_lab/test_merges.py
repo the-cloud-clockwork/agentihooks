@@ -380,6 +380,30 @@ def test_background_keeps_an_answer_no_head_read_until_its_kept_window_ends_whil
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("answer", [(MERGE, BASE), None, RuntimeError("boom")], ids=["found", "absent", "failed"])
+def test_background_resolves_again_for_a_head_that_asks_once_its_unread_answer_left_the_kept_window(
+    answer: tuple[str, str] | None | Exception,
+) -> None:
+    early, late = (("example/repo", number, HEAD) for number in (41, 42))
+    held = Held({early: (MERGE, BASE), late: answer})
+    clock = Clock(now=100.0)
+    background = merges.Background(held, clock=clock, kept_s=120.0)
+    for key in (early, late):
+        with pytest.raises(merges.MergePending):
+            background(*key)
+        assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = 219.0
+    assert background(*early) == (MERGE, BASE)
+    clock.now = 220.0
+    with pytest.raises(merges.MergePending):
+        background(*late)
+    assert held.started.acquire(timeout=WAIT_S)
+    assert held.asked == [early, late, late]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 @pytest.mark.parametrize("waited", [0.0, 31.0], ids=["inside-the-fresh-window", "past-the-fresh-window"])
 def test_background_returns_a_failed_resolution_to_its_own_head_after_another_head_was_asked(waited: float) -> None:
     failed, other = ("example/repo", 41, HEAD), ("example/repo", 44, OTHER)
