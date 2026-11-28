@@ -10,6 +10,7 @@ import ledger_comments
 import ledger_tasks
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ROLES = ("orchestrator", "member")
@@ -120,7 +121,7 @@ def touch(meta, by, at):
         member["last_seen"] = at
 
 
-def _join(doc, op, ctx):
+def _join(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     members = ctx.meta["members"]
     known = members.get(op["by"])
     role = op.get("role", known["role"] if known else "member")
@@ -142,7 +143,7 @@ def _join(doc, op, ctx):
     return True
 
 
-def _leave(doc, op, ctx):
+def _leave(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if ctx.meta["members"].pop(op["by"], None) is None:
         ctx.refused.append(f"leave refused: {op['by']} has not joined this ledger")
         return False
@@ -150,7 +151,7 @@ def _leave(doc, op, ctx):
     return True
 
 
-def _ack(doc, op, ctx):
+def _ack(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     member = ctx.meta["members"].get(op["by"])
     if member is None:
         return False
@@ -161,7 +162,7 @@ def _ack(doc, op, ctx):
     return True
 
 
-def _answer_stats(ctx, by, rev):
+def _answer_stats(ctx: OpContext, by: str, rev: int) -> None:
     events = ctx.meta["events"]
     sent = next((e for e in reversed(events) if e.get("kind") == "stats sync requested"), None)
     if sent is None or sent["rev"] > rev:
@@ -175,7 +176,7 @@ def _item(doc, path):
     return next((i for i in doc.get(name, []) if i["id"] == item_id), None)
 
 
-def _claim(doc, op, ctx):
+def _claim(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     member = ctx.meta["members"].get(op["by"])
     if member is None or _item(doc, op["item"]) is None:
         return False
@@ -185,7 +186,7 @@ def _claim(doc, op, ctx):
     return True
 
 
-def _set(doc, op, ctx):
+def _set(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["path"] == "time_left_minutes":
         if doc.get("time_left_minutes") != op["value"]:
             doc["time_left_minutes"] = op["value"]
@@ -212,7 +213,7 @@ def _set(doc, op, ctx):
     return True
 
 
-def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["list"] == "followups" and (refused := ledger_tasks.expert_refusal(op["by"], "files no follow up")):
         ctx.refused.append(refused)
         return False
@@ -231,7 +232,7 @@ def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-def _retext(doc, op, ctx):
+def _retext(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     import ledger_core as core
 
     item = _item(doc, op["item"])
@@ -244,12 +245,12 @@ def _retext(doc, op, ctx):
     return True
 
 
-def _gate_bypass(doc, op, ctx):
+def _gate_bypass(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     ctx.record(op["by"], "gate bypassed", "", text=f"stopped with {op['unhandled']} unhandled operator events")
     return True
 
 
-def _gate_lift(doc, op, ctx):
+def _gate_lift(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     ctx.record(
         op["by"], "gate lifted", "", text=f"the operator lifted the {op['gate']} gate for one hour", gate=op["gate"]
     )
@@ -269,7 +270,7 @@ HANDLERS = {
 }
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     done = HANDLERS[op["op"]](doc, op, ctx)
     if done and op["op"] != "leave":
         touch(ctx.meta, op["by"], ctx.at)

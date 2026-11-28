@@ -1,0 +1,12 @@
+{
+  "id": "ledger-load-paired-writer-cpu",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2927",
+  "behaviour": "The paired ledger load gate compares the busiest CPU window of the process that takes writes on both sides, so a head running the ledger API service beside the read only ledger server pairs against a base running one combined server; the read only server's own window is reported apart on the head only and never paired, while the absolute CPU budget still holds every server process.",
+  "seam": "The load gate run measure line, fed by the process sampler and read by the paired grader",
+  "tests": [
+    "tests/ledger_load/test_gate.py::test_a_head_with_two_servers_and_a_base_with_one_pair_the_busiest_cpu_window_of_the_writer_alone",
+    "tests/ledger_load/test_gate.py::test_the_read_only_server_cpu_is_reported_under_its_own_key_on_the_head_only",
+    "tests/ledger_load/test_gate.py::test_the_cpu_budget_still_holds_every_server_process_of_the_head"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x_allocated_bytes:62c1efa0840891d9c7aec812a5313b1f470239e72dade00302339267a87cd597": {
+    "reader": "standards_reader",
+    "reason": "The os.stat follow_symlinks parameter uses boolean truth conversion. None and False both disable following; the same dir_fd, names, inode accounting and symlink metadata are used."
+  }
+}

@@ -2,8 +2,8 @@
   "id": "lab-grade-diffs-against-merge-base",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
-  "behaviour": "A lab grade diffs against the merge base of its head and its base: its static units are keyed on the files at that merge base and each job it enqueues carries it as the base a worker checks out, while the grader, the run key and the base the grade names stay the delivered base. A head that shares no history with its base fails expansion.",
-  "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a real git repository, and Scheduler.tick over its fakes through the base each leased job carries",
+  "behaviour": "A lab grade diffs against the merge base of its head and its base: its static units are keyed on the files at that merge base and each job it enqueues carries it as the base a worker checks out, while the grader, the run key and the base the grade names stay the delivered base. A head that shares no history with its base fails expansion. A pull request grade that carries a resolved test merge diffs against that merge's first parent instead, read from the already fetched merge commit, and names it as its merge base the same way.",
+  "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand and _graded_base over a real git repository, and Scheduler.tick over its fakes through the base each leased job carries",
   "rules": [
     "lab-static-base-read-at-delivered-base"
   ],
@@ -14,6 +14,7 @@
     "tests/ci_lab/test_scheduler_merge_base.py::test_an_exclusion_the_base_gained_after_the_fork_point_still_excludes_its_gate",
     "tests/ci_lab/test_scheduler_merge_base.py::test_a_head_that_shares_no_history_with_its_base_fails_expansion_at_the_merge_base",
     "tests/ci_lab/test_scheduler_merge_base.py::test_each_job_of_a_grade_that_names_a_merge_base_carries_it_as_the_base_a_worker_checks_out",
-    "tests/ci_lab/test_scheduler_merge_base.py::test_each_job_of_a_grade_that_names_no_merge_base_carries_the_grades_base"
+    "tests/ci_lab/test_scheduler_merge_base.py::test_each_job_of_a_grade_that_names_no_merge_base_carries_the_grades_base",
+    "tests/ci_lab/test_scheduler_merge_resolution.py::test_expand_reads_the_tree_and_diffs_against_the_first_parent_of_a_resolved_merge"
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__configuration:0324bdd8d89bea584d2528fc31e6d40959ed6c68f8f503e054d33909daa287e7": {
+    "reader": "standards_reader",
+    "reason": "dict/Mapping.get without a default returns None. None and the original empty-string default have identical any/all guard outcomes; no missing value reaches path, UUID or limit processing."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/hub/pulls.py:scripts.hub.pulls.x\u01c1Pulls\u01c1observe:2f0468c3707b989a05c8396b71168326d03c9acccff7895d37a2d4e60033f020": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and does not inspect its first, so cast(None, ...) binds the same list as the original cast(list[tuple[str, Any]], ...); the mutant changes no runtime output and survives only because the cast exists for the type gate."
+  }
+}

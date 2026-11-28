@@ -1,10 +1,12 @@
 import json
 import uuid
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm_ledger import ledger_duplicates, ledger_phase_cli, ledger_phases, ledger_task_duplicates
+from scripts.swarm_ledger.op_context import OpContext
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, send
 from tests.swarm_ledger.test_task_duplicate_check import Judge, authority_live, judged
 from tests.swarm_ledger.test_task_duplicate_check import live as _task_live
@@ -249,7 +251,7 @@ def test_an_append_drops_a_phase_repeating_one_that_landed_during_its_check():
     doc = {"phases": [{"id": "p1", "title": "Seen"}, {"id": "p4", "title": f"  {AGAIN.upper()} "}]}
     ctx = SimpleNamespace(refused=[])
     plan = append(entry("p9"), entry("p10", OTHER))
-    assert gate.apply(doc, plan, ctx, "apply") is True
+    assert gate.apply(doc, plan, cast(OpContext, ctx), "apply") is True
     assert gate.inner.applied == [({**plan, "phases": [entry("p10", OTHER)]}, "apply")]
     assert ctx.refused == [
         f'phase p9 repeats phase p4 "  {AGAIN.upper()} ", added while its duplicate check ran. {HINT}'
@@ -265,7 +267,7 @@ def test_an_append_whose_every_phase_was_refused_is_refused_with_each_reason():
     screen = ledger_task_duplicates.Screen(refused={"append-plan/p9": "first", "append-plan/p10": "second"})
     gate = ledger_task_duplicates.Gate(screen, Inner(accepted=False))
     plan = append(entry("p9"), entry("p10", OTHER))
-    assert gate.apply({}, plan, None, "apply") is False
+    assert gate.apply({}, plan, cast(OpContext, None), "apply") is False
     (applied, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
     assert applied == plan and refuse({}, {}, ctx) is False
     assert ctx.refused == ["first", "second"]
@@ -275,7 +277,7 @@ def test_an_append_with_no_repeat_passes_through_unchanged():
     gate = ledger_task_duplicates.Gate(ledger_task_duplicates.Screen(seen=frozenset({"phases/p9"})), Inner())
     ctx = SimpleNamespace(refused=[])
     plan = append(entry("p9"))
-    assert gate.apply({"phases": []}, plan, ctx, "apply") is True
+    assert gate.apply({"phases": []}, plan, cast(OpContext, ctx), "apply") is True
     assert gate.inner.applied == [(plan, "apply")] and ctx.refused == []
     assert gate.screen.warnings == {}
 
@@ -284,7 +286,7 @@ def test_an_append_the_locked_apply_refuses_is_not_flagged():
     screen = ledger_task_duplicates.Screen(seen=frozenset({"phases/p10"}))
     gate = ledger_task_duplicates.Gate(screen, Inner(accepted=False))
     doc = {"phases": [{"id": "p4", "title": "Landed meanwhile"}]}
-    assert gate.apply(doc, append(entry("p10", OTHER)), SimpleNamespace(refused=[]), "apply") is False
+    assert gate.apply(doc, append(entry("p10", OTHER)), cast(OpContext, SimpleNamespace(refused=[])), "apply") is False
     assert screen.warnings == {}
 
 
@@ -292,7 +294,7 @@ def test_a_phase_with_a_reason_is_not_flagged_for_phases_that_landed_during_the_
     screen = ledger_task_duplicates.Screen(seen=frozenset({"phases/p9"}))
     gate = ledger_task_duplicates.Gate(screen, Inner())
     doc = {"phases": [{"id": "p4", "title": AGAIN}]}
-    assert gate.apply(doc, phase("p9", not_duplicate="the docs site"), None, "apply") is True
+    assert gate.apply(doc, phase("p9", not_duplicate="the docs site"), cast(OpContext, None), "apply") is True
     assert screen.warnings == {}
 
 

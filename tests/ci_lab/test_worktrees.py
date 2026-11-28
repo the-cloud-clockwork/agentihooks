@@ -131,6 +131,25 @@ def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
         mirror.fetch("1" * 40)
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_remote_fetch(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    mirror = _mirror(tmp_path, origin, base)
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_fetch_passes_its_timeout_to_the_lab_remote_fallback_too(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "origin.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    with pytest.raises(subprocess.TimeoutExpired):
+        mirror.fetch(head, timeout=1e-9)
+
+
 def _graded(tmp_path: Path, origin: Path, lab: Path) -> str:
     _git(tmp_path, "init", "-q", "--bare", str(lab))
     side = tmp_path / "side"
@@ -209,6 +228,29 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
+
+
+def test_fetch_passes_the_same_timeout_to_the_lab_remote_fallback_fetch(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _commit(origin, "a", "a")
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
+    assert mirror.fetch(base) is False
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs))
+        if mirror.remote in argv:
+            raise subprocess.CalledProcessError(128, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worktrees.subprocess, "run", run)
+    mirror.fetch("1" * 40, timeout=7.5)
+    assert mirror.lab is not None
+    [primary] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.remote in argv]
+    [fallback] = [kwargs for argv, kwargs in calls if "fetch" in argv and mirror.lab.url in argv]
+    assert primary["timeout"] == 7.5
+    assert fallback["timeout"] == 7.5
 
 
 @pytest.mark.feature("lab-remote-basic-scheme")

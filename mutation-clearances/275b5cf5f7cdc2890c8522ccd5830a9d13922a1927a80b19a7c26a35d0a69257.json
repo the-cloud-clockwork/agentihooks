@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__configuration:715559f19d90ac43051324f7b9bcd2deb52119b608338dbd0d0fae62e7d7e81d": {
+    "reader": "standards_reader",
+    "reason": "Missing mapping entries become None instead of an empty string. Both are false in the any/all guards; incomplete settings refuse before any value is consumed, and fully populated settings are unchanged."
+  }
+}
