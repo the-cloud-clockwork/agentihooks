@@ -227,6 +227,7 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
             "plan_add needs plan, an id of letters, digits, _ and -",
         ),
         ({"op": "plan_add", "plan": "a", "title": " "}, "plan_add needs a title"),
+        ({"op": "plan_add", "plan": "a", "title": "A", "task": ""}, "plan_add task must be a task id"),
         ({"op": "plan_add", "plan": "a", "title": "A", "url": "ftp://x"}, "url must be an http or https link"),
         ({"op": "plan_add", "plan": "a", "title": "A", "artifact": 1}, "artifact must be an http or https link"),
         ({"op": "slice_add", "phase": "phases/p1", "anchor": "bad anchor"}, "slice_add needs phase and an anchor"),

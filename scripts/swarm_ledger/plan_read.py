@@ -115,7 +115,7 @@ def sharers(doc: dict[str, Any], task: dict[str, Any]) -> list[str]:
 
 def _own(doc: dict[str, Any], task: dict[str, Any]) -> str:
     """Return the artifact of the plan published for task, the plan its lines count in, or an empty string."""
-    return _ledger("ledger_plans").own_artifact(doc, task["id"], str(task.get("plan_url") or ""))
+    return _ledger("ledger_plans").own_artifact(doc, task["id"], task.get("plan_url"))
 
 
 def _region(task: dict[str, Any]) -> tuple[Any, Any]:
