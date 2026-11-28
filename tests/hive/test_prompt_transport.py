@@ -853,3 +853,49 @@ def test_a_local_recovery_without_a_recorded_folder_names_its_own(setup, homes):
     with at(homes.controller), patch.object(commands, "hive_id", return_value="host"):
         recovered = resume._recovery_text("fixture", setup.agent, {"id": "task"})
     assert f"task folder {homes.controller / '.agentihooks' / 'swarm' / 'fixture' / 'tasks' / 'task'} (" in recovered
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+@pytest.mark.parametrize(
+    "target",
+    [pytest.param({}, id="hub-admitted"), pytest.param({"pid": 4242, "pid_start": 9001}, id="hive-started-codex")],
+)
+def test_resume_texts_name_the_portable_folder_for_an_agent_whose_hive_is_on_its_record(
+    setup: SimpleNamespace, homes: SimpleNamespace, target: dict[str, int]
+) -> None:
+    from dataclasses import replace
+
+    agent = replace(setup.agent, runtime_target=target)
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        restored = resume.restored_text("fixture", agent, "ledger show")
+        recovered = resume._recovery_text("fixture", agent, TASK)
+    assert "~/.agentihooks/swarm/fixture/tasks/task" in restored
+    assert "~/.agentihooks/swarm/fixture/tasks/task" in recovered
+    assert "/controller" not in restored + recovered
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_named_folder_stays_local_when_the_host_target_or_the_hive_is_this_one(
+    setup: SimpleNamespace, homes: SimpleNamespace
+) -> None:
+    from dataclasses import replace
+
+    recorded = TASK["workspace"]
+    local = str(homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task")
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="host"):
+        assert ledger_workspace.named("fixture", setup.agent, recorded) == recorded
+        assert ledger_workspace.named("fixture", replace(setup.agent, runtime_target={}), recorded) == recorded
+        assert ledger_workspace.named("fixture", replace(setup.agent, hive="elsewhere"), recorded) == recorded
+        assert ledger_workspace.named("fixture", replace(setup.agent, runtime_target={}, hive=""), "") == local
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_named_folder_follows_a_host_target_elsewhere_over_the_hive_on_the_record(
+    setup: SimpleNamespace, homes: SimpleNamespace
+) -> None:
+    from dataclasses import replace
+
+    agent = replace(setup.agent, hive="controller")
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        named = ledger_workspace.named("fixture", agent, TASK["workspace"])
+    assert named == "~/.agentihooks/swarm/fixture/tasks/task"

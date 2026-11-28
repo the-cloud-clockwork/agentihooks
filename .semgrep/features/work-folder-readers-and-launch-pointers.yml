@@ -8,8 +8,14 @@ rules:
       steering. ledger_workspace._synced must name a task's hive with reports.workspace_host, the host target else the
       hive on the record; ledger_workspace.launched_on must write the WORK_FOLDER key with no expiry; HiveLaunch.complete,
       supervisor.admit and codex.admit_legacy must record the launching hive through ledger_workspace.launched_on.
+      ledger_workspace.named must choose the resume texts' hive with reports.workspace_host, never reports.host (#14151).
     patterns:
       - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  def named(...):
+                    ...
+              - pattern: ports.hive().reports.host(...)
           - patterns:
               - pattern: |
                   def _synced(...):
