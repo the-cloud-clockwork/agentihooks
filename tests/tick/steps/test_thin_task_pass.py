@@ -24,6 +24,7 @@ from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.adapters.ledger import ClientLedger
 from scripts.tick.deadline import Deadline
 from scripts.tick.steps import CallStep, actions_of, hook_domains, thin
+from tests.swarm.generated_release import generated_release
 
 pytestmark = pytest.mark.unit
 
@@ -253,6 +254,32 @@ def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(ta
     master item."""
     found = _run([task])
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+def test_the_generated_release_task_gets_no_write_on_repeated_passes() -> None:
+    """The release task the phase builder generates gets no enhancement task, no mark and no master notice, on the
+    first pass and on every pass after it."""
+    release = generated_release()
+    for _ in range(2):
+        found = _run([release])
+        assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+def test_an_ordinary_thin_ops_task_beside_the_release_task_gets_exactly_one_enhancement() -> None:
+    """An ordinary thin ops task in the same pass as the generated release task gets one enhancement task and one mark
+    and is the only task the master hears about; the next pass over the rows that write produced changes nothing."""
+    release, ops = generated_release(), {**THIN, "kind": "ops"}
+    first = _run([release, ops])
+    assert [(added["task"], added["enhances"]) for added in _added(first)] == [("enhance-t1", "t1")]
+    assert [operation for operation in _operations(first) if operation["op"] == "task_enhancement"] == [MARK]
+    assert first.lines == ["queued enhance-t1 for thin task t1"]
+    assert first.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t1"), True)]
+    after = _applied([release, ops], _operations(first))
+    assert after[0] == release
+    second = _run(after)
+    assert (second.lines, second.calls(), second.inbox.sent) == ([], [], [])
 
 
 @pytest.mark.feature("thin-skip-open-pr")
