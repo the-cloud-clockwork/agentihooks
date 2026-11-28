@@ -194,11 +194,20 @@ def _pr_field(url, field, run):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def pr_merged(url: str, run=subprocess.run) -> bool:
+def pr_merged(url: str, run: Callable[..., Any] = subprocess.run) -> bool:
+    from scripts.swarm import gitlab_pull, pull_head
+
+    if pull_head.gitlab_link(url):
+        pull = gitlab_pull.pull(url)
+        return pull is not None and pull.state == "MERGED"
     return _pr_field(url, "merged", run) == "true"
 
 
-def pr_head(url: str, run=subprocess.run) -> str | None:
+def pr_head(url: str, run: Callable[..., Any] = subprocess.run) -> str | None:
+    from scripts.swarm import gitlab_pull, pull_head
+
+    if pull_head.gitlab_link(url):
+        return gitlab_pull.head(url)
     return _pr_field(url, "head.sha", run)
 
 

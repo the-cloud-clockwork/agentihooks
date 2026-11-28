@@ -296,3 +296,4 @@ def test_an_answer_without_draft_merge_time_or_description_reads_ready_unmerged_
     merge = {**answer(), "description": None}
     read = asdict(gitlab.merge_request_state(LINK, "fake-token", Sent(merge)))
     assert (read["draft"], read["description"], read["merged_at"]) == (False, "", None)
+    assert asdict(gitlab.MergeRequestState(LINK, "open", HEAD, False, HEAD, {}))["description"] == ""
