@@ -614,7 +614,7 @@ def test_the_master_release_frees_a_held_task_whose_spec_states_its_proof_throug
             released.append(ops)
             return super().mutate(operations, deadline=deadline)
 
-    result = enhance_sweep.release(state(SLUG)["tasks"], Checked(), MASTER, pause=lambda _: None)
+    result = getattr(enhance_sweep, "release")(state(SLUG)["tasks"], Checked(), MASTER, pause=lambda _: None)
     assert (result.lines, result.released, result.failed) == (
         ("released thin task t1: its spec states its proof",),
         1,
