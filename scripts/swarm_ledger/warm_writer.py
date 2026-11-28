@@ -41,8 +41,12 @@ class Answering(socketserver.StreamRequestHandler):
         if not sent:
             return
         asked = json.loads(sent)
-        method = "GET" if asked["payload"] is None else "POST"
-        with request_metrics.answering(method, f"/api/v1/ledgers/{asked['slug']}/{asked['path']}"):
+        timed = (
+            contextlib.nullcontext()
+            if asked["payload"] is None
+            else request_metrics.answering("POST", f"/api/v1/ledgers/{asked['slug']}/{asked['path']}")
+        )
+        with timed:
             try:
                 self.answer(asked)
             finally:

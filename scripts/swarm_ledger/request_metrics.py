@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request
 
@@ -209,7 +209,7 @@ def record(
             EVICTED_THROUGH = max(EVICTED_THROUGH, expired[0])
 
 
-def journal_rows(path: Path) -> Iterator[list]:
+def journal_rows(path: Path) -> Iterator[list[Any]]:
     try:
         lines = path.read_text().splitlines()
     except FileNotFoundError:
@@ -317,8 +317,7 @@ def spool(row: Row) -> None:
 def compacted(path: Path) -> list[list[Any]]:
     """The newest rows spooled at ``path`` inside the retention window, at most the sample capacity of them."""
     floor = time.time() - RETENTION_SECONDS
-    rows = list(cast(Iterator[list[Any]], journal_rows(path)))
-    return [row for row in rows if row[1] >= floor][-MAX_SAMPLES:]
+    return [row for row in journal_rows(path) if row[1] >= floor][-MAX_SAMPLES:]
 
 
 def drained(path: Path) -> list[Row]:
@@ -326,9 +325,9 @@ def drained(path: Path) -> list[Row]:
     if not (path.is_file() and path.stat().st_size):
         return []
     with exclusive(path):
-        rows = list(cast(Iterator[list[Any]], journal_rows(path)))
+        rows = list(journal_rows(path))
         path.write_text("")
-    return cast(list[Row], replay(iter(rows), STARTED_AT)[0])
+    return [tuple(row[1:]) for row in rows if row[0] == "s"]
 
 
 def absorb() -> None:

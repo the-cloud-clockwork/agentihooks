@@ -9839,6 +9839,7 @@
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_socket_read_and_an_empty_probe_keep_no_sample",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_fallback_write_inside_a_server_request_keeps_only_the_server_sample",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_socket_write_caller_has_its_reply_while_the_writer_still_keeps_the_sample",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_writer_whose_half_close_fails_still_answers_keeps_the_sample_and_logs_no_error",
         "tests/swarm_ledger/test_writer_request_samples.py::test_an_idle_owner_pass_leaves_its_journal_bytes_unchanged",
         "tests/swarm_ledger/test_writer_request_samples.py::test_an_owner_returns_each_sample_child_writers_spool_during_its_rewrites_once_through_its_metrics_reader",
         "tests/swarm_ledger/test_writer_request_samples.py::test_an_owner_returns_each_sample_a_writer_in_another_process_spools_once_through_its_metrics_reader",

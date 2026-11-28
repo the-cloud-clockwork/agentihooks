@@ -257,6 +257,18 @@ def test_a_socket_write_caller_has_its_reply_while_the_writer_still_keeps_the_sa
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
+def test_a_writer_whose_half_close_fails_still_answers_keeps_the_sample_and_logs_no_error(
+    twins: Twins, writer: Path, owner: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(warm_writer, "socket", SimpleNamespace(SHUT_WR=-1))
+    with database_ledger.acting(""):
+        status, _ = over_socket(writer, twins.here, "operations", applied(twins.here, 1))
+    assert status == 200
+    assert [(method, route) for method, route, _, _ in written(1)] == [("POST", WRITTEN)]
+    assert "Exception occurred" not in capsys.readouterr().err
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
 def test_an_idle_owner_pass_leaves_its_journal_bytes_unchanged(owner: Path, capsys: pytest.CaptureFixture[str]) -> None:
     request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
     request_metrics.persist()
