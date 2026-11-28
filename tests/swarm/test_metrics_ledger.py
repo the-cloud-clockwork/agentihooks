@@ -314,3 +314,54 @@ def test_the_spool_keeps_only_the_newest_snapshot_cycle_once_earlier_ones_shippe
             box.flush(at)
     finally:
         box.close()
+
+
+class OneInsertSink:
+    def __init__(self) -> None:
+        self.inserts = 0
+
+    def send(self, sink: metrics_outbox.Settings | None, query: str, body: bytes) -> bool:
+        if not query.startswith("INSERT"):
+            return True
+        self.inserts -= 1
+        return self.inserts >= 0
+
+
+def unshipped_snapshot_rows(box: metrics_outbox.Outbox) -> int:
+    return box.db.execute("SELECT count(*) FROM spool WHERE tbl = 'ledger_snapshots' AND shipped = 0").fetchone()[0]
+
+
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
+def test_unshipped_snapshot_rows_stay_within_one_snapshot_when_the_sink_takes_less_than_a_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(metrics_outbox, "BATCH", 2)
+    ledger, sink = Ledger(), OneInsertSink()
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        for cycle in (0, 1):
+            at = record_cycle(box, cycle, ledger)
+            snapshot = len([row for row in read(box, "ledger_snapshots") if row["ts_ms"] == at])
+            sink.inserts = 1
+            assert box.flush(at) < snapshot
+            assert unshipped_snapshot_rows(box) <= snapshot
+    finally:
+        box.close()
+
+
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
+def test_a_newer_snapshot_of_one_ledger_keeps_another_ledgers_unshipped_snapshot(tmp_path: Path) -> None:
+    from scripts.swarm import metrics_ledger
+    from scripts.swarm.ledger_client import LedgerClient
+
+    sink = Sink()
+    sink.up = False
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        metrics_ledger.record(box, "example-doctor", NOW, cast("LedgerClient", Ledger()))
+        later = record_cycle(box, 1, Ledger())
+        box.flush(later)
+        kept = {(row["ledger"], row["ts_ms"]) for row in read(box, "ledger_snapshots")}
+        assert kept == {("example-doctor", NOW), ("example", later)}
+    finally:
+        box.close()
