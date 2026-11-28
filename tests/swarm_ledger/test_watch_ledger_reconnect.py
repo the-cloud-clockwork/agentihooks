@@ -172,6 +172,7 @@ def test_repeated_database_drops_wait_longer_up_to_a_cap_and_start_over_after_a_
             "Missing or wrong ledger credential",
         ),
         (401, b"<html>sign in</html>", "Unauthorized", "Unauthorized"),
+        (401, b'{"error": "denied"}', "Unauthorized", "Unauthorized"),
     ],
 )
 def test_a_refusal_that_repeats_on_a_fresh_credential_stops_the_watch_with_its_reason(
@@ -236,6 +237,30 @@ def test_a_refusal_cleared_by_a_fresh_credential_keeps_the_watch_streaming(
     assert len(reads) == 3
     assert cursors == [None, None, "c-5", "c-5", "c-6"]
     assert sleeps == [0.5] * 4
+
+
+@pytest.mark.feature("ledger-watch-database-reconnect")
+@pytest.mark.parametrize(
+    ("code", "body", "message"),
+    [
+        (404, b"<html>404 page not found</html>", "Not Found"),
+        (404, b'{"detail": "no route"}', "Not Found"),
+        (404, b'{"error": {"code": "resource_missing", "message": "No such resource"}}', "Not Found"),
+        (403, b"[]", "Forbidden"),
+    ],
+)
+def test_a_403_or_404_without_the_ledger_refusal_code_keeps_retrying_at_the_interval(
+    code: int, body: bytes, message: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sleeps = watched(monkeypatch, "--interval", "0.5")
+    cursors: list[str | None] = []
+    outcomes = [refusal(code, body, message), refusal(code, body, message), refusal(code, body, message), SystemExit()]
+    monkeypatch.setattr(watch_ledger, "stream", scripted(outcomes, cursors))
+    with pytest.raises(SystemExit) as stopped:
+        watch_ledger.main()
+    assert stopped.value.code is None
+    assert capsys.readouterr().out.splitlines() == [f"WARNING ledger stream: HTTP Error {code}: {message}"]
+    assert sleeps == [0.5] * 3
 
 
 @pytest.mark.feature("ledger-watch-database-reconnect")

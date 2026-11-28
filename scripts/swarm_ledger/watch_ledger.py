@@ -5,7 +5,7 @@ Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
 Follows the ledger server's event stream, reading the ledger in process when it opens or names a newer revision, and prints each event logged after
 rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
-too). A dropped stream reconnects after --interval seconds (a dropped database: doubling to 30 s) and replays from its cursor. On a remote host, such
+too). A dropped stream reconnects after --interval seconds and replays from its cursor. On a remote host, such
 as a hive worker, it reads the ledger in process every --interval seconds instead:
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
@@ -16,8 +16,8 @@ as a hive worker, it reads the ledger in process every --interval seconds instea
   OPERATOR rev=17 checked phases/p2
   OPERATOR rev=18 message added on chat [m-3c4d]: "text" | REPLY RULES: <chat_instructions>
 
-plus `SEED_ERROR <message>` when the HTML seed stops parsing, `WARNING <message>` when a word limit is broken or a read fails,
-and `STOPPED ledger watch: <reason>` before exit 1 on a repeated 401, 403 or 404. Restart with --since-rev <last rev printed> to replay.
+plus `SEED_ERROR <message>` when the HTML seed stops parsing, `WARNING <message>` when a word limit is broken or a
+read fails, and `STOPPED ledger watch: <reason>` before exit 1. Restart with --since-rev <last rev printed> to replay.
 """
 
 import argparse
@@ -49,7 +49,7 @@ STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
 IN_PROCESS = "in-process"
 EXPORTS: dict[Any, Any] = {}
 BACKOFF_CAP_S = 30.0
-REFUSALS = (401, 403, 404)
+REFUSALS = {401: None, 403: "forbidden", 404: "ledger_missing"}
 
 
 def credentials(slug: str) -> dict[str, str]:
@@ -189,8 +189,8 @@ def alive(beat):
 
 
 def backoff(delay: float, interval: float) -> float:
-    """The wait after one more failed read of the ledger database: twice the last, at most BACKOFF_CAP_S or
-    --interval when that is longer."""
+    """The wait after one more failed read of the ledger database: twice the last, at most BACKOFF_CAP_S, or
+    --interval itself when that is longer than the cap."""
     return min(delay * 2, max(BACKOFF_CAP_S, interval))
 
 
@@ -201,24 +201,29 @@ def warned(exc: Exception, failure: str | None) -> str:
     return str(exc)
 
 
-def reason(exc: urllib.error.HTTPError) -> str:
-    """The refusal's status and the ledger's error message, or the HTTP reason when the body carries none."""
+def refusal(exc: Exception) -> str | None:
+    """Why exc is a refusal that no reconnect clears, or None: an HTTP 401, or a 403 or 404 whose ledger error code
+    names a refused credential or a missing ledger, never a proxy page or another resource's error."""
+    if not isinstance(exc, urllib.error.HTTPError) or exc.code not in REFUSALS:
+        return None
     try:
-        message = json.loads(exc.read())["error"]["message"]
-    except (ValueError, KeyError, TypeError):
-        message = exc.reason
-    return f"HTTP {exc.code} {message}"
+        error = json.loads(exc.read())["error"]
+        code, message = error.get("code"), error.get("message")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        code, message = None, None
+    if REFUSALS[exc.code] not in (None, code):
+        return None
+    return f"HTTP {exc.code} {message or exc.reason}"
 
 
 def refused(exc: Exception, again: bool) -> bool:
-    """Whether exc is an HTTP 401, 403 or 404 refusal; one that follows a refusal, on a credential read again,
-    prints STOPPED and exits 1, since another reconnect cannot clear it."""
-    if not isinstance(exc, urllib.error.HTTPError) or exc.code not in REFUSALS:
-        return False
-    if again:
-        say(f"STOPPED ledger watch: {reason(exc)}")
+    """Whether exc is a refusal; one that follows a refusal, on a credential read again, prints STOPPED and exits 1,
+    since another reconnect cannot clear it."""
+    cause = refusal(exc)
+    if cause and again:
+        say(f"STOPPED ledger watch: {cause}")
         sys.exit(1)
-    return True
+    return cause is not None
 
 
 def found(repository: Any, slug: str, interval: float) -> bool:
