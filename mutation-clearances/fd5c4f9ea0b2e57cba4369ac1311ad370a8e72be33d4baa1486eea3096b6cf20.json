@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__prepare:72cb229cbc75d1d7b8c5543e065a97f3c05ab64a5ee1c9e015b0b1ad64d4bfd9": {
+    "reader": "standards_reader",
+    "reason": "XX padding preserves the persistent-excess-root refusal reason and PolicyError. It does not change the reset, remeasurement or refusal decision."
+  }
+}

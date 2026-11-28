@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__configuration:f0e78bd2535b609cd8a98d370573d951e7fff66912e5d9cbf36538419f46c46c": {
+    "reader": "standards_reader",
+    "reason": "The preceding lstat establishes an existing entry. For an accepted canonical non-symlink directory strict=False resolves to the same root; dangling/noncanonical symlinks still fail the canonical equality/directory checks before mutation. Only non-contractual refusal detail can differ."
+  }
+}
