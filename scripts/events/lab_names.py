@@ -6,7 +6,7 @@ both stay top level string literal assignments.
 
 LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
 LAB_SUBJECT = "ci.lab.head.>"
-LAB_CONSUMER = "ci-lab-scheduler-renamed"
+LAB_CONSUMER = "ci-lab-scheduler"
 RELAY_CONSUMER = "ci-lab-relay"
 RELAY_SUBJECT = "ci.lab.head.notice"
 LAB_DURABLES = ((LAB_CONSUMER, LAB_SUBJECT), (RELAY_CONSUMER, RELAY_SUBJECT))
