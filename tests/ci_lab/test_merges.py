@@ -726,10 +726,11 @@ class _StillRunning:
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
-def test_fresh_treats_a_still_running_resolution_as_fresh_without_reading_its_result() -> None:
+@pytest.mark.parametrize("read", [True, False], ids=["read", "unread"])
+def test_fresh_treats_a_still_running_resolution_as_fresh_without_reading_its_result(read: bool) -> None:
     background = merges.Background(lambda *_: None, clock=lambda: 0.0)
     future = cast("Future[tuple[str, str] | None]", _StillRunning())
-    assert background._fresh(0.0, ([], future), 30.0) is True
+    assert background._fresh(0.0, ([], future), read=read) is True
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -737,11 +738,13 @@ def test_fresh_treats_a_still_running_resolution_as_fresh_without_reading_its_re
 def test_fresh_measures_the_window_from_when_the_resolution_began_not_added_to_the_clock(
     answer: tuple[str, str] | Exception | None,
 ) -> None:
-    background = merges.Background(lambda *_: None, clock=lambda: 0.0)
+    background = merges.Background(lambda *_: None, clock=lambda: 0.0, fresh_s=30.0, kept_s=120.0)
     future: Future[tuple[str, str] | None] = Future()
     if isinstance(answer, Exception):
         future.set_exception(answer)
     else:
         future.set_result(answer)
-    assert background._fresh(129.0, ([100.0], future), 30.0) is True
-    assert background._fresh(130.0, ([100.0], future), 30.0) is False
+    assert background._fresh(129.0, ([100.0], future), read=True) is True
+    assert background._fresh(130.0, ([100.0], future), read=True) is False
+    assert background._fresh(219.0, ([100.0], future), read=False) is True
+    assert background._fresh(220.0, ([100.0], future), read=False) is False

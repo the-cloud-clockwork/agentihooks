@@ -9,10 +9,11 @@ subclass; either is one try the caller may spend again. `Background` runs those 
 pass on a thread pool, raising its subclass `MergePending` while one still runs under `bound_s` and
 `MergeUnanswered` once it has run past it; any other error a resolution thread raised, not already a
 `MergeRefused`, it raises wrapped as `MergeUnanswered` instead, so no error of a resolution ever reaches a
-caller as anything but the `MergeRefused` family. A found merge answers every call until `fresh_s` after it
-started; an absent answer and a failed resolution are each read once and gone, so the next call starts a new
-one. `Resolver` keeps one GitHub reader per repository the lab grades, reading the repository's mirror through
-the port the scheduler gives it.
+caller as anything but the `MergeRefused` family. A finished resolution waits for its own head whatever other
+heads are asked meanwhile, `kept_s` after it started at most. A found merge then answers every call of its head
+until `fresh_s` after it started; an absent answer and a failed resolution are each read once and gone, so the
+next call starts a new one. `Resolver` keeps one GitHub reader per repository the lab grades, reading the
+repository's mirror through the port the scheduler gives it.
 """
 
 import subprocess
@@ -32,6 +33,7 @@ __all__ = [
     "BOUND_S",
     "FRESH_S",
     "GIT_TIMEOUT",
+    "KEPT_S",
     "PERMISSIONS",
     "WORKERS",
     "Actions",
@@ -52,6 +54,7 @@ OK = 200
 SERVER_ERROR = 500
 WORKERS = 4
 FRESH_S = 30.0
+KEPT_S = 3600.0
 GIT_TIMEOUT = 30.0
 BOUND_S = 45.0
 
@@ -171,8 +174,10 @@ class Background:
     failed resolution then raises its error once, wrapped as MergeUnanswered when it is not already one of
     MergeRefused's own. A resolution still running `bound_s` after a thread began it raises MergeUnanswered
     instead, counting as one try, and keeps running orphaned; a later call starts it again. One still waiting
-    for a thread has read nothing, so it stays pending and spends no try however long it waits. A resolution
-    that found a merge answers every call until `fresh_s` after a thread began it, so no merge stays in memory
+    for a thread has read nothing, so it stays pending and spends no try however long it waits. A finished
+    resolution waits for the head it was started for: calls for other heads leave it alone until that head
+    reads it, and one no head reads is forgotten `kept_s` after a thread began it. A resolution that found a
+    merge then answers every call of its head until `fresh_s` after a thread began it, so no merge is reused
     longer; an absent answer is read once and then gone, so the next call starts a new resolution and so reads
     GitHub again."""
 
@@ -183,13 +188,16 @@ class Background:
         fresh_s: float = FRESH_S,
         clock: Callable[[], float] = time.monotonic,
         bound_s: float = BOUND_S,
+        kept_s: float = KEPT_S,
     ) -> None:
         self.resolve = resolve
         self.fresh_s = fresh_s
         self.clock = clock
         self.bound_s = bound_s
+        self.kept_s = kept_s
         self.pool = ThreadPoolExecutor(workers)
         self.resolutions: dict[tuple[str, int, str], tuple[list[float], Future[tuple[str, str] | None]]] = {}
+        self.read: set[tuple[str, int, str]] = set()
 
     def __call__(self, repo: str, number: int, head: str) -> tuple[str, str] | None:
         """Return the finished resolution of a pull request's head, or raise MergePending while it waits for a
@@ -197,8 +205,11 @@ class Background:
         now = self.clock()
         key = (repo, number, head)
         self.resolutions = {
-            each: entry for each, entry in self.resolutions.items() if each == key or self._fresh(now, entry)
+            each: entry
+            for each, entry in self.resolutions.items()
+            if each == key or self._fresh(now, entry, read=each in self.read)
         }
+        self.read.intersection_update(self.resolutions)
         if key not in self.resolutions:
             began: list[float] = []
             self.resolutions[key] = (began, self.pool.submit(self._run, began, repo, number, head))
@@ -218,6 +229,8 @@ class Background:
             raise MergeUnanswered(f"the merge of {repo}#{number} for {head} failed: {error}") from error
         if future.result() is None or now - began[0] >= self.fresh_s:
             del self.resolutions[key]
+        else:
+            self.read.add(key)
         return future.result()
 
     def _run(self, began: list[float], repo: str, number: int, head: str) -> tuple[str, str] | None:
@@ -226,10 +239,9 @@ class Background:
         began.append(self.clock())
         return self.resolve(repo, number, head)
 
-    def _fresh(self, now: float, entry: tuple[list[float], Future[tuple[str, str] | None]]) -> bool:
-        """Return whether a resolution not just read keeps answering: not yet finished, or finished with a found
-        merge inside its fresh window."""
+    def _fresh(self, now: float, entry: tuple[list[float], Future[tuple[str, str] | None]], *, read: bool) -> bool:
+        """Return whether a resolution the call was not made for stays, whatever it answered: not yet finished,
+        or finished inside the fresh window when its head has read its merge, inside the kept window when no
+        head has read it."""
         began, future = entry
-        if not future.done():
-            return True
-        return future.exception() is None and future.result() is not None and now - began[0] < self.fresh_s
+        return not future.done() or now - began[0] < (self.fresh_s if read else self.kept_s)
