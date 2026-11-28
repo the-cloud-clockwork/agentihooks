@@ -436,7 +436,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     registry = metrics.Registry()
-    node = worker.environment(environ).get(contract.NODE_NAME, "")
+    node = worker.environment(environ).get(contract.NODE_NAME)
     observe = (partial(_observe_node_mirror, registry, pod.trees.worktrees.mirror.node, node),) if node else ()
     with metrics.serve_registry("", contract.METRICS_PORT, registry, *observe) as exposition:
         threading.Thread(target=exposition.serve_forever).start()
