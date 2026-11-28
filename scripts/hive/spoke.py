@@ -18,12 +18,28 @@ from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 ASKED = "asked"
 
 
+class SpawnUnavailable(RuntimeError):
+    """A spawn the runtime refused for want of room or a seat; ``reason`` is the runtime's refusal."""
+
+    def __init__(self, message: str, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def refusal(error: Exception) -> str:
+    """The runtime refusal a failed spawn carries, empty for any other failure."""
+    return error.reason if isinstance(error, SpawnUnavailable) else ""
+
+
 class Tasks(Protocol):
     def request(self, event: Envelope) -> SpawnRequest | None:
         """The task carries admitted execution_id, execution_generation and claim_generation."""
         ...
 
-    def reopen(self, event: Envelope) -> None: ...
+    def reopen(self, event: Envelope, refused: str = "") -> None:
+        """Asks the hub to reopen a task whose launch failed; ``refused`` is the runtime's refusal, which holds the
+        task off this hive until its capacity changes."""
+        ...
 
     def dead_lettered(self, event: Envelope) -> None:
         """Asks the hub to reopen a dead lettered offer, which advances its task's claim generation when no
@@ -232,8 +248,8 @@ class Spoke:
         except (admission.Unanswered, admission.Held) as unsettled:
             delivery.nak(self.config.policy.ack_wait_ms)
             return self._unsettled(unsettled, pending_revision)
-        except Exception:
-            self._give_back(event, key, pending_revision, delivery.attempt)
+        except Exception as error:
+            self._give_back(event, key, pending_revision, delivery.attempt, refusal(error))
             raise
         if spawned is None:
             self._clear_pending(pending_revision)
@@ -265,8 +281,8 @@ class Spoke:
             spawned = self._spawn(event, key, revision, heartbeat)
         except (admission.Unanswered, admission.Held) as unsettled:
             return self._unsettled(unsettled, pending_revision)
-        except Exception:
-            self._give_back(event, key, pending_revision, attempt)
+        except Exception as error:
+            self._give_back(event, key, pending_revision, attempt, refusal(error))
             raise
         if spawned is None:
             self._clear_pending(pending_revision)
@@ -286,13 +302,16 @@ class Spoke:
         self._failed()
         return ASKED
 
-    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int) -> None:
+    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int, refused: str) -> None:
         """Asks the hub to reopen an offer whose launch failed and left its claim ready while the offer has deliveries
-        left; the final delivery is dead lettered instead."""
+        left, carrying the runtime's refusal when there is one; the final delivery is dead lettered instead."""
         current = json.loads(self.bus.state("spoke-work").get(key).value)
         if current["state"] == "ready" and attempt < self.config.policy.max_deliver:
             self._clear_pending(pending_revision)
-            self.tasks.reopen(event)
+            if refused:
+                self.tasks.reopen(event, refused)
+            else:
+                self.tasks.reopen(event)
 
     def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:
         """Reports the stored launch decision to the hub once the started event is out; a refused or slow report is
@@ -341,9 +360,10 @@ class Spoke:
         outcome = self.runtime.spawn(request)
         if not outcome.ok:
             claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
-            if outcome.status is not Status.UNAVAILABLE:
-                harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
-                self.tasks.failed(event, harness, outcome.detail)
+            if outcome.status is Status.UNAVAILABLE:
+                raise SpawnUnavailable(f"spawn {outcome.status}: {outcome.detail}", outcome.detail)
+            harness = outcome.value.get("harness", "") if isinstance(outcome.value, dict) else ""
+            self.tasks.failed(event, harness, outcome.detail)
             raise RuntimeError(f"spawn {outcome.status}: {outcome.detail}")
         placed = outcome.value
         started = Envelope(

@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -629,7 +630,7 @@ def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(
     monkeypatch.setattr(factory, "open_bus", lambda config: configs.append(config) or bus)
     monkeypatch.setattr(store, "connect", lambda: "swarm store")
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
-    monkeypatch.setattr(herdr, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(herdr, "worker_runtime", lambda: "herdr")
     monkeypatch.setattr(lanes, "run", lambda *args: served.append(args))
     environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://bus:4222", "HIVE_EXCLUDED": "master,ci"}
 
@@ -642,6 +643,43 @@ def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(
     bus.close.assert_called_once_with()
 
 
+@pytest.mark.feature("hub-hive-one-claude-cap")
+def test_the_lane_spokes_spawn_on_the_worker_claude_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.events import factory
+    from scripts.swarm import capacity, commands, store
+
+    served: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(factory, "open_bus", lambda config: Mock())
+    monkeypatch.setattr(store, "connect", lambda: "swarm store")
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
+    monkeypatch.setattr(lanes, "run", lambda *args: served.append(args))
+
+    lanes._loop({})
+
+    [(_, _, runtime, _, _)] = served
+    assert runtime.herdr.quota_accounts is capacity.worker_accounts
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_refused_give_back_carries_its_refusal_to_the_hub(hub: SimpleNamespace) -> None:
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).reopen(offer(), "no claude account has placeable quota seats")
+
+    assert hub.hub.seen == [
+        (
+            "reopen",
+            "rig",
+            {
+                "op": "reopen",
+                "hive": "hive-a",
+                "task": "t1",
+                "lane": "eng",
+                "generation": 2,
+                "refused": "no claude account has placeable quota seats",
+            },
+        )
+    ]
+
+
 def test_the_lane_loop_reads_no_excluded_lanes_as_every_lane(monkeypatch):
     from scripts.events import factory
     from scripts.swarm import commands, store
@@ -651,7 +689,7 @@ def test_the_lane_loop_reads_no_excluded_lanes_as_every_lane(monkeypatch):
     monkeypatch.setattr(factory, "open_bus", lambda config: Mock())
     monkeypatch.setattr(store, "connect", lambda: "swarm store")
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
-    monkeypatch.setattr(herdr, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(herdr, "worker_runtime", lambda: "herdr")
     monkeypatch.setattr(lanes, "run", lambda *args: served.append(args))
 
     lanes._loop({})

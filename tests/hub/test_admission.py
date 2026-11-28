@@ -681,6 +681,105 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     assert rig.admitter.reopen(SLUG, ask()) is False
 
 
+REFUSAL = "no claude account has placeable quota seats"
+
+
+def _hive_sessions(rig: SimpleNamespace, sessions: dict[str, int], hive: str = "hive-a") -> None:
+    from scripts.hive import registry
+
+    rig.store.redis.set(f"{registry.key(hive)}:sessions", json.dumps(sessions))
+
+
+def _refused_give_back(rig: SimpleNamespace) -> None:
+    rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.reopen(SLUG, ask(refused=REFUSAL)) is True
+
+
+def again(rig: SimpleNamespace, **fields: str) -> dict[str, Any]:
+    """The next offer of t1 after a give back, at the claim generation its claim and its release advanced."""
+    return ask(generation=rig.rows["t1"]["claim_generation"], **fields)
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_give_back_without_a_refusal_is_admitted_again_on_the_same_hive(rig: SimpleNamespace) -> None:
+    rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.reopen(SLUG, ask()) is True
+
+    assert rig.admitter.admit(SLUG, again(rig))["hive"] == "hive-a"
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_refused_give_back_holds_the_task_on_that_hive_and_another_hive_takes_it(rig: SimpleNamespace) -> None:
+    _hive_sessions(rig, {"claude:a": 6})
+    _refused_give_back(rig)
+
+    answer = rig.admitter.admit(SLUG, again(rig))
+    assert list(answer) == ["held"]
+    assert answer["held"].endswith(REFUSAL)
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.admitter.admit(SLUG, again(rig, hive="hive-b"))["hive"] == "hive-b"
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_held_task_leaves_other_tasks_admitted_on_that_hive(rig: SimpleNamespace) -> None:
+    _refused_give_back(rig)
+
+    assert "held" in rig.admitter.admit(SLUG, again(rig))
+    assert rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))["hive"] == "hive-a"
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+@pytest.mark.parametrize("change", ["sessions", "caps", "ended"])
+def test_a_held_task_is_admitted_once_the_hive_capacity_changes(
+    rig: SimpleNamespace, seat_bus: Any, change: str
+) -> None:
+    _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 10}])
+    _hive_sessions(rig, {"claude:a": 6})
+    _refused_give_back(rig)
+    assert "held" in rig.admitter.admit(SLUG, again(rig))
+
+    if change == "sessions":
+        _hive_sessions(rig, {"claude:a": 5})
+    elif change == "caps":
+        _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 11}])
+    else:
+        rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
+        _end_started(rig, "t2")
+
+    assert rig.admitter.admit(SLUG, again(rig))["hive"] == "hive-a"
+
+
+def _end_started(rig: SimpleNamespace, task_id: str) -> None:
+    """Ends the admitted agent of task_id the way an agent leaves after it started working."""
+    from dataclasses import replace
+
+    agent = next(agent for agent in rig.store.agents(SLUG) if agent.task == task_id)
+    rig.store.put_agent(SLUG, replace(agent, state="working"))
+    assert rig.store.release(SLUG, task_id, agent.name)
+    assert rig.store.drop_agent(SLUG, agent.name)
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+@pytest.mark.parametrize("hive", ["hive-a", "hive-b"])
+def test_another_task_refused_and_given_back_leaves_a_held_task_held(rig: SimpleNamespace, hive: str) -> None:
+    _refused_give_back(rig)
+    other = ask(task="t2", lane="ci", hive=hive)
+
+    rig.admitter.admit(SLUG, other)
+    assert rig.admitter.reopen(SLUG, {**other, "refused": REFUSAL}) is True
+
+    assert "held" in rig.admitter.admit(SLUG, again(rig))
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+def test_a_refusal_hold_outlives_thirty_minutes_and_still_expires(rig: SimpleNamespace) -> None:
+    _refused_give_back(rig)
+
+    held = rig.store.redis.pttl(rig.store.key(SLUG, admission.REFUSAL_HOLD, "t1", "hive-a"))
+
+    assert 30 * 60 * 1000 < held <= admission.HOLD_MS
+
+
 @pytest.mark.feature("dead-offer-generation")
 def test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation(rig: SimpleNamespace) -> None:
     rig.rows["t1"]["claim_generation"] = 4

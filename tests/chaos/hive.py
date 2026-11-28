@@ -79,7 +79,7 @@ class ChaosTasks:
         }
         return SpawnRequest(config=None, lane=LANE, name=f"{LANE}-{event.key}", task=task)
 
-    def reopen(self, event: Envelope) -> None:
+    def reopen(self, event: Envelope, refused: str = "") -> None:
         self.journal.write("reopened", task=event.key)
 
     def dead_lettered(self, event: Envelope) -> None:

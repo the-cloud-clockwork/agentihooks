@@ -1508,7 +1508,15 @@ the smaller of the five hour and week percentage left, at least the band in
 [Claude account load balancing](load-balancing.md) and at most the ceiling, which wins when set below the band. An
 account at 96% of both windows left reports 11; one with under 10% of its five hour window left keeps the band's 2;
 under 5% of either window it reports 0. Worker admission under a hive or cluster spawn backend reads every Claude
-row this way, interactive slots included. Launches routed by one machine's own processes keep the band.
+row this way, interactive slots included. The hive's own worker spawn reads the same cap: `session_bands.worker_cap`
+is the one computation, and the lane spokes and the order consumer spawn through `capacity.worker_accounts`, so the
+hub never admits a seat the hive spawn refuses. Launches routed by one machine's own processes keep the band.
+
+When a hive spawn is still refused as unavailable, the spoke gives the claim back with the refusal. The hub then holds
+that task off that hive until the hive's reported caps or session counts change or an agent of the swarm that had
+started ends, for at most a day. Another task's refused give back retires an agent that never started, so it lifts no
+hold and two refused tasks never wake each other. A held offer stays queued for the other hives; other tasks, such as
+a preempted task's successor taking its own freed seat, and a give back without a refusal are admitted at once.
 
 #### Closed and draining accounts get no hive agent
 

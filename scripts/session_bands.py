@@ -57,6 +57,11 @@ def hive_ceiling(environ: Mapping[str, str]) -> int:
         return HIVE_CEILING
 
 
+def worker_cap(five_left: float | None, week_left: float | None, environ: Mapping[str, str]) -> int | None:
+    """The live sessions one Claude subscription takes for swarm workers, read alike by hub admission and hive spawn."""
+    return scaled_cap(five_left, week_left, hive_ceiling(environ))
+
+
 def upcoming(resets_at: float | None, now: float) -> float | None:
     return resets_at if resets_at is not None and resets_at > now else None
 

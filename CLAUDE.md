@@ -139,7 +139,9 @@ so the variable **name** identifies its account (never read the value out).
 live session cap, computed from each account's five-hour window left (6 at
 60%+, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5%; no new session
 below 5% of the week either), counted from `/proc` by
-`hooks/context/account_sessions.py`. `hooks/context/quota_policy.py` is pure code
+`hooks/context/account_sessions.py`. Swarm workers on hives instead take the band
+scaled toward `AGENTIHOOKS_HIVE_SESSION_CEILING` (`session_bands.worker_cap`), read
+alike by the hub admission and the hive spawn. `hooks/context/quota_policy.py` is pure code
 deciding HANDOFF / WAIT / STOP / PUSH from the session's statusline quota and the
 router cache; STOP and WAIT are alerts injected at PreToolUse and never block a tool. `init-agent --handoff` runs
 the handoff and marks the old session `handed_off`. Register the real agent PID

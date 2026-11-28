@@ -118,7 +118,7 @@ class Tasks:
                 "execution_generation": agent.generation, "claim_generation": generation}
         return SpawnRequest(store.config(slug), "eng", name, task)
 
-    def reopen(self, event):
+    def reopen(self, event, refused=""):
         return None
 
     def launched(self, event: Envelope, placed: SimpleNamespace) -> None:
