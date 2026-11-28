@@ -299,7 +299,7 @@ def test_main_gives_leases_the_scheduler_retention(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(factory, "open_bus", lambda found: bus)
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
-    monkeypatch.setattr(scheduler, "serve", lambda *args: 7)
+    monkeypatch.setattr(scheduler, "serve", lambda *args, **options: 7)
     monkeypatch.setattr(relay, "build", RelayBuilds())
 
     assert scheduler.main([], environ) == 7

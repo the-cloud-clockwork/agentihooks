@@ -2663,6 +2663,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     import redis
 
     from scripts.events import config, factory
+    from scripts.swarm import redis_grace
     from tests.ci_lab.test_scheduler_cache import capture_environment, startup_environments
 
     calls: dict[str, Any] = {"served": 0}
@@ -2726,8 +2727,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     builds = RelayBuilds()
 
-    def serve(found: scheduler.Scheduler, relaying: Any, interval: float, passes: int, clock: Any, sleep: Any) -> int:
-        calls["serve"] = (found, relaying, interval, passes, clock, sleep)
+    def serve(
+        found: scheduler.Scheduler, relaying: Any, interval: float, passes: int, clock: Any, sleep: Any, grace_s: float
+    ) -> int:
+        calls["serve"] = (found, relaying, interval, passes, clock, sleep, grace_s)
         return 7
 
     runtime = tmp_path / "runtime.yaml"
@@ -2749,6 +2752,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_BUCKET: "bucket",
         scheduler.contract.CONTROL_TOKEN: "tok",
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        "CI_LAB_REDIS_GRACE_S": "12",
     } | APP_SETTINGS
     requested, environ = startup_environments(environ, tmp_path, monkeypatch, with_policy)
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
@@ -2806,15 +2810,18 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert built_spending is spending and found.spending is spending
     assert ports == (8800, 8801, 9108)
     assert calls["thread"] is True and calls["served"] == 3
-    found, relaying, interval, passes, clock, sleep = calls["serve"]
+    found, relaying, interval, passes, clock, sleep, grace_s = calls["serve"]
     assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
+    assert grace_s == 12.0
     assert scheduler.main([], requested) == 7
     assert calls["serve"][2:4] == (scheduler.INTERVAL_S, 0)
-    del requested[scheduler.contract.CONTROL_TOKEN]
+    del requested[scheduler.contract.CONTROL_TOKEN], requested["CI_LAB_REDIS_GRACE_S"]
     environ.pop(scheduler.contract.CONTROL_TOKEN, None)
+    environ.pop("CI_LAB_REDIS_GRACE_S", None)
     assert scheduler.main([], environ) == 7
     assert calls["listen"][2].token == ""
+    assert calls["serve"][6] == redis_grace.DEFAULT_GRACE_S
     calls.clear()
     runtime.write_text(yaml.safe_dump({"classes": []}))
     with pytest.raises(delivery.DeliveryError):
@@ -2884,7 +2891,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     def listen(*_arguments: Any) -> list[Any]:
         return []
 
-    def serve(found: scheduler.Scheduler, *_arguments: Any) -> int:
+    def serve(found: scheduler.Scheduler, *_arguments: Any, **_options: Any) -> int:
         served.append(found)
         return 0
 

@@ -1,0 +1,42 @@
+rules:
+  - id: lab-pass-redis-error-without-grace
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab scheduler pass that catches a Redis error and never asks the grace window keeps serve looping through a
+      lasting Redis outage. Every pass is skipped while the HTTP threads keep the TCP readiness probe green, so the pod
+      stays Ready and idle and Kubernetes never restarts it. In the handler ask the redis_grace Outage whether the
+      outage is still tolerated, and return 1 once Redis has failed every pass for the grace window.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-pass-redis-error-without-grace.py
+    patterns:
+      - pattern-inside: |
+          while $CONDITION:
+              ...
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except RedisError as $ERROR:
+                  ...
+          - pattern: |
+              try:
+                  ...
+              except RedisError:
+                  ...
+      - pattern-not: |
+          try:
+              ...
+          except RedisError as $ERROR:
+              ...
+              <... $OUTAGE.tolerated() ...>
+              ...
+      - pattern-not: |
+          try:
+              ...
+          except RedisError:
+              ...
+              <... $OUTAGE.tolerated() ...>
+              ...
