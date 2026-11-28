@@ -1,5 +1,4 @@
-import subprocess
-import sys
+import multiprocessing
 from collections.abc import Callable, Mapping
 from io import StringIO
 from pathlib import Path
@@ -143,6 +142,16 @@ def test_unsafe_roots_refuse_without_removing_foreign_data(
         (directory / "unowned").write_text("keep")
     else:
         directory.chmod(0o777)
+    if kind != "foreign":
+        original_iterdir = Path.iterdir
+        rejected = Path(policy[cache.ROOT])
+
+        def iterdir(path: Path) -> list[Path]:
+            if path == rejected:
+                raise AssertionError("Unsafe root was enumerated")
+            return list(original_iterdir(path))
+
+        monkeypatch.setattr(Path, "iterdir", iterdir)
     with pytest.raises(cache.PolicyError):
         cache.run(lambda _found: 0, policy)
     assert retained.read_text() == "foreign data"
@@ -588,7 +597,14 @@ def test_group_or_world_writable_owned_entries_refuse_start(policy: dict[str, st
     with pytest.raises(cache.PolicyError) as raised:
         cache.run(lambda found: started.append(found) or 0, policy)
     assert started == []
-    assert "none" != str(raised.value).casefold()
+    reason = (
+        "owned private directory"
+        if entry == "root"
+        else "ownership lock"
+        if entry == "lock"
+        else "unsafe cache directory"
+    )
+    assert reason in str(raised.value).casefold()
 
 
 @pytest.mark.feature("lab-scheduler-cache-policy")
@@ -736,7 +752,14 @@ def test_owned_entries_with_foreign_uid_metadata_refuse_before_start(
     with pytest.raises(cache.PolicyError) as raised:
         cache.run(lambda found: started.append(found) or 0, policy)
     assert started == []
-    assert str(raised.value).casefold() != "none"
+    reason = (
+        "owned private directory"
+        if entry == "root"
+        else "ownership lock"
+        if entry == "lock"
+        else "unsafe cache directory"
+    )
+    assert reason in str(raised.value).casefold()
 
 
 @pytest.mark.feature("lab-scheduler-cache-policy")
@@ -970,13 +993,24 @@ def test_a_lock_without_write_access_refuses_before_consumers(policy: dict[str, 
 
 @pytest.mark.feature("lab-scheduler-cache-policy")
 def test_allocated_bytes_refuses_a_fifo_without_waiting_for_a_writer(tmp_path: Path) -> None:
+    assert cache.allocated_bytes(tmp_path) == tmp_path.stat().st_blocks * 512
     fifo = tmp_path / "fifo"
     cache.os.mkfifo(fifo)
-    program = (
-        "import sys; from pathlib import Path; from scripts.ci_lab import cache\n"
-        "try: cache.allocated_bytes(Path(sys.argv[1]))\n"
-        "except NotADirectoryError: sys.exit(0)\n"
-        "sys.exit(1)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", program, str(fifo)], capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stderr
+
+    def inspect_fifo() -> None:
+        try:
+            cache.allocated_bytes(fifo)
+        except NotADirectoryError:
+            return
+        raise SystemExit(1)
+
+    process = multiprocessing.get_context("fork").Process(target=inspect_fifo)
+    process.start()
+    try:
+        process.join(timeout=10)
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=10)
+        process.close()
