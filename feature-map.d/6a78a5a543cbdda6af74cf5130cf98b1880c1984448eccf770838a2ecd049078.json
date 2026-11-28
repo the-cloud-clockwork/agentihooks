@@ -2,10 +2,11 @@
   "id": "hub-admission-composed-admits-gate",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-gate-direct-test",
-  "behaviour": "The admits gate a hub admission composes by default, a running swarm with release wait, apply wait, fleet red and the lab CI behind hold all clear, judges every offer with no checker stubbed: while a fresh lab reading predicts a pull request wait past the CI behind threshold it refuses an eng task, which keeps no claim, and admits a ci task; a paused swarm refuses both lanes.",
-  "seam": "scripts.swarm.admission_view.admits over a real RedisStore and SwarmConfig, and scripts.hub.admission.Admission.admit built with its readiness source and the default narrow view, as the hub runner builds it",
+  "behaviour": "The admits gate a hub admission composes by default, a running swarm with release wait, apply wait, fleet red and the lab CI behind hold all clear, judges every offer with no checker stubbed: while the lab capacity reading the tick captures predicts a pull request wait past the CI behind threshold it refuses an eng task, which keeps no claim, and admits a ci task; a paused swarm admits neither lane.",
+  "seam": "scripts.swarm.admission_view.admits over a real RedisStore and SwarmConfig after scripts.swarm.lab_capacity.capture saves the reading, and scripts.hub.admission.Admission.admit built with its readiness source and the default narrow view, as the hub runner builds it",
   "tests": [
     "tests/hub/test_admission_gates.py::test_the_production_admits_gate_refuses_an_eng_task_behind_a_slow_lab_and_admits_a_ci_task",
+    "tests/hub/test_admission_gates.py::test_a_paused_swarm_admits_neither_lane_through_the_production_admission",
     "tests/swarm/test_admission_view.py::test_the_composed_admits_gate_holds_eng_behind_a_slow_lab_and_refuses_every_lane_while_paused"
   ]
 }
