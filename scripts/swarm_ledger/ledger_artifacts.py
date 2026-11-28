@@ -12,6 +12,7 @@ import ledger_core as core
 import ledger_media as media
 
 from scripts.swarm_ledger import ports
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.repository import artifact_files
 
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
@@ -208,7 +209,7 @@ def refusal(doc: dict, op: dict, members: dict) -> str:
     return "" if requested or operator_asked(doc, op.get("request")) else REFUSED
 
 
-def _add(doc: dict, op: dict, ctx: core.Context) -> bool:
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
@@ -238,7 +239,7 @@ def _add(doc: dict, op: dict, ctx: core.Context) -> bool:
     return True
 
 
-def _move(doc, op, ctx, source, dest):
+def _move(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, source: str, dest: str) -> bool:
     row = next((r for r in doc[source] if r["id"] == op["target"]), None)
     if row is None:
         return any(r["id"] == op["target"] for r in doc[dest])
@@ -253,7 +254,7 @@ def _move(doc, op, ctx, source, dest):
     return True
 
 
-def _purge(doc, op, ctx):
+def _purge(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["by"] not in ctx.meta["members"]:
         return False
     rows = doc["artifacts"] + doc[TRASH]
@@ -263,7 +264,7 @@ def _purge(doc, op, ctx):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["op"] == "artifact_add":
         return _add(doc, op, ctx)
     if op["op"] == "artifact_purge":
@@ -281,7 +282,7 @@ def in_use(doc):
     return used
 
 
-def sweep(slug, doc, ctx):
+def sweep(slug: str, doc: dict[str, Any], ctx: OpContext) -> None:
     from scripts.swarm_ledger.storage_migration.hosted import media_mutation
 
     used = in_use(doc)

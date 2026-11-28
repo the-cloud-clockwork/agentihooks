@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__configuration:f8118327a713ddbe1275eeef293135d81d7962d4e70927c48631ef817840a705": {
+    "reader": "standards_reader",
+    "reason": "Path.resolve treats strict=None as false. Existing canonical directories resolve identically after lstat; symlink/noncanonical entries remain refused by equality and type checks before mutation. Exact refusal wording is not the contract."
+  }
+}

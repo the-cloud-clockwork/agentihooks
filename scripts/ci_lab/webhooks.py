@@ -38,7 +38,8 @@ NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 class HeadEvent:
     """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor.
     A pull request head also names its lane, the pull request's head branch, a push to dev names dev, and a closed
-    pull request names the lane whose work ends."""
+    pull request names the lane whose work ends. A pull request head also keeps its pull request number, 0 for
+    every other event."""
 
     event: str
     repo: str
@@ -47,6 +48,7 @@ class HeadEvent:
     actor: str
     action: str
     lane: str = ""
+    pull_number: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,10 @@ def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
         return []
     pull, repo = payload["pull_request"], payload["repository"]["html_url"]
     head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
-    return [HeadEvent("pull_request", repo, head, base, author, payload["action"], pull_lane(pull))]
+    number = pull.get("number", 0)
+    return [
+        HeadEvent("pull_request", repo, head, base, author, payload["action"], lane=pull_lane(pull), pull_number=number)
+    ]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -118,8 +123,9 @@ def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent | CheckEvent]:
         return []
     pulls = run["pull_requests"]
     base = pulls[0]["base"]["sha"] if pulls else ""
+    number = pulls[0].get("number", 0) if pulls else 0
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
-    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"])]
+    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"], pull_number=number)]
 
 
 HEADS: Mapping[str, Callable[[Mapping[str, Any]], Sequence[HeadEvent | CheckEvent]]] = {
@@ -155,10 +161,15 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
     return HeadEvent(NOTICE, repo, head, base, actor, PUSHED)
 
 
-def head_data(event: HeadEvent) -> dict[str, str]:
-    """Return the envelope data of a head: its six fields and, for a head that names one, its lane."""
-    data = asdict(event)
-    return data if event.lane else {name: value for name, value in data.items() if name != "lane"}
+def head_data(event: HeadEvent) -> dict[str, str | int]:
+    """Return the envelope data of a head: its six fields and, for a head that names one, its lane and pull request
+    number."""
+    data: dict[str, str | int] = asdict(event)
+    if not event.lane:
+        del data["lane"]
+    if not event.pull_number:
+        del data["pull_number"]
+    return data
 
 
 def envelope(event: HeadEvent | CheckEvent) -> Envelope:

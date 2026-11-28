@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x__run_service:08bd85f182a28f9f92fa2324ed36111a7fbd993ba92ec378a721995990102bf9": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and does not inspect or convert its first argument. cast(None, redis.Redis) and cast(Any, redis.Redis) therefore call the identical Redis class with identical parameters."
+  }
+}

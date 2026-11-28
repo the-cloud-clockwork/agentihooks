@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x\u01c1Scheduler\u01c1_advance:e1a2fd68ce5f4b7bef51ae1ddd904aba50f5f10a931a6cac985a144a0dc36747": {
+    "reader": "standards_reader",
+    "reason": "GradeRequest.actor is written where a request is built, in the intake request builder and the scheduler's request reader, and read nowhere under scripts/ci_lab. State, GradeInputs and every log line and post take no actor, and the one asdict of a request, in Scheduler._hold, is reached only from the head event intake loop, never from _advance through _regrade and _start. No value of actor can be observed on this path."
+  }
+}

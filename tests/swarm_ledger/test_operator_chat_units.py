@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_authority, ledger_comments, ledger_core, ledger_notifications
 from scripts.swarm_ledger.api import schemas
+from scripts.swarm_ledger.op_context import OpContext
 
 TO_ONLY_CHAT = "to addresses only an agent chat message or comment, reply_to only an agent chat message"
 OPERATOR_ONLY = "an agent chat message goes to the operator or answers his line by its id"
@@ -42,10 +43,10 @@ def test_an_agent_answer_to_the_operator_is_a_new_comment_beside_its_status():
     c.meta["members"] = {"eng": {"last_seen": 1}}
     c.record = lambda *args, **fields: c.records.append((args, fields))
     answered = op("phases/p1/comments", to="operator")
-    assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
+    assert ledger_comments.agent_thread_op(thread, answered, cast(OpContext, c), "phases/p1", "comment") is True
     assert thread == [status, ANSWER] and c.meta["members"]["eng"]["last_seen"] == 7
     assert c.records == [(("eng", "comment added", "phases/p1"), {"id": "m-1", "text": "Phase one is done."})]
-    assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
+    assert ledger_comments.agent_thread_op(thread, answered, cast(OpContext, c), "phases/p1", "comment") is True
     assert len(thread) == 2 and len(c.records) == 1
 
 
@@ -62,7 +63,7 @@ def test_only_the_swarm_relay_answers_the_operator_on_an_entry():
 def test_an_agent_status_after_its_answer_leaves_the_answer_intact():
     thread, c = [dict(ANSWER)], ctx()
     status = {**op("phases/p1/comments"), "id": "c-2", "text": "Still on the phase."}
-    assert ledger_comments.agent_thread_op(thread, status, c, "phases/p1", "comment") is True
+    assert ledger_comments.agent_thread_op(thread, status, cast(OpContext, c), "phases/p1", "comment") is True
     assert thread == [ANSWER, {"id": "c-2", "by": "eng", "at": 7, "text": "Still on the phase."}]
 
 
@@ -118,7 +119,10 @@ def test_consecutive_operator_comments_are_not_repeated_agent_statuses():
 
 def test_an_agent_status_comment_still_amends_its_last_one():
     thread, c = [{"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}], ctx()
-    assert ledger_comments.agent_thread_op(thread, op("phases/p1/comments"), c, "phases/p1", "comment") is True
+    assert (
+        ledger_comments.agent_thread_op(thread, op("phases/p1/comments"), cast(OpContext, c), "phases/p1", "comment")
+        is True
+    )
     assert [(e["id"], e["text"]) for e in thread] == [("c-0", "Phase one is done.")]
 
 
@@ -157,21 +161,21 @@ def ctx():
 
 def test_an_unaddressed_agent_message_is_refused_and_not_kept():
     thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
-    assert ledger_comments.agent_thread_op(thread, op(), c, "chat", "message") is False
+    assert ledger_comments.agent_thread_op(thread, op(), cast(OpContext, c), "chat", "message") is False
     assert c.refused == [f"eng message refused: {ledger_comments.UNADDRESSED}"]
     assert [e["id"] for e in thread] == ["m-0"]
 
 
 def test_an_unprompted_message_to_the_operator_is_refused_and_not_kept():
     thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
-    assert ledger_comments.agent_thread_op(thread, op(to="operator"), c, "chat", "message") is False
+    assert ledger_comments.agent_thread_op(thread, op(to="operator"), cast(OpContext, c), "chat", "message") is False
     assert c.refused == [f"eng message refused: {ledger_comments.UNADDRESSED}"]
     assert [e["id"] for e in thread] == ["m-0"]
 
 
 def test_a_reply_to_an_operator_line_is_kept():
     thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
-    assert ledger_comments.agent_thread_op(thread, op(reply_to="m-0"), c, "chat", "message") is True
+    assert ledger_comments.agent_thread_op(thread, op(reply_to="m-0"), cast(OpContext, c), "chat", "message") is True
     assert c.refused == []
     assert thread[-1] == {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", "reply_to": "m-0"}
 
