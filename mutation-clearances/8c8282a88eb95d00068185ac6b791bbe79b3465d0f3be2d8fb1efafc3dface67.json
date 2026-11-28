@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_changed:6ee09639948a68bc3a940dee78fd5e76bae05beab75c3fd621ad0abacf960c38": {
+    "reader": "standards-reader",
+    "reason": "changed mutant 9 is equivalent: omitting check selects subprocess.run's default False, preserving process execution and explicit error handling."
+  }
+}

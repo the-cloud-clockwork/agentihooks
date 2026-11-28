@@ -84,6 +84,15 @@ jobs:
           baseline="$(git merge-base "$BASE" HEAD)"
           semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" --baseline-commit "$baseline" tests
 
+      - name: Test modules import no new private names from other test modules
+        env:
+          BASE: ${{ inputs.base }}
+          SCRIPT: scripts/private_test_imports.py
+        run: |
+          grader="$SCRIPT"
+          if [[ -e "$RUNNER_TEMP/grader/$SCRIPT" ]]; then grader="$RUNNER_TEMP/grader/$SCRIPT"; fi
+          python "$grader" check --baseline-commit "$(git merge-base "$BASE" HEAD)" --grader "$RUNNER_TEMP/grader"
+
       - name: Rule exceptions only shrink
         env:
           BASE: ${{ inputs.base }}

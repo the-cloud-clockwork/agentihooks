@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:f12227d48f813ad42fbc4de2d120c9d3c95ee4b6d1910e9626f8980c204bbf95": {
+    "reader": "standards-reader",
+    "reason": "check mutant 28 is equivalent: removing maxsplit preserves the baseline path used to identify touched entries; supported baseline keys contain one separator."
+  }
+}

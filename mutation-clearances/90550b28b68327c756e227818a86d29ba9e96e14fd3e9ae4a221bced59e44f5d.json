@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_grade:96449a3d9208b4f7738a1bed6e491254ad2f674ef411e75296e820057d69376f": {
+    "reader": "standards-reader",
+    "reason": "grade mutant 11 is equivalent: increasing maxsplit to 2 still produces the same two fields because supported offender keys contain exactly one separator."
+  }
+}

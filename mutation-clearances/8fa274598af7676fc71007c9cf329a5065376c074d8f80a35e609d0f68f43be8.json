@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_grade:c185bccb5a9f0e782c5c9173ee0443188729498ef49bb74c5e5c7e968d865889": {
+    "reader": "standards-reader",
+    "reason": "grade mutant 9 is equivalent: right splitting preserves both diagnostic fields because supported paths and imported identifiers contain no additional separator."
+  }
+}

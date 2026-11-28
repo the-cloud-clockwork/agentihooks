@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:df9d26888d290b5959a51f05b4b8c54602b42be2fdcad25a4420f243ad630c9a": {
+    "reader": "standards-reader",
+    "reason": "check mutant 40 is equivalent: removing maxsplit preserves the extracted path because each supported baseline key has exactly one :: separator."
+  }
+}

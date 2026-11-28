@@ -5260,6 +5260,34 @@
       ]
     },
     {
+      "id": "test-private-imports-ratchet",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-private-test-imports",
+      "behaviour": "A test module that imports a private name from another test module is refused unless the shrink only list of the offenders dev held when the rule landed names it, and a listed entry in a file the change touches that its file no longer imports is refused until the list drops it; only findings new against the merge base count, so offenders that reached dev past the merge queue never fail another change.",
+      "seam": "the Semgrep rule test-private-imports, the list .semgrep/test-private-imports-allowlist.json, the check and write commands of scripts.private_test_imports, and the Semgrep workflow scan step 'Test modules import no new private names from other test modules'",
+      "tests": [
+        "tests/test_private_test_imports.py::test_offenders_key_each_finding_by_its_file_and_the_name_its_byte_span_covers",
+        "tests/test_private_test_imports.py::test_grade_refuses_a_new_offender_the_list_does_not_name",
+        "tests/test_private_test_imports.py::test_grade_passes_offenders_the_list_names",
+        "tests/test_private_test_imports.py::test_grade_refuses_a_listed_entry_its_file_no_longer_imports",
+        "tests/test_private_test_imports.py::test_grade_passes_a_stale_entry_in_a_file_the_change_did_not_touch",
+        "tests/test_private_test_imports.py::test_changed_lists_the_files_between_the_baseline_and_head_deleted_ones_included",
+        "tests/test_private_test_imports.py::test_configs_add_the_grader_copy_only_when_the_grader_holds_the_rule",
+        "tests/test_private_test_imports.py::test_scan_runs_strict_json_semgrep_past_the_ignore_file",
+        "tests/test_private_test_imports.py::test_scan_refuses_a_semgrep_run_that_fails",
+        "tests/test_private_test_imports.py::test_check_grades_new_findings_and_rescans_only_the_listed_files_the_change_touches",
+        "tests/test_private_test_imports.py::test_check_passes_when_the_list_names_every_offender",
+        "tests/test_private_test_imports.py::test_check_skips_the_listed_scan_when_the_change_touches_no_listed_file",
+        "tests/test_private_test_imports.py::test_write_records_every_offender_sorted_and_indented_by_one_space",
+        "tests/test_private_test_imports.py::test_main_routes_check_and_write_from_the_working_directory",
+        "tests/test_private_test_imports.py::test_main_requires_a_subcommand",
+        "tests/test_private_test_imports.py::test_main_help_names_the_command",
+        "tests/test_private_test_imports.py::test_the_list_names_each_offender_once_in_order_with_an_existing_test_file",
+        "tests/test_private_test_imports.py::test_the_rule_reads_only_test_modules_and_its_fixture",
+        "tests/test_ci_semgrep.py::test_private_test_imports_gate_runs_the_grader_copy_against_the_merge_base"
+      ]
+    },
+    {
       "id": "semgrep-engine-posix-backend",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-runner-oom",

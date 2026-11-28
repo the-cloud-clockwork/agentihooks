@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:fb54d2e5da724669a4a99259ec93ae70d562dc214f48be8bba4562db1d0f7af8": {
+    "reader": "standards-reader",
+    "reason": "check mutant 41 is equivalent: right splitting and left splitting select the same rescan path because supported baseline keys contain one separator."
+  }
+}

@@ -1,0 +1,23 @@
+rules:
+  - id: test-private-imports
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A test module imports the private name $NAME from the test module $MOD. Make the helper public in a
+      shared test module instead; a file still doing so stays listed in test-private-imports-allowlist.json
+      until its import goes.
+    patterns:
+      - pattern-either:
+          - pattern: from $MOD import $NAME
+          - pattern: from $MOD import $NAME as $ALIAS
+      - metavariable-regex:
+          metavariable: $MOD
+          regex: ^(tests(\.|$)|\.)
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: ^_(?!_\w*__$)
+      - focus-metavariable: $NAME
+    paths:
+      include:
+        - "/tests/"
+        - "test-private-imports.test.py"
