@@ -488,19 +488,19 @@ def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_held_tasks_are_the_open_in_scope_engineer_and_ci_tasks_the_claim_hold_keeps() -> None:
-    assert [task["id"] for task in getattr(enhance_sweep, "held")(HELD_TASKS)] == ["r1", "r2", "r4", "r5", "r8"]
+    assert [task["id"] for task in enhance_sweep.held(HELD_TASKS)] == ["r1", "r2", "r4", "r5", "r8"]
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_a_held_task_is_released_once_its_thin_check_passes() -> None:
-    assert [task["id"] for task in getattr(enhance_sweep, "releasable")(HELD_TASKS)] == RELEASED
+    assert [task["id"] for task in enhance_sweep.releasable(HELD_TASKS)] == RELEASED
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_by_its_author() -> None:
     ledger = FakeLedger(dict(ANSWERS))
     pauses: list[float] = []
-    result = getattr(enhance_sweep, "release")(HELD_TASKS, ledger, MASTER, pause=pauses.append)
+    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=pauses.append)
     assert result.lines == tuple(f"released thin task {tid}: its spec states its proof" for tid in RELEASED)
     assert (result.released, result.failed) == (4, 0)
     assert _calls(ledger) == RELEASE_CALLS
@@ -511,14 +511,14 @@ def test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_release_pauses_before_its_first_write_after_the_queue_wrote() -> None:
     pauses: list[float] = []
-    getattr(enhance_sweep, "release")(HELD_TASKS, FakeLedger(dict(ANSWERS)), MASTER, pause=pauses.append, wrote=True)
+    enhance_sweep.release(HELD_TASKS, FakeLedger(dict(ANSWERS)), MASTER, pause=pauses.append, wrote=True)
     assert pauses == [3.0, 3.0, 3.0, 3.0]
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_a_dry_release_writes_nothing() -> None:
     pauses: list[float] = []
-    result = getattr(enhance_sweep, "release")(HELD_TASKS, None, MASTER, pause=pauses.append)
+    result = enhance_sweep.release(HELD_TASKS, None, MASTER, pause=pauses.append)
     assert (result.lines, result.released, result.failed, pauses) == ((), 0, 0, [])
 
 
@@ -538,7 +538,7 @@ def test_a_dry_release_writes_nothing() -> None:
 def test_a_failed_release_write_is_counted_and_the_release_goes_on(error: Exception, failure: str) -> None:
     ledger = SecondWriteFails(dict(ANSWERS), error=error)
     emitted: list[str] = []
-    result = getattr(enhance_sweep, "release")(HELD_TASKS, ledger, MASTER, pause=lambda _: None, emit=emitted.append)
+    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=lambda _: None, emit=emitted.append)
     released = [f"released thin task {tid}: its spec states its proof" for tid in RELEASED]
     lines = (released[0], failure, *released[2:])
     assert (result.lines, result.released, result.failed) == (lines, 3, 1)
@@ -593,3 +593,19 @@ def test_the_command_releases_as_the_swarm_when_no_agent_is_pinned(
     [call] = ledger.calls
     operations = cast(list[dict[str, object]], call.args[0])
     assert (call.operation, [op["by"] for op in operations]) == ("mutate", ["swarm", "swarm"])
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_the_command_pauses_between_the_last_queue_write_and_the_first_release(
+    swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serve(monkeypatch, {"tasks": [_task("q1"), *HELD_TASKS[:2]]})
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: FakeLedger(dict(ANSWERS)))
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    monkeypatch.setattr(enhance_sweep, "principal", lambda: MASTER)
+    assert cli.main(["sw", "enhance", "sweep"]) == 0
+    assert json.loads(capsys.readouterr().out)["actions"] == [
+        "queued enhance-q1 for thin task q1",
+        "released thin task r1: its spec states its proof",
+    ]
+    assert swarm == [3.0]

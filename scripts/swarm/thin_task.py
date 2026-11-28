@@ -11,7 +11,7 @@ from typing import Any
 from scripts.swarm.slice_check import CODE_KINDS, done_when, short
 from scripts.swarm_ledger import ledger_kinds
 
-__all__ = ["ENHANCE", "THIN_WORDS", "backfill", "exempt", "section_complete", "thin"]
+__all__ = ["ENHANCE", "THIN_WORDS", "backfill", "exempt", "section_complete", "stated", "thin"]
 
 BACKFILL_BUDGET = 30.0
 BACKFILL_PAIRS = 25
@@ -21,6 +21,7 @@ BACKFILL_MAX_WRITE = 2.0
 THIN_WORDS = 40
 ENHANCE = "enhance-{}"
 EXEMPT = ("planned", "skipped")
+PROOF = re.compile(r"\bproof\s*:", re.I)
 NAMED = re.compile(
     r"\b[A-Za-z]\w*\("
     r"|\b[a-z][a-z0-9]+(?:[._][a-z0-9]+)+"
@@ -48,21 +49,31 @@ BODY = ("Summary", "Seams", "Tests", "Proof")
 
 
 def thin(task: dict[str, Any]) -> list[str]:
-    """Every rule the task fails; code and CI seams name a public boundary and observed outcome together."""
+    """Every rule the task fails: any task under 40 words fails the length rule, and a task that states no proof also
+    fails the done when and territory rules and, for code and ci work, the rule that a seam names a public boundary
+    and observed outcome together."""
     if exempt(task):
         return []
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
     tid, description = task["id"], task["description"]
-    problems: list[str] = []
-    if short(description, THIN_WORDS):
-        problems.append(f"Task {tid} has a description under {THIN_WORDS} words.")
-    if not done_when(description):
-        problems.append(f"Task {tid} has no done when sentence.")
+    problems = [f"Task {tid} has a description under {THIN_WORDS} words."] if short(description, THIN_WORDS) else []
+    if stated(task):
+        return problems
+    problems.append(f"Task {tid} has no done when sentence.")
     if not task.get("territory"):
         problems.append(f"Task {tid} names no territory.")
     if kind in CODE_KINDS and not _named_seam(description):
         problems.append(f"Task {tid} is {kind} work that names no seam.")
     return problems
+
+
+def stated(task: dict[str, Any]) -> bool:
+    """Whether the task states how it is proven: a contract carrying must, check and judge, or a description with a
+    proof label or a done when sentence."""
+    contract: dict[str, Any] = task.get("contract") or {}
+    keys: tuple[str, ...] = ledger_kinds.CONTRACT_KEYS  # pyright: ignore[reportUnknownMemberType]
+    description: str = task["description"]
+    return all(contract.get(key) for key in keys) or PROOF.search(description) is not None or done_when(description)
 
 
 def _named_seam(text: str) -> bool:
