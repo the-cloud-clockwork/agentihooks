@@ -463,6 +463,73 @@ def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
         server.server_close()
 
 
+def samples(registry: metrics.Registry) -> list[str]:
+    return [line for line in registry.render().splitlines() if not line.startswith("#")]
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_a_registry_server_runs_its_observers_before_each_metrics_answer_and_for_no_other_route() -> None:
+    registry = metrics.Registry()
+    calls: list[str] = []
+
+    def first() -> None:
+        calls.append("first")
+        registry.set(contract.SLOTS_TOTAL, float(len(calls)))
+
+    server = metrics.serve_registry("127.0.0.1", 0, registry, first, lambda: calls.append("second"))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        for path in ("/capacity", "/missing"):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(f"{base}{path}", timeout=5)
+            assert refused.value.code == 404
+        with pytest.raises(urllib.error.HTTPError) as posted:
+            urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
+        assert posted.value.code == 405
+        assert calls == []
+        with urllib.request.urlopen(f"{base}/metrics", timeout=5) as reply:
+            assert "\nci_lab_slots_total 1.0\n" in reply.read().decode()
+        assert calls == ["first", "second"]
+        with urllib.request.urlopen(f"{base}/metrics", timeout=5) as reply:
+            assert "\nci_lab_slots_total 3.0\n" in reply.read().decode()
+        assert calls == ["first", "second", "first", "second"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_a_node_mirror_age_is_labelled_with_its_node_and_never_below_zero(tmp_path: Path) -> None:
+    registry = metrics.Registry()
+    (tmp_path / metrics.FETCHED_AT).write_text("1000\n")
+
+    metrics.observe_mirror(registry, tmp_path, 1_030_500, "ci-node-1")
+    assert samples(registry) == ['ci_lab_node_mirror_age_seconds{node="ci-node-1"} 30.5']
+
+    metrics.observe_mirror(registry, tmp_path, 999_000, "ci-node-1")
+    assert samples(registry) == ['ci_lab_node_mirror_age_seconds{node="ci-node-1"} 0.0']
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+@pytest.mark.parametrize("stamp", [None, "", "soon\n", "12.5\n"], ids=["missing", "empty", "word", "fraction"])
+def test_a_node_mirror_without_a_readable_stamp_drops_only_its_own_sample(tmp_path: Path, stamp: str | None) -> None:
+    registry = metrics.Registry()
+    registry.set(contract.SLOTS_TOTAL, 3.0)
+    registry.set(contract.MIRROR_AGE_SECONDS, 7.0)
+    (tmp_path / metrics.FETCHED_AT).write_text("1000\n")
+    metrics.observe_mirror(registry, tmp_path, 1_030_000, "ci-node-1")
+    if stamp is None:
+        (tmp_path / metrics.FETCHED_AT).unlink()
+    else:
+        (tmp_path / metrics.FETCHED_AT).write_text(stamp)
+
+    metrics.observe_mirror(registry, tmp_path, 1_031_000, "ci-node-1")
+
+    assert samples(registry) == ["ci_lab_slots_total 3.0", "ci_lab_mirror_age_seconds 7.0"]
+
+
 @pytest.mark.feature("lab-scheduler-cached-snapshot")
 def test_concurrent_first_reads_of_the_latest_load_build_it_once() -> None:
     builds: list[int] = []

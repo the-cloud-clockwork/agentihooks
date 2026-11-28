@@ -32,6 +32,7 @@ SCHEDULER_URL = "CI_LAB_SCHEDULER_URL"
 CONTROL_TOKEN = "CI_LAB_CONTROL_TOKEN"
 SLOTS = "CI_LAB_SLOTS"
 GIT_MIRROR = "CI_LAB_GIT_MIRROR"
+NODE_NAME = "CI_LAB_NODE_NAME"
 UV_CACHE_DIR = "UV_CACHE_DIR"
 WORK_ROOT = "CI_LAB_WORK_ROOT"
 MANIFEST = "CI_LAB_MANIFEST"
@@ -53,6 +54,7 @@ UNIT_DURATION_SECONDS = "ci_lab_unit_duration_seconds"
 CACHE_HITS_TOTAL = "ci_lab_cache_hits_total"
 CACHE_MISSES_TOTAL = "ci_lab_cache_misses_total"
 MIRROR_AGE_SECONDS = "ci_lab_mirror_age_seconds"
+NODE_MIRROR_AGE_SECONDS = "ci_lab_node_mirror_age_seconds"
 CORE_SECONDS_TOTAL = "ci_lab_core_seconds_total"
 HEADS_GRADED_TOTAL = "ci_lab_heads_graded_total"
 BUDGET_FRACTION = "ci_lab_budget_fraction"
@@ -76,6 +78,7 @@ METRICS: Mapping[str, tuple[str, ...]] = {
     CACHE_HITS_TOTAL: ("cache",),
     CACHE_MISSES_TOTAL: ("cache",),
     MIRROR_AGE_SECONDS: (),
+    NODE_MIRROR_AGE_SECONDS: ("node",),
     CORE_SECONDS_TOTAL: ("class",),
     HEADS_GRADED_TOTAL: ("class", "conclusion"),
     BUDGET_FRACTION: (),
@@ -119,6 +122,7 @@ WORKER = Service(
         SCHEDULER_URL,
         SLOTS,
         GIT_MIRROR,
+        NODE_NAME,
         UV_CACHE_DIR,
         WORK_ROOT,
         MANIFEST,

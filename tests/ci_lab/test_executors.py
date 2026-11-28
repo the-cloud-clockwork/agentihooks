@@ -1392,6 +1392,21 @@ def test_main_exports_no_mirror_age_without_a_node_name(monkeypatch: pytest.Monk
     assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
 
 
+@pytest.mark.feature("lab-worker-node-mirror-age")
+@pytest.mark.parametrize("stamp", [None, "soon\n"], ids=["missing", "unparseable"])
+def test_main_exports_no_mirror_age_while_its_node_stamp_is_missing_or_unparseable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stamp: str | None
+) -> None:
+    (tmp_path / "node").mkdir()
+    if stamp is not None:
+        (tmp_path / "node" / "fetched-at").write_text(stamp)
+    monkeypatch.setattr(executors, "time", SimpleNamespace(time=lambda: 1000030.0))
+
+    _, _, _, scraped, _ = serve_main(monkeypatch, {**environ_of(tmp_path), "CI_LAB_NODE_NAME": "ci-node-1"})
+
+    assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
+
+
 @pytest.mark.feature("lab-worker-run-directory-reclaimed")
 def test_static_cuts_its_run_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, static_trees: FakeWorktrees
