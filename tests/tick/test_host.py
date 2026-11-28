@@ -136,6 +136,8 @@ def test_the_host_steps_sit_at_their_sites_in_legacy_order() -> None:
         slow = {"hive ledger", "host pressure", "prompt backlog"}
         lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
+    probe = next(step for step in host.STEPS if step.name == "ledger probe")
+    assert probe.needs == frozenset({"ledger watchdog"})
 
 
 def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,11 +332,9 @@ def test_a_raising_step_is_held_and_the_rest_of_its_site_runs(monkeypatch: pytes
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     state = _pass(box, raises=incidents.host_pressure)
-    assert _run("wrapper health", calls, state, monkeypatch) == ["ran 2", "ran 3", "ran 5"]
+    assert _run("wrapper health", calls, state, monkeypatch) == ["ran 3"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
-        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
-        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
         ("call", sweep.notify_drains, STORE),
