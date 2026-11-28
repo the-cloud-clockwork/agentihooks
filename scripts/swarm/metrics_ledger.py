@@ -44,6 +44,7 @@ PATHS = "CREATE TABLE IF NOT EXISTS ledger_metric_paths (slug TEXT, node TEXT, v
 READ_PATHS = "SELECT node, value FROM ledger_metric_paths WHERE slug=?"
 SAVE_PATHS = "INSERT OR REPLACE INTO ledger_metric_paths VALUES (?, ?, ?)"
 DROP_SHIPPED = "DELETE FROM spool WHERE tbl = ? AND shipped = 1"
+DROP_SUPERSEDED = "DELETE FROM spool WHERE tbl = ? AND substr(event_id, 1, ?) = ? AND ts_ms < ?"
 
 
 def paths(nodes: list, tasks: list) -> dict:
@@ -203,6 +204,8 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
         connection.executemany(SAVE_BIRTHS, [(slug, node, at) for node, at in births.items()])
         connection.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
         connection.execute(DROP_SHIPPED, (SNAPSHOTS.name,))
+        prefix = f"snapshot:{slug}:"
+        connection.execute(DROP_SUPERSEDED, (SNAPSHOTS.name, len(prefix), prefix, snapshot))
 
     box.append_many(batches, checkpoint)
     acknowledged = doc["_meta"].get("events_ack")

@@ -1,0 +1,12 @@
+{
+  "id": "metrics-spool-bounds-unshipped-ledger-snapshots",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-outbox-snapshot-backlog",
+  "behaviour": "A ledger metrics record drops that ledger's snapshot rows older than its newest snapshot, shipped or not, so the controller's metrics spool holds at most one unshipped snapshot per ledger however few rows the sink accepts, while another ledger's unshipped snapshot rows stay.",
+  "seam": "metrics_ledger.record over two snapshot passes against a metrics outbox whose sink accepts fewer rows than one snapshot, and against a spool holding another ledger's unshipped snapshot, and on a pass that appends no new snapshot",
+  "tests": [
+    "tests/swarm/test_metrics_ledger.py::test_unshipped_snapshot_rows_stay_within_one_snapshot_when_the_sink_takes_less_than_a_snapshot",
+    "tests/swarm/test_metrics_ledger.py::test_a_newer_snapshot_of_one_ledger_keeps_another_ledgers_unshipped_snapshot",
+    "tests/swarm/test_metrics_ledger.py::test_snapshot_after_a_phase_tick_shows_counts_priorities_time_left_and_freezes"
+  ]
+}

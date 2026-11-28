@@ -194,6 +194,7 @@ def test_four_task_states_become_distinct_rows_with_the_hierarchy_path(tmp_path)
         box.close()
 
 
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
 def test_snapshot_after_a_phase_tick_shows_counts_priorities_time_left_and_freezes(tmp_path):
     from scripts.swarm import metrics_ledger
 
@@ -288,7 +289,7 @@ def record_cycle(box: metrics_outbox.Outbox, cycle: int, ledger: Ledger) -> int:
 
 
 @pytest.mark.feature("metrics-spool-drops-shipped-ledger-snapshots")
-def test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record(tmp_path: Path) -> None:
+def test_shipped_ledger_events_and_only_the_newest_unshipped_snapshot_survive_the_next_record(tmp_path: Path) -> None:
     ledger, sink = Ledger(), Sink()
     ledger.move("claimed", 1, NOW)
     box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
@@ -298,7 +299,7 @@ def test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record(t
         kept = [record_cycle(box, cycle, ledger) for cycle in (1, 2)]
         box.flush(kept[-1])
         assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1)]
-        assert snapshot_times(box)[-2:] == kept
+        assert snapshot_times(box) == kept[-1:]
     finally:
         box.close()
 
@@ -312,5 +313,57 @@ def test_the_spool_keeps_only_the_newest_snapshot_cycle_once_earlier_ones_shippe
             at = record_cycle(box, cycle, ledger)
             assert snapshot_times(box) == [at]
             box.flush(at)
+    finally:
+        box.close()
+
+
+class OneInsertSink:
+    def __init__(self) -> None:
+        self.inserts = 0
+
+    def send(self, sink: metrics_outbox.Settings | None, query: str, body: bytes) -> bool:
+        if not query.startswith("INSERT"):
+            return True
+        self.inserts -= 1
+        return self.inserts >= 0
+
+
+def unshipped_snapshot_rows(box: metrics_outbox.Outbox) -> int:
+    return box.db.execute("SELECT count(*) FROM spool WHERE tbl = 'ledger_snapshots' AND shipped = 0").fetchone()[0]
+
+
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
+def test_unshipped_snapshot_rows_stay_within_one_snapshot_when_the_sink_takes_less_than_a_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(metrics_outbox, "BATCH", 2)
+    ledger, sink = Ledger(), OneInsertSink()
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        for cycle in (0, 1):
+            at = record_cycle(box, cycle, ledger)
+            snapshot = len([row for row in read(box, "ledger_snapshots") if row["ts_ms"] == at])
+            sink.inserts = 1
+            shipped = box.flush(at)
+            assert 0 < shipped < snapshot
+            assert unshipped_snapshot_rows(box) == snapshot - shipped
+    finally:
+        box.close()
+
+
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
+def test_a_newer_snapshot_of_one_ledger_keeps_another_ledgers_unshipped_snapshot(tmp_path: Path) -> None:
+    from scripts.swarm import metrics_ledger
+    from scripts.swarm.ledger_client import LedgerClient
+
+    sink = Sink()
+    sink.up = False
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        metrics_ledger.record(box, "example-doctor", NOW, cast("LedgerClient", Ledger()))
+        later = record_cycle(box, 1, Ledger())
+        box.flush(later)
+        kept = {(row["ledger"], row["ts_ms"]) for row in read(box, "ledger_snapshots")}
+        assert kept == {("example-doctor", NOW), ("example", later)}
     finally:
         box.close()
