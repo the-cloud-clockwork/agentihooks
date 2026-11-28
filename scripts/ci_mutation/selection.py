@@ -411,6 +411,11 @@ def collect_shard_stats(runner: Any, test_runner: Any, tests: list[str], output:
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    scope = Path.cwd() / "changed-lines.json"
+    if scope.is_file():
+        test_runner._pytest_add_cli_args.extend(
+            ["-p", "scripts.ci_mutation.stats_candidates", f"--mutation-stats-scope={scope.resolve()}"]
+        )
     measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
     coverage_file = output.with_suffix(".coverage")
     if measured:
