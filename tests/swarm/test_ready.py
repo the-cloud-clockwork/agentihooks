@@ -18,6 +18,9 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
+from tests.forge.fakes import Sent
+from tests.forge.test_gitlab import LINK as GITLAB
+from tests.forge.test_gitlab import recorded
 from tests.helpers import store_seed
 from tests.helpers.seat import seat_agent
 from tests.swarm.memory_fixture import tmp_path
@@ -515,6 +518,47 @@ def test_ready_refuses_a_draft_pull_request(released, capsys):
     assert capsys.readouterr().err == (
         f"swarm: cannot read whether pull request {URL} is a draft; run swarm ready again when it answers\n"
     )
+
+
+def _gitlab(released: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch, **fields: object) -> None:
+    """Point t1 at the recorded GitLab merge request at the worktree head and read it through the real view."""
+    _, ledger, _, _ = released
+    merge, _ = recorded()
+    merge.update(sha=HEAD, **fields)
+    monkeypatch.setenv("GITLAB_TOKEN", "fake-token")
+    monkeypatch.setattr("scripts.swarm.gitlab_pull.TRANSPORT", Sent(merge))
+    monkeypatch.setattr(cli.ledger_events, "view", read_pull)
+    ledger.rows["t1"]["pr_url"] = GITLAB
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_ready_carries_a_gitlab_merge_request_with_its_head(released, monkeypatch):
+    store, ledger, shell, doc = released
+    _gitlab(released, monkeypatch)
+    assert release(doc) == 0
+    assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["awaiting"] == "merge"
+    assert json.loads(store.redis.hget(store.key("sw", "ready"), "t1")) == {
+        "url": GITLAB,
+        "head": HEAD,
+        "worktree": TOP,
+        "agent": AGENT,
+        "at": NOW,
+        "on": {"kind": "checks", "target": GITLAB, "head": HEAD},
+    }
+    assert shell.port.calls == []
+
+
+@pytest.mark.feature("swarm-gitlab-change-close")
+def test_ready_refuses_a_gitlab_draft_with_the_gitlab_hint(released, monkeypatch, capsys):
+    store, _, shell, doc = released
+    _gitlab(released, monkeypatch, draft=True)
+    capsys.readouterr()
+    assert release(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: pull request {GITLAB} is a draft; mark it ready for review in GitLab first\n"
+    )
+    assert ready.record(store, "sw", "t1") is None and working(store)
+    assert shell.port.calls == []
 
 
 def test_ready_refuses_a_worktree_whose_head_the_pull_request_lacks(released, capsys):

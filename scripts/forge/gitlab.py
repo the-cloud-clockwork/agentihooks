@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Any
 from urllib.error import HTTPError
@@ -51,12 +51,18 @@ class FetchError(ForgeError):
 
 @dataclass(frozen=True)
 class MergeRequestState:
+    """A merge request's tracker state; its description is read with it but kept out of equality, so a body edit
+    leaves two reads of one state equal."""
+
     url: str
     state: str
     head: str
     queued: bool
     checks_head: str
     suites: dict[str, dict[str, str]]
+    draft: bool = False
+    merged_at: str | None = None
+    description: str = field(default="", compare=False)
 
 
 def pipeline_suites(pipeline: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -129,6 +135,9 @@ class GitLabForge:
             queued=False,
             checks_head=pipeline["sha"] if pipeline else raw["sha"],
             suites=pipeline_suites(pipeline) if pipeline else {},
+            draft=bool(raw.get("draft")),
+            merged_at=raw.get("merged_at"),
+            description=raw.get("description") or "",
         )
 
 
