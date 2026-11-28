@@ -194,6 +194,7 @@ def test_four_task_states_become_distinct_rows_with_the_hierarchy_path(tmp_path)
         box.close()
 
 
+@pytest.mark.feature("metrics-spool-bounds-unshipped-ledger-snapshots")
 def test_snapshot_after_a_phase_tick_shows_counts_priorities_time_left_and_freezes(tmp_path):
     from scripts.swarm import metrics_ledger
 
@@ -288,7 +289,7 @@ def record_cycle(box: metrics_outbox.Outbox, cycle: int, ledger: Ledger) -> int:
 
 
 @pytest.mark.feature("metrics-spool-drops-shipped-ledger-snapshots")
-def test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record(tmp_path: Path) -> None:
+def test_shipped_ledger_events_and_only_the_newest_unshipped_snapshot_survive_the_next_record(tmp_path: Path) -> None:
     ledger, sink = Ledger(), Sink()
     ledger.move("claimed", 1, NOW)
     box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
@@ -343,8 +344,9 @@ def test_unshipped_snapshot_rows_stay_within_one_snapshot_when_the_sink_takes_le
             at = record_cycle(box, cycle, ledger)
             snapshot = len([row for row in read(box, "ledger_snapshots") if row["ts_ms"] == at])
             sink.inserts = 1
-            assert box.flush(at) < snapshot
-            assert unshipped_snapshot_rows(box) <= snapshot
+            shipped = box.flush(at)
+            assert 0 < shipped < snapshot
+            assert unshipped_snapshot_rows(box) == snapshot - shipped
     finally:
         box.close()
 
