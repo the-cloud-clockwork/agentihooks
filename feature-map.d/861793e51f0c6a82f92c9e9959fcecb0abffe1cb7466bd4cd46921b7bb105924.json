@@ -1,0 +1,13 @@
+{
+  "id": "lab-check-installs-entry-imports",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2929",
+  "behaviour": "The Lab check workflow's post job installs every third party distribution that the module it runs with python -m imports at module level, followed through every local scripts, hooks and tests module that import reaches; imports inside function bodies and under TYPE_CHECKING are not required. A workflow whose install step misses one names the module and the local module importing it, and a workflow that runs no python -m entry is refused.",
+  "seam": "tests.contracts.test_lab_check_installs.missing_installs over .github/workflows/lab-check.yml and the scripts.ci_lab.checks import closure",
+  "tests": [
+    "tests/contracts/test_lab_check_installs.py::test_the_lab_check_workflow_installs_every_distribution_its_poster_imports",
+    "tests/contracts/test_lab_check_installs.py::test_the_walk_names_a_module_level_import_reached_through_a_local_module",
+    "tests/contracts/test_lab_check_installs.py::test_the_walk_passes_once_the_install_step_names_the_distribution",
+    "tests/contracts/test_lab_check_installs.py::test_a_workflow_without_an_entry_is_refused"
+  ]
+}
