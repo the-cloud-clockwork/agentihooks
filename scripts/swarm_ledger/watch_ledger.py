@@ -264,7 +264,7 @@ def main() -> None:
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, stop)
-    headers, cursor, failure, delay, refusal = None, None, None, args.interval, False
+    headers, cursor, failure, delay, refused_once = None, None, None, args.interval, False
     while not stopping:
         alive(beat)
         pause = args.interval
@@ -275,7 +275,7 @@ def main() -> None:
             for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)
-                cursor, failure, delay, refusal = event_id or cursor, None, args.interval, False
+                cursor, failure, delay, refused_once = event_id or cursor, None, args.interval, False
         except Expired:
             cursor = None
             continue
@@ -284,7 +284,7 @@ def main() -> None:
         except sqlite3.DatabaseError as exc:
             failure, pause, delay = warned(exc, failure), delay, backoff(delay, args.interval)
         except (OSError, ValueError) as exc:
-            headers, refusal = None, refused(exc, refusal)
+            headers, refused_once = None, refused(exc, refused_once)
             failure = warned(exc, failure)
         time.sleep(pause)
 
