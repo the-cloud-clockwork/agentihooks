@@ -163,6 +163,39 @@ def test_bundle_bounds_each_fetch_of_a_missing_commit_and_answers_none_when_ever
 
 
 @pytest.mark.feature("lab-worker-fetches-a-test-merge-it-lacks")
+def test_bundle_answers_the_bundle_of_a_commit_a_store_holds_after_its_fetch_failed(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, fork, head = origin
+    merge = _synthetic_merge(repo, fork, head, monkeypatch)
+    expander = _expander(tmp_path, monkeypatch)
+    expander.serve([f"file://{repo}"])
+    real_fetch = Mirror.fetch
+
+    def lost(self: Mirror, sha: str, timeout: float | None = None) -> bool:
+        real_fetch(self, sha, timeout)
+        raise subprocess.CalledProcessError(128, ["git", "fetch"])
+
+    monkeypatch.setattr(Mirror, "fetch", lost)
+    found = expander.bundle(merge)
+    assert found is not None
+    target = _clone_holding(tmp_path, repo, fork)
+    assert _applied(tmp_path, target, found, merge) == merge
+
+
+@pytest.mark.feature("lab-worker-fetches-a-test-merge-it-lacks")
+def test_bundle_answers_none_for_an_id_a_served_remote_gives_that_names_no_commit(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, _, head = origin
+    tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
+    expander = _expander(tmp_path, monkeypatch)
+    expander.serve([f"file://{repo}"])
+    assert expander.bundle(tree) is None
+    assert _kind(expander.mirror(f"file://{repo}").store, tree) == "tree\n"
+
+
+@pytest.mark.feature("lab-worker-fetches-a-test-merge-it-lacks")
 def test_two_requests_for_one_missing_commit_at_once_fetch_it_once(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -15,6 +15,8 @@
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_fetches_a_commit_no_store_holds_from_the_served_remote_that_holds_it",
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_none_for_a_commit_no_served_remote_holds",
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_bounds_each_fetch_of_a_missing_commit_and_answers_none_when_every_one_runs_past_the_bound",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_the_bundle_of_a_commit_a_store_holds_after_its_fetch_failed",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_none_for_an_id_a_served_remote_gives_that_names_no_commit",
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_two_requests_for_one_missing_commit_at_once_fetch_it_once",
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_the_bundle_route_answers_the_bundle_of_a_commit_the_scheduler_store_never_held",
     "tests/ci_lab/test_scheduler_bundle_fetch.py::test_build_names_every_served_repository_to_the_expander_for_the_fetch_of_a_missing_commit"
