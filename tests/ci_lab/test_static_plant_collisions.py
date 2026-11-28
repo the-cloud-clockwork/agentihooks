@@ -1,5 +1,7 @@
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ WIRING_PLANT = "lint.check-every-pull-request-job-is-a-need-of-gate-required"
 COUNT_PLANT = "test-count.hold-the-base-revision-s-test-count"
 LIFECYCLE = "tests/fixtures/phase_lifecycle.json"
 LIFECYCLE_READER = "tests/swarm/test_phase_state.py"
+SLOWEST_LOADED_MERGE_GROUP_SECONDS = 54.4
 
 
 def _load_plant(name: str) -> dict[str, Any]:
@@ -97,6 +100,37 @@ def test_every_static_plant_outside_the_type_gate_job_keeps_its_file_s_baseline(
                 owners = ", ".join(_owners(round_plants, path))
                 failures.append(f"{owners} leaves {path} with {count} type errors, more than the {allowed} allowed")
     assert failures == []
+
+
+@pytest.mark.feature("lab-static-plants-turn-only-their-own-gate")
+def test_the_type_baseline_check_bound_outlasts_three_times_its_slowest_loaded_merge_group_run() -> None:
+    marks = pytestmark if isinstance(pytestmark, list) else [pytestmark]
+    bounds = [mark.args[0] for mark in marks if mark.name == "timeout"]
+    assert bounds and bounds[0] >= 3 * SLOWEST_LOADED_MERGE_GROUP_SECONDS
+
+
+@pytest.mark.feature("lab-static-plants-turn-only-their-own-gate")
+def test_a_plant_that_adds_a_type_error_fails_the_type_baseline_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    plants = root / "tests" / "ci_lab" / "plants"
+    (root / "scripts").mkdir(parents=True)
+    plants.mkdir(parents=True)
+    (root / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
+    (root / "scripts" / "planted.py").write_text("def planted() -> int:\n    return 1\n")
+    edit = {"path": "scripts/planted.py", "before": "return 1", "after": 'return "x"'}
+    plant = {"gate": "lint/hold-the-size-and-complexity-limits", "reason": "a return outside its type", "edits": [edit]}
+    (plants / "planted.json").write_text(json.dumps(plant))
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "pyproject.toml", "scripts/planted.py"], check=True)
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", root)
+    monkeypatch.setattr(sys.modules[__name__], "PLANTS", plants)
+    rounds = tmp_path / "rounds"
+    rounds.mkdir()
+    failure = r"planted leaves scripts/planted\.py with \d+ type errors, more than the 0 allowed"
+    with pytest.raises(AssertionError, match=failure):
+        test_every_static_plant_outside_the_type_gate_job_keeps_its_file_s_baseline(rounds)
 
 
 def _patched_workflows(edits: list[dict[str, str]]) -> dict[str, Any]:
