@@ -294,6 +294,7 @@ STEPS = (
         BEFORE,
         held(_past_health(_ledger_watchdog)),
         needs=frozenset({"ledger health"}),
+        reads=pass_domains("stop"),
         lane=Lane("tick"),
     ),
     CallStep(
@@ -301,6 +302,7 @@ STEPS = (
         BEFORE,
         held(_past_health(_ledger_probe)),
         needs=frozenset({"ledger watchdog"}),
+        reads=pass_domains("stop"),
         lane=Lane("tick"),
     ),
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
