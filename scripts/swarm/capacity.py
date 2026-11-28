@@ -234,18 +234,17 @@ def probe(environ: dict[str, str], now: float) -> list[Account]:
     return _claude(environ, now, True) + _codex(environ, now, True)
 
 
-def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None, worker: bool = False) -> list[Account]:
+def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None) -> list[Account]:
     """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
 
-    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says; ``worker`` gives
-    a local Claude reading the swarm worker cap the hive reports carry.
+    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says.
     """
     from scripts.routing import aggregate
 
     rows = (
         _global(environ, now, redis)
         if redis is not None or aggregate.enabled(environ)
-        else _claude(environ, now, refresh, worker) + _codex(environ, now, refresh)
+        else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
     return reserved_accounts(rows, environ)
 
@@ -274,7 +273,11 @@ def hive_accounts(store: RedisStore) -> Callable[..., list[Account]]:
 
 def worker_accounts(environ: dict[str, str], now: float, refresh: bool = True) -> list[Account]:
     """The quota reader of a hive spawn: every account with the Claude cap the hub admits that hive's workers by."""
-    return accounts(environ, now, refresh, worker=True)
+    from scripts.routing import aggregate
+
+    if aggregate.enabled(environ):
+        return accounts(environ, now, refresh)
+    return reserved_accounts(_claude(environ, now, refresh, worker=True) + _codex(environ, now, refresh), environ)
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
