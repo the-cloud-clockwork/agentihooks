@@ -60,7 +60,11 @@ def close(slug: str, row: dict[str, Any], autonomy: str) -> Closing | None:
     target = next((t for t in doc["tasks"] if t["id"] == target_id), None) if doc else None
     if doc is None or target is None or not target.get("plan_lines"):
         raise SwarmError(UNSLICED.format(task=row["id"], target=target_id))
-    problems = thin_task.section_complete(plan_read.exact(doc, target, load))
+    try:
+        text = plan_read.exact(doc, target, load)
+    except ValueError as error:
+        raise SwarmError(INCOMPLETE.format(target=target_id, problems=str(error))) from error
+    problems = thin_task.section_complete(text)
     if problems:
         raise SwarmError(INCOMPLETE.format(target=target_id, problems=" ".join(problems)))
     limits = slice_check.Limits.from_env(os.environ)

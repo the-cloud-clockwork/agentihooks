@@ -164,6 +164,18 @@ def served(slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]
     return {**found, "rejected": rejected}
 
 
+def fetching(monkeypatch: pytest.MonkeyPatch, change: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    """Make the enhancement close read the test ledger as ``change`` rewrites it."""
+    fetched = plan_read.fetched
+
+    def read(slug: str, environ: Mapping[str, str]) -> tuple[dict[str, Any], Callable[[str, str], bytes] | None]:
+        doc, load = fetched(slug, environ)
+        assert doc is not None
+        return change(doc), load
+
+    monkeypatch.setattr(plan_read, "fetched", read)
+
+
 def publish_plan(monkeypatch: pytest.MonkeyPatch, path: Path, phase: str) -> None:
     """Run the planner's publish-plan command into ``phase`` against the test ledger, storing the plan as a ledger
     artifact."""
@@ -251,6 +263,40 @@ def test_done_refuses_an_incomplete_section_and_names_every_missing_part(
     code, err = cli(capsys, PLANNER, "done", "--slice", TARGET)
     assert code == 1
     assert enhance_review.INCOMPLETE.format(target=TARGET, problems=MISSING) in err
+    assert (task(ENHANCE)["state"], task(TARGET)["enhancement"]) == ("claimed", "needed")
+    assert hold(TARGET) == HELD
+
+
+@pytest.mark.feature("swarm-enhance-close")
+def test_done_refuses_an_enhancement_whose_target_plan_lines_hold_no_text(
+    thin: Seats, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, ledger = thin
+    autonomy(store, "full")
+    sliced(ledger, "\n\n" + section())
+    blank = {"plan_lines": "4-5"}
+    fetching(
+        monkeypatch, lambda doc: {**doc, "tasks": [{**t, **blank} if t["id"] == TARGET else t for t in doc["tasks"]]}
+    )
+    code, err = cli(capsys, PLANNER, "done", "--slice", TARGET)
+    assert code == 1
+    assert enhance_review.INCOMPLETE.format(target=TARGET, problems="plan lines 4-5 hold no text") in err
+    assert (task(ENHANCE)["state"], task(TARGET)["enhancement"]) == ("claimed", "needed")
+    assert hold(TARGET) == HELD
+
+
+@pytest.mark.feature("swarm-enhance-close")
+def test_done_refuses_an_enhancement_whose_stored_plan_is_missing(
+    thin: Seats, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, ledger = thin
+    autonomy(store, "full")
+    sliced(ledger, section())
+    fetching(monkeypatch, lambda doc: {**doc, "artifacts": []})
+    code, err = cli(capsys, PLANNER, "done", "--slice", TARGET)
+    assert code == 1
+    missing = "plan artifact is missing or is not marked as a plan"
+    assert enhance_review.INCOMPLETE.format(target=TARGET, problems=missing) in err
     assert (task(ENHANCE)["state"], task(TARGET)["enhancement"]) == ("claimed", "needed")
     assert hold(TARGET) == HELD
 
