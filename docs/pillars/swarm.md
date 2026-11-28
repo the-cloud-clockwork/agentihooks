@@ -4457,8 +4457,8 @@ description, which is expected to list the rules the thin check failed. The thin
 
 A description names a seam with the word seam or seams, a backticked name, a call shape such as `refresh(`, a dotted
 or snake case name, an endpoint path, or an `agentihooks` or `python -m` command. A task is never thin when it has a
-`plan_slice`, is itself a `plan` task, or has its `enhancement` field set to `planned` or `skipped`. The check only
-returns these lines: no code on `dev` copies them into a description or creates the enhancement task.
+`plan_slice`, is itself a `plan` task, has its `enhancement` field set to `planned` or `skipped`, or is the `ops` task
+`release-<phase>` the tick generates for its own release phase. The check only returns these lines: no code on `dev` copies them into a description or creates the enhancement task.
 
 For swarm `demo`, planner `planner@abcdef-0001` and target `t-login` in phase `p1`, the enhancement steps read:
 

@@ -8,7 +8,7 @@ import time
 from itertools import batched
 from typing import Any
 
-from scripts.swarm.slice_check import CODE_KINDS, done_when, short
+from scripts.swarm.slice_check import CODE_KINDS, RELEASE, done_when, short
 from scripts.swarm_ledger import ledger_kinds
 
 __all__ = ["ENHANCE", "THIN_WORDS", "backfill", "exempt", "section_complete", "thin"]
@@ -76,10 +76,11 @@ def _named_seam(text: str) -> bool:
 
 
 def exempt(task: dict[str, Any]) -> bool:
-    """Whether the task is never thin: it carries a plan slice, is plan kind work, or its enhancement is planned or
-    skipped."""
+    """Whether the task is never thin: it carries a plan slice, is plan kind work, its enhancement is planned or
+    skipped, or it is the ops release task the tick generates for its own phase."""
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
-    return bool(task.get("plan_slice")) or kind == "plan" or task.get("enhancement") in EXEMPT
+    released = kind == "ops" and task.get("id") == RELEASE.format(task.get("phase"))
+    return bool(task.get("plan_slice")) or kind == "plan" or task.get("enhancement") in EXEMPT or released
 
 
 def section_complete(text: str) -> list[str]:
