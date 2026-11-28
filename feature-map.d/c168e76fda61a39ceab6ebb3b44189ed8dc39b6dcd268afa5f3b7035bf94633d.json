@@ -1,0 +1,15 @@
+{
+  "id": "lab-scheduler-exits-after-redis-grace",
+  "rules": [
+    "lab-pass-redis-error-without-grace"
+  ],
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2838",
+  "behaviour": "The CI lab scheduler ends its process with exit code 1 and one flushed line naming the grace window once Redis errors have failed every pass for the grace seconds, read from CI_LAB_REDIS_GRACE_S and 120 seconds by default, so Kubernetes restarts a pod that would otherwise stay Ready and idle through a lasting Redis outage. A run of failed passes shorter than the window is ridden out as before, and a pass with no Redis error starts the window again.",
+  "seam": "scripts.ci_lab.scheduler.serve over the lab fixture with a scripted scheduler tick, an injected clock that each sleep moves on and a grace_s keyword, and scripts.ci_lab.scheduler.main passing grace_s to a fake serve",
+  "tests": [
+    "tests/ci_lab/test_scheduler_serve.py::test_serve_exits_1_once_redis_errors_outlast_the_grace_window",
+    "tests/ci_lab/test_scheduler_serve.py::test_serve_rides_out_redis_errors_shorter_than_the_grace_window",
+    "tests/ci_lab/test_scheduler_serve.py::test_a_good_pass_resets_the_grace_window"
+  ]
+}

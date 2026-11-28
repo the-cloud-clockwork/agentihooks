@@ -80,7 +80,7 @@ from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer, Delivery
 from scripts.github_app import GitAuthRefused, GitHubAppAuth
-from scripts.swarm import metrics_outbox
+from scripts.swarm import metrics_outbox, redis_grace
 
 __all__ = [
     "GRADES",
@@ -2540,6 +2540,8 @@ def serve(
     passes: int,
     clock: Callable[[], float],
     sleep: Callable[[float], None],
+    *,
+    grace_s: float = redis_grace.DEFAULT_GRACE_S,
 ) -> int:
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
     action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
