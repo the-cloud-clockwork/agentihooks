@@ -1,0 +1,12 @@
+{
+  "id": "role-skill-commands-parse",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2858",
+  "behaviour": "Every agentihooks command a package role skill shows, inline in backticks or on a line inside a fenced block with its backslash continuation lines joined, parses with that command's own parser, forge and review included; a fenced forge command with a non numeric number or an unknown forge kind fails the parse check.",
+  "seam": "_commands, _parse_each and PARSERS in tests/test_package_role_skills.py over the five role SKILL.md files and the forge and review command parsers",
+  "tests": [
+    "tests/test_package_role_skills.py::test_every_role_skill_command_parses",
+    "tests/test_package_role_skills.py::test_commands_reads_fenced_blocks_with_continuations",
+    "tests/test_package_role_skills.py::test_a_planted_bad_forge_command_in_a_fence_turns_the_parse_check_red"
+  ]
+}
