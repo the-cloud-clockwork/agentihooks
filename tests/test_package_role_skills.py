@@ -139,14 +139,43 @@ def test_role_skill_covers_its_loop(role):
     assert [step for step in (*COMMON, *LOOP[role]) if step not in text] == []
 
 
+@pytest.mark.feature("role-skill-commands-parse")
 @pytest.mark.parametrize("role", ROLE_SKILLS)
-def test_every_role_skill_command_parses(role):
-    commands = [c for c in _commands(_skill(role).read_text()) if not c.startswith("agentihooks ledger watch")]
+def test_every_role_skill_command_parses(role: str) -> None:
+    _parse_each([c for c in _commands(_skill(role).read_text()) if not c.startswith("agentihooks ledger watch")])
 
+
+def _parse_each(commands: list[str]) -> None:
     assert commands
     for command in commands:
         tool, argv = _argv(command)
         assert PARSERS[tool](argv), command
+
+
+@pytest.mark.feature("role-skill-commands-parse")
+def test_commands_reads_fenced_blocks_with_continuations() -> None:
+    commands = _commands(_skill("reviewer").read_text())
+
+    assert "agentihooks forge read 123 --remote https://github.com/owner/repo.git --forge github" in commands
+    assert (
+        "agentihooks review post https://github.com/owner/repo/pull/123 --slug <slug> "
+        "--finding '<first finding>' --finding '<next finding>'"
+    ) in commands
+
+
+FENCED_FORGE = (
+    "Read the change request:\n\n   ```bash\n   agentihooks forge read {number} \\\n"
+    "     --remote https://github.com/owner/repo.git \\\n     --forge {kind}\n   ```\n"
+)
+
+
+@pytest.mark.feature("role-skill-commands-parse")
+@pytest.mark.parametrize(("number", "kind"), [("notanumber", "github"), ("123", "bitbucket")])
+def test_a_planted_bad_forge_command_in_a_fence_turns_the_parse_check_red(number: str, kind: str) -> None:
+    _parse_each(_commands(FENCED_FORGE.format(number="123", kind="github")))
+
+    with pytest.raises(SystemExit):
+        _parse_each(_commands(FENCED_FORGE.format(number=number, kind=kind)))
 
 
 @pytest.mark.parametrize("role", ROLE_SKILLS)
