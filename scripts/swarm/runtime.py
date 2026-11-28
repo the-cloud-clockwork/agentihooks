@@ -362,6 +362,13 @@ def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
     return herdr
 
 
+def worker_runtime() -> "HerdrRuntime":
+    """A herdr runtime for hive worker spawns, reading the Claude cap the hub admits those workers by."""
+    herdr = HerdrRuntime()
+    herdr.quota_accounts = capacity.worker_accounts
+    return herdr
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
     pass_memo: dict | None = None

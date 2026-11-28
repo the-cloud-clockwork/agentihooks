@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1_refusal_held:6be25a6722659ba7a83b9ba0ec20d3b55979f3d58cb65cb6496e6019ba892f57": {
+    "reader": "standards_reader",
+    "reason": "The mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime, so _refusal_held reads the same redis key and returns the same value."
+  }
+}

@@ -83,7 +83,9 @@ response header carries the fable window.
 
 1. Each account's cap of live sessions comes from its five hour window alone:
    6 at 60% or more left, 4 at 40 to 60%, 3 at 10 to 40%, 2 at 5 to 10%, none
-   below 5% until that window resets.
+   below 5% until that window resets. Swarm workers on hives take this band
+   scaled toward `AGENTIHOOKS_HIVE_SESSION_CEILING` instead, the cap both the hub
+   admission and the hive spawn read (see [Hives](hives.md)).
 2. An account with under 5% of its week left takes no new session until the week
    resets.
 3. A reading that is missing or older than fifteen minutes is refreshed first; an
