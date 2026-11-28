@@ -735,6 +735,7 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_cr
     assert 0 < record["expires"] - auth.time.time() <= auth.SERVICE_TTL_S
 
 
+@pytest.mark.feature("hub-service-credential-renewal-survives-wait-failure")
 def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monkeypatch, hive, capsys):
     import json
 
@@ -769,6 +770,64 @@ def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monke
     assert auth.controller(hive, credential)
     assert 0 < json.loads(store.get(key).value)["expires"] - auth.time.time() <= auth.SERVICE_TTL_S
     assert capsys.readouterr().err.startswith("hub: service credential renewal failed\nTraceback")
+
+
+def _loading() -> Exception:
+    import redis
+
+    return redis.BusyLoadingError("Redis is loading the dataset in memory")
+
+
+def _unreachable() -> Exception:
+    return OSError(113, "No route to host")
+
+
+@pytest.mark.feature("hub-service-credential-renewal-survives-wait-failure")
+@pytest.mark.parametrize("failure", [_refused, _loading, _unreachable], ids=["connection", "busy-loading", "os"])
+def test_the_renewal_loop_keeps_renewing_after_its_timer_wait_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    hive: Any,
+    capsys: pytest.CaptureFixture[str],
+    failure: Callable[[], Exception],
+) -> None:
+    from scripts.hive import auth
+
+    credential = auth.issue_service(hive, "hub-a")
+    store, key = auth._store(hive), auth._service_key("hub-a")
+    auth.hive_state.amend(store, key, lambda _: None)
+    assert not auth.controller(hive, credential)
+    keep_service = auth.keep_service
+    steps: list[tuple[str, object]] = []
+    answers = iter([failure(), None])
+
+    def wait(seconds: float) -> None:
+        steps.append(("wait", seconds))
+        answer = next(answers, Stop())
+        if answer is not None:
+            raise answer
+
+    def slept(seconds: float) -> None:
+        steps.append(("sleep", seconds))
+
+    def keep(redis: Any, kept: str) -> None:
+        steps.append(("keep", kept))
+        keep_service(redis, kept)
+
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    monkeypatch.setattr(runner, "sleep", slept, raising=False)
+    monkeypatch.setattr(auth, "keep_service", keep)
+    with pytest.raises(Stop):
+        runner._renew_forever(hive, credential)
+    assert steps == [
+        ("wait", runner.KEEP_S),
+        ("sleep", runner.KEEP_S),
+        ("keep", credential),
+        ("wait", runner.KEEP_S),
+        ("keep", credential),
+        ("wait", runner.KEEP_S),
+    ]
+    assert auth.controller(hive, credential)
+    assert capsys.readouterr().err.startswith("hub: service credential renewal wait failed\nTraceback")
 
 
 def test_the_renewal_runs_on_a_daemon_thread(monkeypatch, hive):
