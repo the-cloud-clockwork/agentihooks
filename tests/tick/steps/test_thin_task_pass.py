@@ -120,6 +120,11 @@ class Pass:
         return [(call.operation, call.args) for call in self.ledger.calls]
 
 
+@pytest.fixture(autouse=True)
+def ungraded_thin_tasks() -> None:
+    thin_task._graded.cache_clear()  # pyright: ignore[reportPrivateUsage]
+
+
 def _step() -> CallStep:
     import_module("scripts.tick.steps.thin")
     found = {step.name: step for step in registry.steps()}["thin task pass"]
