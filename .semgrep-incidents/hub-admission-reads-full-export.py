@@ -41,7 +41,9 @@ class PlanDocTasksCollection:
     def _steering(self, slug: str, phase_id: str) -> object:
         # ruleid: hub-admission-reads-full-export
         rows = self._ledger.tasks(slug)
-        return [row for row in rows if row.get("phase") == phase_id]
+        # ruleid: hub-admission-reads-full-export
+        document = self._ledger.export(slug)
+        return [row for row in rows if row.get("phase") == phase_id], document
 
 
 class PlanDocNarrow:

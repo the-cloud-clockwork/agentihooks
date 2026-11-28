@@ -247,25 +247,12 @@ class LedgerClient:
         return rows
 
     def tasks_in_phases(self, slug: str, phases: Iterable[str], fields: Iterable[str] = ()) -> list[dict[str, Any]]:
-        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection.
-
-        A ledger server older than the phases selection refuses it as schema_invalid; only then is the whole tasks
-        collection read and selected here by the server's own selection code, until that server is redeployed.
-        """
-        query = where_query(phases=phases, fields=fields)
-        try:
-            rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
-            return rows
-        except urllib.error.HTTPError as exc:
-            from scripts.swarm_ledger.api.client import failure
-
-            replay, error = failure(exc)
-            if exc.code != 400 or error.get("code") != "schema_invalid":
-                raise replay from None
-        from scripts.swarm_ledger.api import task_list
-
-        selected: list[dict[str, Any]] = task_list.selecting(self.tasks(slug), query)["data"]
-        return selected
+        """The task rows of the given phases, cut to the named fields beside their ids, read by a narrow selection
+        that a refusal never widens into the whole tasks collection."""
+        rows: list[dict[str, Any]] = self._resource(
+            slug, f"tasks?{urlencode(where_query(phases=phases, fields=fields))}"
+        )
+        return rows
 
     def thread(self, slug: str, record: str, name: str) -> list[dict[str, Any]]:
         """Every entry of one record's thread, such as a phase's comments, read page by page without the record."""

@@ -2179,9 +2179,8 @@ database, so the read reaches no separate server. The same read is open to any l
 | `phases` | Phase ids, comma separated, at most 8,000 characters | Its `phase` is listed |
 | `fields` | Field names, comma separated, at most 500 characters | Not a filter: each kept row carries only its `id` and the named fields it has |
 
-`LedgerClient.tasks_in_phases` sends the `phases` selection. A ledger server older than that filter answers
-`400 schema_invalid`; only then the client reads the whole tasks collection and selects from it with the server's own
-selection code, until that server is redeployed.
+`LedgerClient.tasks_in_phases` sends the `phases` selection and raises any refusal; it never widens into the whole
+tasks collection. The hub runs the route code of its own release, so it always knows the filter.
 
 A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
 except its comments and answers, which come back as `comments_count` and `answers_count`. The reply is one page,
@@ -2271,10 +2270,11 @@ is its dependency phases' reads, most often a long comment thread. A large `turn
   the view equal to the steering built from the whole export, for a plan task with transitive and cyclic
   dependencies, comments, a sent back review, a published plan and an enhancement target, and counts its reads: each
   dependency phase and thread once, no export. `tests/swarm/test_ledger_client_task.py` and
-  `tests/swarm_ledger/test_task_list_selecting.py` cover the phase selection, its fallback on an older ledger server,
-  and the thread and artifact reads.
+  `tests/swarm_ledger/test_task_list_selecting.py` cover the phase selection, a refusal raised without a whole tasks
+  read, and the thread and artifact reads.
 - Semgrep incident rule `hub-admission-reads-full-export`, scoped to `scripts/hub/admission.py` and
-  `scripts/swarm/admission_view.py`: any `.snapshot(...)`, `.state(...)` or `.tasks(...)` call there is an error. Run it by hand with:
+  `scripts/swarm/admission_view.py`: any `.snapshot(...)`, `.state(...)`, `.tasks(...)` or `.export(...)` call there
+  is an error. Run it by hand with:
 
 ```bash
 semgrep scan --config .semgrep-incidents/hub-admission-reads-full-export.yml scripts/hub/

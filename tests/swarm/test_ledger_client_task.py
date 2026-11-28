@@ -130,41 +130,20 @@ def test_a_phase_read_asks_the_ledger_for_the_tasks_of_those_phases_cut_to_their
     assert reads == [("demo", "tasks?fields=title%2Cstate&phases=p1%2Cp2", False)]
 
 
-PHASED_ROWS = [
-    {"id": "t1", "phase": "p1", "title": "A", "comments": [{"text": "x"}]},
-    {"id": "t2", "phase": "p3", "title": "B"},
-    {"id": "t3", "phase": "p2", "title": "C", "state": "done"},
-]
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+@pytest.mark.parametrize("code,error", [(400, "schema_invalid"), (400, "revision_conflict"), (500, "schema_invalid")])
+def test_a_refused_phase_read_is_raised_and_never_widens_into_the_tasks_collection(
+    monkeypatch: pytest.MonkeyPatch, code: int, error: str
+) -> None:
+    reads: list[tuple[str, str, bool]] = []
 
-
-def phase_refusing(code: int, error: str, reads: list[tuple[str, str, bool]]) -> object:
     def resource(slug: str, path: str, collection: bool = False) -> list[dict[str, object]]:
         reads.append((slug, path, collection))
         if not collection:
             raise refused(code, error)
-        return PHASED_ROWS
+        return [{"id": "t1", "phase": "p1"}]
 
-    return SimpleNamespace(resource=resource)
-
-
-@pytest.mark.feature("plan-lane-admission-narrow-read")
-def test_a_ledger_without_the_phase_selection_falls_back_to_selecting_its_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reads: list[tuple[str, str, bool]] = []
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: phase_refusing(400, "schema_invalid", reads))
-
-    found = ledger_client.LedgerClient().tasks_in_phases("demo", iter(["p1", "p2"]), ("title", "state"))
-
-    assert found == [{"id": "t1", "title": "A"}, {"id": "t3", "state": "done", "title": "C"}]
-    assert reads[1:] == [("demo", "tasks", True)]
-
-
-@pytest.mark.feature("plan-lane-admission-narrow-read")
-@pytest.mark.parametrize("code,error", [(400, "revision_conflict"), (500, "schema_invalid")])
-def test_any_other_refusal_of_a_phase_read_is_raised(monkeypatch: pytest.MonkeyPatch, code: int, error: str) -> None:
-    reads: list[tuple[str, str, bool]] = []
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: phase_refusing(code, error, reads))
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(resource=resource))
 
     with pytest.raises(urllib.error.HTTPError) as raised:
         ledger_client.LedgerClient().tasks_in_phases("demo", ["p1"])

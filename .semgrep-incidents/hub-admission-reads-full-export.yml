@@ -18,3 +18,4 @@ rules:
       - pattern: $OBJ.snapshot(...)
       - pattern: $OBJ.state(...)
       - pattern: $OBJ.tasks(...)
+      - pattern: $OBJ.export(...)
