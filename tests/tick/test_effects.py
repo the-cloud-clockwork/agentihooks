@@ -112,6 +112,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     assert declared == {
         "reap": frozenset({"ledger", "runtime", "inbox"}),
         "hive sweep": frozenset({"coordination"}),
+        "hive drain notice": frozenset({"coordination"}),
         "workflow runner": frozenset({"host"}),
         "knowledge warm": frozenset({"host"}),
         "doc items map": frozenset({"ledger", "coordination"}),

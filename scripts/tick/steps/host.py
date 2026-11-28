@@ -31,7 +31,7 @@ from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
-REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
+REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "hive drain notice", "outbox migration"})
 VIEW_RESERVE_S = 20.0
 PENDING_VIEW = object()
 _LAST_VIEWS: dict[str, Any] = {}
@@ -352,6 +352,29 @@ registry.register(
         lane=Lane("slow"),
         effects=frozenset({"coordination"}),
         feature="hive-quiet-sweep",
+    )
+)
+
+
+def _hive_drain_notice(cli: Any, get: Get) -> list[str]:
+    """Tell the master of each swarm with a live agent on a draining hive of that drain, once per drain."""
+    from scripts.hive import sweep
+
+    timing.call(sweep.notify_drains, get("store"))  # pyright: ignore[reportUnknownMemberType]
+    return []
+
+
+registry.register(
+    CallStep(
+        "hive drain notice",
+        "wrapper health",
+        held(_hive_drain_notice),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"coordination"}),
+        feature="hive-stop-drain-notice",
     )
 )
 

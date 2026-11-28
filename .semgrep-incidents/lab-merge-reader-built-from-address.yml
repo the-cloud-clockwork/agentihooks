@@ -1,0 +1,16 @@
+rules:
+  - id: lab-merge-reader-built-from-address
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The scheduler calls the merge resolver with a repository address. Its GitHub reader needs owner and name, so
+      build the reader from the converted value and ask the mirror by the value given.
+    paths:
+      include:
+        - /scripts/ci_lab/merges.py
+        - lab-merge-reader-built-from-address.py
+    patterns:
+      - pattern-inside: |
+          def __call__(self, $REPO, ...):
+              ...
+      - pattern: self.reader($REPO)
