@@ -329,18 +329,17 @@ def test_background_answers_a_found_merge_until_its_fresh_window_ends_then_reads
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
-def test_background_keeps_only_a_found_merge_inside_its_fresh_window_while_another_head_is_asked() -> None:
-    found, failed, absent = (("example/repo", number, HEAD) for number in (41, 42, 43))
-    other = ("example/repo", 44, OTHER)
-    held = Held({found: (MERGE, BASE), failed: RuntimeError("boom"), absent: None, other: (MERGE, BASE)})
+def test_background_forgets_a_merge_its_head_read_once_its_fresh_window_ended_and_another_head_is_asked() -> None:
+    found, other = ("example/repo", 41, HEAD), ("example/repo", 44, OTHER)
+    held = Held({found: (MERGE, BASE), other: (MERGE, BASE)})
     clock = Clock()
     background = merges.Background(held, clock=clock, fresh_s=30.0)
-    for key in (found, failed, absent):
-        with pytest.raises(merges.MergePending):
-            background(*key)
-        assert held.started.acquire(timeout=WAIT_S)
+    with pytest.raises(merges.MergePending):
+        background(*found)
+    assert held.started.acquire(timeout=WAIT_S)
     held.release.set()
     _finished(background.resolutions)
+    assert background(*found) == (MERGE, BASE)
     clock.now = 29.0
     with contextlib.suppress(merges.MergePending):
         background(*other)
@@ -349,6 +348,161 @@ def test_background_keeps_only_a_found_merge_inside_its_fresh_window_while_anoth
     with contextlib.suppress(merges.MergePending):
         background(*other)
     assert set(background.resolutions) == {other}
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("kept_s", [None, 120.0], ids=["an-hour-by-default", "the-window-given"])
+def test_background_keeps_an_answer_no_head_read_until_its_kept_window_ends_while_another_head_is_asked(
+    kept_s: float | None,
+) -> None:
+    found, failed, absent = (("example/repo", number, HEAD) for number in (41, 42, 43))
+    other = ("example/repo", 44, OTHER)
+    held = Held({found: (MERGE, BASE), failed: RuntimeError("boom"), absent: None, other: (MERGE, BASE)})
+    clock = Clock(now=100.0)
+    if kept_s is None:
+        background, window = merges.Background(held, clock=clock), 3600.0
+    else:
+        background, window = merges.Background(held, clock=clock, kept_s=kept_s), kept_s
+    for key in (found, failed, absent):
+        with pytest.raises(merges.MergePending):
+            background(*key)
+        assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = 100.0 + window - 1.0
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert set(background.resolutions) == {found, failed, absent, other}
+    clock.now = 100.0 + window
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert set(background.resolutions) == {other}
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("answer", [(MERGE, BASE), None, RuntimeError("boom")], ids=["found", "absent", "failed"])
+def test_background_resolves_again_for_a_head_that_asks_once_its_unread_answer_left_the_kept_window(
+    answer: tuple[str, str] | None | Exception,
+) -> None:
+    early, late = (("example/repo", number, HEAD) for number in (41, 42))
+    held = Held({early: (MERGE, BASE), late: answer})
+    clock = Clock(now=100.0)
+    background = merges.Background(held, clock=clock, kept_s=120.0)
+    for key in (early, late):
+        with pytest.raises(merges.MergePending):
+            background(*key)
+        assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = 219.0
+    assert background(*early) == (MERGE, BASE)
+    clock.now = 220.0
+    with pytest.raises(merges.MergePending):
+        background(*late)
+    assert held.started.acquire(timeout=WAIT_S)
+    assert held.asked == [early, late, late]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("waited", [0.0, 31.0], ids=["inside-the-fresh-window", "past-the-fresh-window"])
+def test_background_returns_a_failed_resolution_to_its_own_head_after_another_head_was_asked(waited: float) -> None:
+    failed, other = ("example/repo", 41, HEAD), ("example/repo", 44, OTHER)
+    held = Held({failed: merges.MergeRefused("GET pulls/41 answered 404"), other: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    with pytest.raises(merges.MergePending):
+        background(*failed)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = waited
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    with pytest.raises(merges.MergeRefused, match="answered 404"):
+        background(*failed)
+    assert held.asked.count(failed) == 1
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("waited", [0.0, 31.0], ids=["inside-the-fresh-window", "past-the-fresh-window"])
+def test_background_returns_an_absent_answer_to_its_own_head_after_another_head_was_asked(waited: float) -> None:
+    absent, other = ("example/repo", 43, HEAD), ("example/repo", 44, OTHER)
+    held = Held({absent: None, other: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    with pytest.raises(merges.MergePending):
+        background(*absent)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = waited
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert background(*absent) is None
+    assert held.asked.count(absent) == 1
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+@pytest.mark.parametrize("waited", [0.0, 31.0], ids=["inside-the-fresh-window", "past-the-fresh-window"])
+def test_background_returns_a_found_merge_to_its_own_head_after_another_head_was_asked(waited: float) -> None:
+    found, other = ("example/repo", 41, HEAD), ("example/repo", 44, OTHER)
+    held = Held({found: (MERGE, BASE), other: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    with pytest.raises(merges.MergePending):
+        background(*found)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = waited
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert background(*found) == (MERGE, BASE)
+    assert held.asked.count(found) == 1
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_keeps_the_answer_of_a_head_resolved_again_after_its_read_merge_left() -> None:
+    key, other = ("example/repo", 41, HEAD), ("example/repo", 44, OTHER)
+    held = Held({key: (MERGE, BASE), other: (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, fresh_s=30.0)
+    with pytest.raises(merges.MergePending):
+        background(*key)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    assert background(*key) == (MERGE, BASE)
+    clock.now = 30.0
+    assert background(*key) == (MERGE, BASE)
+    held.release.clear()
+    with pytest.raises(merges.MergePending):
+        background(*key)
+    assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    clock.now = 61.0
+    with contextlib.suppress(merges.MergePending):
+        background(*other)
+    assert background(*key) == (MERGE, BASE)
+    assert held.asked.count(key) == 2
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_gives_each_waiting_head_its_own_failure_when_a_pass_asks_them_in_turn() -> None:
+    keys = [("example/repo", number, HEAD) for number in (41, 42, 43)]
+    held = Held({key: merges.MergeRefused(f"GET pulls/{key[1]} answered 404") for key in keys})
+    background = merges.Background(held, clock=Clock())
+    for key in keys:
+        with pytest.raises(merges.MergePending):
+            background(*key)
+        assert held.started.acquire(timeout=WAIT_S)
+    held.release.set()
+    _finished(background.resolutions)
+    for key in keys:
+        with pytest.raises(merges.MergeRefused, match=f"^GET pulls/{key[1]} answered 404$"):
+            background(*key)
+    assert held.asked == keys
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -596,16 +750,25 @@ class _StillRunning:
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
-def test_fresh_treats_a_still_running_resolution_as_fresh_without_reading_its_result() -> None:
+@pytest.mark.parametrize("read", [True, False], ids=["read", "unread"])
+def test_fresh_treats_a_still_running_resolution_as_fresh_without_reading_its_result(read: bool) -> None:
     background = merges.Background(lambda *_: None, clock=lambda: 0.0)
     future = cast("Future[tuple[str, str] | None]", _StillRunning())
-    assert background._fresh(0.0, ([], future)) is True
+    assert background._fresh(0.0, ([], future), read=read) is True
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
-def test_fresh_measures_the_window_from_when_the_resolution_began_not_added_to_the_clock() -> None:
-    background = merges.Background(lambda *_: None, clock=lambda: 0.0, fresh_s=30.0)
+@pytest.mark.parametrize("answer", [(MERGE, BASE), None, RuntimeError("boom")], ids=["found", "absent", "failed"])
+def test_fresh_measures_the_window_from_when_the_resolution_began_not_added_to_the_clock(
+    answer: tuple[str, str] | Exception | None,
+) -> None:
+    background = merges.Background(lambda *_: None, clock=lambda: 0.0, fresh_s=30.0, kept_s=120.0)
     future: Future[tuple[str, str] | None] = Future()
-    future.set_result((MERGE, BASE))
-    assert background._fresh(120.0, ([100.0], future)) is True
-    assert background._fresh(131.0, ([100.0], future)) is False
+    if isinstance(answer, Exception):
+        future.set_exception(answer)
+    else:
+        future.set_result(answer)
+    assert background._fresh(129.0, ([100.0], future), read=True) is True
+    assert background._fresh(130.0, ([100.0], future), read=True) is False
+    assert background._fresh(219.0, ([100.0], future), read=False) is True
+    assert background._fresh(220.0, ([100.0], future), read=False) is False
