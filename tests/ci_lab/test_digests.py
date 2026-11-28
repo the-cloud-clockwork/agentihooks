@@ -267,6 +267,7 @@ def test_two_head_shas_over_equal_trees_key_differently_and_one_head_sha_keys_on
     first = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
     second = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "b" * 40})
     repeated = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    assert digests.static_key(first) == "static-v1-0d05572ff3f264c1b9c4b5edd4bd8a78c36b64878ade38a16d05140e9d9b266d"
     assert digests.static_key(first) != digests.static_key(second)
     assert digests.static_key(first) == digests.static_key(repeated)
     assert digests.static_key(inputs) != digests.static_key(first)
