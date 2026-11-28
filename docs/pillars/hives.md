@@ -2180,7 +2180,9 @@ database, so the read reaches no separate server. The same read is open to any l
 | `fields` | Field names, comma separated, at most 500 characters | Not a filter: each kept row carries only its `id` and the named fields it has |
 
 `LedgerClient.tasks_in_phases` sends the `phases` selection and raises any refusal; it never widens into the whole
-tasks collection. The hub runs the route code of its own release, so it always knows the filter.
+tasks collection. A request reaches this host's warm writer first and runs the route code in process only when no
+writer takes it, so a warm writer older than the `phases` filter answers `400 schema_invalid` and a plan task
+admission fails until that writer restarts on the new release.
 
 A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
 except its comments and answers, which come back as `comments_count` and `answers_count`. The reply is one page,
