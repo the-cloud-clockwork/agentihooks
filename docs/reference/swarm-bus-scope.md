@@ -542,8 +542,10 @@ users files and compares the grants agentihooks renders with the antoncore users
 | `member_claims`, with its `_INBOX.<user>.>` read as `_INBOX.>` | `swarm-hive` | Compared while the user exists; skipped with a notice once it is gone |
 | `controller_claims` | `swarm-controller` | Always compared; a missing user fails the check |
 
-It also holds the `swarm-ci-lab-scheduler` user to the names the lab scheduler binds. It reads `LAB_STREAM`
-from `scripts/events/nats.py` and `DURABLE` from `scripts/ci_lab/scheduler.py` without running either file. Every
+It also holds the `swarm-ci-lab-scheduler` user to the names the lab scheduler binds. It reads `LAB_STREAM` and
+`LAB_CONSUMER` from `scripts/events/lab_names.py`, a module with no imports, without running it; tests hold that
+module equal to the stream, durables and subjects `scripts/events/nats.py`, `scripts/ci_lab/scheduler.py` and
+`scripts/ci_lab/relay.py` bind. Every
 binding of each name must be a top level non-empty string literal assignment, and the last one is graded; a
 binding made only at run time, through `globals()`, `exec` or `setattr` on the module, is outside what this read sees.
 The user must name `$JS.API.CONSUMER.INFO.<stream>.<durable>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>`,
