@@ -264,6 +264,42 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute:
             "def dormant(value: target(1)):\n    return value\ndef test_annotation_import():\n    assert True\n",
             ["test_annotation_import"],
         ),
+        (
+            "handlers = {'write': lambda pipe, key, value: pipe.set(key, value)}\n"
+            "def test_unrelated():\n    assert True\n"
+            "def test_reaches():\n    assert target(1) == 2\n",
+            ["test_reaches"],
+        ),
+        (
+            "from functools import reduce\n"
+            "def test_callback():\n    assert reduce(lambda total, value: target(value), [1], 0) == 2\n",
+            ["test_callback"],
+        ),
+        (
+            "handlers = {'first': lambda: 0, 'second': lambda: target(1)}\n"
+            "def test_unrelated():\n    assert True\n"
+            "def test_dispatch():\n    assert handlers['second']() == 2\n",
+            ["test_dispatch"],
+        ),
+        (
+            "class Runner:\n    def execute(self):\n        return target(1)\n"
+            "factory = lambda: Runner\n"
+            "def test_factory():\n    assert factory()().execute() == 2\n",
+            ["test_factory"],
+        ),
+        (
+            "callback = lambda value=target(1): value\ndef test_default():\n    assert True\n",
+            ["test_default"],
+        ),
+        (
+            "def test_immediate():\n    assert (lambda: target(1))() == 2\n",
+            ["test_immediate"],
+        ),
+        (
+            "def invoke(callback):\n    return callback()\n"
+            "def test_callback():\n    assert invoke(lambda: target(1)) == 2\n",
+            ["test_callback"],
+        ),
     ],
     ids=[
         "direct",
@@ -294,6 +330,13 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "", execute:
         "bare-annotation-is-not-construction",
         "annotation-call-initialization",
         "function-annotation-initialization",
+        "dormant-lambda-table",
+        "external-lambda-callback",
+        "lambda-dictionary-dispatch",
+        "lambda-returned-class",
+        "lambda-default-initialization",
+        "immediate-lambda",
+        "forwarded-lambda-callback",
     ],
 )
 def test_statistics_candidates_preserve_indirect_reach_and_order(

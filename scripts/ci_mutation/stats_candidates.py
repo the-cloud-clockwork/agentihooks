@@ -44,6 +44,8 @@ def initialized(node: ast.AST) -> Sequence[ast.AST]:
                 if value is not None and any(isinstance(child, ast.Call) for child in ast.walk(value))
             ),
         ]
+    if isinstance(node, ast.Lambda):
+        return [*node.args.defaults, *(value for value in node.args.kw_defaults if value)]
     if isinstance(node, ast.AnnAssign) and isinstance(node.annotation, ast.Name):
         return [node.target, *([node.value] if node.value is not None else [])]
     if isinstance(node, ast.If) and ast.unparse(node.test) in ("__name__ == '__main__'", "'__main__' == __name__"):
@@ -98,6 +100,7 @@ class Reach:
         self.root = root.resolve()
         self.changes = changes
         self.nodes: dict[Key, ast.AST] = {}
+        self.lambdas: dict[ast.Lambda, Key] = {}
         self.parents: dict[Key, Key] = {}
         self.bindings: dict[Key, dict[str, list[ast.AST]]] = {}
         self.aliases: dict[Key, dict[str, list[tuple[str, str]]]] = {}
@@ -237,14 +240,16 @@ class Reach:
         owner = self.parents.get(scope)
         if name in ("self", "cls") and owner is not None and isinstance(self.nodes[owner], ast.ClassDef):
             return {owner}
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
             arguments.extend(value for value in (node.args.vararg, node.args.kwarg) if value is not None)
             for argument in arguments:
                 if argument.arg == name:
                     if argument.annotation is not None:
                         return self.annotation(scope, argument.annotation)
-                    return {EXTERNAL if name == "request" or node.name.startswith("pytest_") else UNKNOWN}
+                    return {
+                        EXTERNAL if name == "request" or getattr(node, "name", "").startswith("pytest_") else UNKNOWN
+                    }
         if scope in self.parents:
             return self.binding(self.parents[scope], name)
         if name in vars(__import__("builtins")) or name in ("__name__", "__file__", "__package__"):
@@ -308,11 +313,23 @@ class Reach:
             return set[Key]().union(*(self.value(scope, value) for value in node.elts))
         if isinstance(node, ast.Subscript):
             return self.subscript(scope, node)
-        if isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr, ast.Dict, ast.Compare, ast.UnaryOp)):
+        if isinstance(node, ast.Dict):
+            return set[Key]().union(*(self.value(scope, value) for value in node.values)) or {EXTERNAL}
+        if isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr, ast.Compare, ast.UnaryOp)):
             return {EXTERNAL}
         if isinstance(node, ast.Lambda):
-            return {UNKNOWN}
+            return {self.lambda_key(scope, node)}
         return {UNKNOWN}
+
+    def lambda_key(self, scope: Key, node: ast.Lambda) -> Key:
+        if node not in self.lambdas:
+            key = scope[0], -len(self.lambdas) - 1
+            self.lambdas[node] = key
+            self.nodes[key] = node
+            self.parents[key] = scope
+            self.bindings[key] = {}
+            self.aliases[key] = {}
+        return self.lambdas[node]
 
     def attribute(self, owners: set[Key], name: str) -> set[Key]:
         result: set[Key] = set()
@@ -385,11 +402,16 @@ class Reach:
         if token in self.active:
             return {UNKNOWN}
         self.active.add(token)
-        values = [
-            node.value
-            for node in self.executed(key)
-            if isinstance(node, (ast.Return, ast.Yield)) and node.value is not None
-        ]
+        definition = self.nodes[key]
+        values = (
+            [definition.body]
+            if isinstance(definition, ast.Lambda)
+            else [
+                node.value
+                for node in self.executed(key)
+                if isinstance(node, (ast.Return, ast.Yield)) and node.value is not None
+            ]
+        )
         result = set[Key]().union(*(self.value(key, value) for value in values)) if values else {EXTERNAL}
         self.active.remove(token)
         return result
@@ -490,24 +512,29 @@ class Reach:
                     result.add(UNKNOWN)
         return result
 
+    def call_arguments(self, key: Key, node: ast.Call) -> set[Key]:
+        arguments = [*node.args, *(value.value for value in node.keywords)]
+        return {origin for argument in arguments for origin in self.value(key, argument) if origin[0]}
+
     def call_edges(self, key: Key, node: ast.Call) -> set[Key]:
+        arguments = self.call_arguments(key, node)
         kind = self.lookup_kind(key, node.func)
         if kind == "globals":
-            return set()
+            return arguments
         if kind in ("getattr", "hasattr"):
             if not node.args:
-                return {UNKNOWN}
+                return arguments | {UNKNOWN}
             owners = self.value(key, node.args[0])
-            result = {owner for owner in owners if not owner[0]}
+            result = arguments | {owner for owner in owners if not owner[0]}
             for owner in owners:
                 if owner[0]:
                     result.update(self.bindings_to_keys(owner, "__getattr__"))
             return result
         if kind in ("import_module", "__import__"):
-            return self.call_value(key, node)
+            return arguments | self.call_value(key, node)
         if kind:
-            return {UNKNOWN}
-        return self.callables(key, node) | self.patch_imports(key, node)
+            return arguments | {UNKNOWN}
+        return arguments | self.callables(key, node) | self.patch_imports(key, node)
 
     def callables(self, key: Key, node: ast.Call) -> set[Key]:
         functions = self.value(key, node.func)
@@ -516,8 +543,10 @@ class Reach:
                 functions.update(self.bindings_to_keys(function, "__init__"))
                 functions.update(self.bindings_to_keys(function, "__new__"))
         for function in functions:
-            if function[0] and isinstance(definition := self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if definition.name not in ("__init__", "__new__"):
+            if function[0] and isinstance(
+                definition := self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+            ):
+                if isinstance(definition, ast.Lambda) or definition.name not in ("__init__", "__new__"):
                     self.associate(key, function, node)
         return functions
 
@@ -539,7 +568,7 @@ class Reach:
 
     def associate(self, caller: Key, function: Key, call: ast.Call) -> None:
         definition = self.nodes[function]
-        if not isinstance(definition, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not isinstance(definition, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             return
         parameters = [*definition.args.posonlyargs, *definition.args.args]
         values = [self.value(caller, value) for value in call.args]
