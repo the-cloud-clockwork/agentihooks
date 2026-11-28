@@ -64,6 +64,54 @@ HELD = _task("t11", phase="p2")
 SLICED = _task("t11", phase="p3", slice="slices/s2")
 MERGED = [_task("t11", merged_into="t13"), _task("t13", phase="p2", state="done")]
 UNFROZEN = thin.unfrozen({"tasks": TASKS})
+NONE = {"count": 0, "ids": [], "released": 0, "failed": 0}
+MASTER = "master@a1b2c3-0001"
+HELD_TASKS = [
+    _task("r1", enhancement="needed", description=FULL, territory=["scripts/swarm"]),
+    _task("enhance-r1", lane="plan", kind="plan", enhances="r1"),
+    _task("r2", enhancement="needed"),
+    _task("r3", enhancement="needed", description=FULL, pr_url="https://github.com/o/r/pull/9"),
+    _task("r4", enhancement="needed", description=FULL),
+    _task("r5", lane="ci", enhancement="needed", description=FULL),
+    _task("enhance-r5", lane="plan", kind="plan", enhances="r5", state="claimed"),
+    _task("r6", enhancement="needed", description=FULL, out_of_scope=True),
+    _task("enhance-r6", lane="plan", kind="plan", enhances="r6"),
+    _task("r7", state="done", enhancement="needed", description=FULL),
+    {key: value for key, value in _task("r8", enhancement="needed", description=FULL).items() if key != "lane"},
+    _task("enhance-r8", lane="plan", kind="plan", enhances="r8", out_of_scope=True),
+    _task("r9", lane="plan", kind="plan", enhancement="needed", description=FULL),
+    _task("r10", enhancement="planned", description=FULL),
+]
+RELEASED = ["r1", "r4", "r5", "r8"]
+
+
+def _mark(tid: str) -> dict[str, object]:
+    return {
+        "op": "task_enhancement",
+        "id": f"thin-release-{tid}",
+        "by": MASTER,
+        "item": f"tasks/{tid}",
+        "expected": "needed",
+        "enhancement": "skipped",
+    }
+
+
+def _scope(tid: str) -> dict[str, object]:
+    return {
+        "op": "set",
+        "id": f"thin-scope-{tid}",
+        "by": MASTER,
+        "path": f"tasks/enhance-{tid}/out_of_scope",
+        "value": True,
+    }
+
+
+RELEASE_CALLS = [
+    ("mutate", ([_mark("r1"), _scope("r1")],)),
+    ("mutate", ([_mark("r4")],)),
+    ("mutate", ([_mark("r5")],)),
+    ("mutate", ([_mark("r8")],)),
+]
 
 
 @dataclass
@@ -198,7 +246,9 @@ def test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_noth
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {
         "dry_run": True,
+        "held": 1,
         "lanes": REPORT,
+        "release": NONE,
         "actions": [],
         "counts": {"queued": 0, "failed": 0, "skipped": 0},
     }
@@ -224,7 +274,9 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     lines = [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")]
     assert json.loads(captured.out) == {
         "dry_run": False,
+        "held": 1,
         "lanes": REPORT,
+        "release": NONE,
         "actions": lines,
         "counts": {"queued": 5, "failed": 0, "skipped": 0},
     }
@@ -388,7 +440,9 @@ def test_the_command_flushes_each_outcome_to_stderr_before_the_next_write(
     assert captured.out.count("\n") == 1
     assert json.loads(captured.out) == {
         "dry_run": False,
+        "held": 0,
         "lanes": {"eng": {"count": 3, "ids": ["a", "b", "c"]}, "ci": {"count": 0, "ids": []}},
+        "release": NONE,
         "actions": lines,
         "counts": {"queued": 2, "failed": 1, "skipped": 0},
     }
@@ -418,13 +472,123 @@ def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry
     assert captured.err == line + "\n"
     assert json.loads(captured.out) == {
         "dry_run": dry_run,
+        "held": 0,
         "lanes": {
             "eng": {"count": 2, "ids": ["a", "c"]} if dry_run else {"count": 0, "ids": []},
             "ci": {"count": 0, "ids": []},
         },
+        "release": NONE,
         "actions": [line],
         "counts": {"queued": 0, "failed": 0, "skipped": 1},
     }
     assert built == ([] if dry_run else ["sw"])
     assert ledger.calls == []
     assert swarm == []
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_the_held_tasks_are_the_open_in_scope_engineer_and_ci_tasks_the_claim_hold_keeps() -> None:
+    assert [task["id"] for task in enhance_sweep.held(HELD_TASKS)] == ["r1", "r2", "r4", "r5", "r8"]
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_a_held_task_is_released_once_its_thin_check_passes() -> None:
+    assert [task["id"] for task in enhance_sweep.releasable(HELD_TASKS)] == RELEASED
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_by_its_author() -> None:
+    ledger = FakeLedger(dict(ANSWERS))
+    pauses: list[float] = []
+    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=pauses.append)
+    assert result.lines == tuple(f"released thin task {tid}: its spec states its proof" for tid in RELEASED)
+    assert (result.released, result.failed) == (4, 0)
+    assert _calls(ledger) == RELEASE_CALLS
+    assert pauses == [3.0, 3.0, 3.0]
+    assert all(29 < call.deadline.remaining <= 30 for call in ledger.calls)
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_the_release_pauses_before_its_first_write_after_the_queue_wrote() -> None:
+    pauses: list[float] = []
+    enhance_sweep.release(HELD_TASKS, FakeLedger(dict(ANSWERS)), MASTER, pause=pauses.append, wrote=True)
+    assert pauses == [3.0, 3.0, 3.0, 3.0]
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_a_dry_release_writes_nothing() -> None:
+    pauses: list[float] = []
+    result = enhance_sweep.release(HELD_TASKS, None, MASTER, pause=pauses.append)
+    assert (result.lines, result.released, result.failed, pauses) == ((), 0, 0, [])
+
+
+@pytest.mark.feature("swarm-enhance-release")
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        pytest.param(LedgerRefused("the task changed"), "refused the release of r4: the task changed", id="refused"),
+        pytest.param(TimeoutError("no answer"), "failed the release of r4: TimeoutError no answer", id="timeout"),
+        pytest.param(
+            LedgerUnreachable("unreachable"),
+            "failed the release of r4: LedgerUnreachable unreachable",
+            id="unreachable",
+        ),
+    ],
+)
+def test_a_failed_release_write_is_counted_and_the_release_goes_on(error: Exception, failure: str) -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=error)
+    emitted: list[str] = []
+    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=lambda _: None, emit=emitted.append)
+    released = [f"released thin task {tid}: its spec states its proof" for tid in RELEASED]
+    lines = (released[0], failure, *released[2:])
+    assert (result.lines, result.released, result.failed) == (lines, 3, 1)
+    assert tuple(emitted) == lines
+    assert ledger.log == ["write 1", "write 2", "write 3", "write 4"]
+
+
+@pytest.mark.feature("swarm-enhance-release")
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_the_command_reports_the_held_count_and_releases_as_its_caller(
+    dry_run: bool, swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serve(monkeypatch, {"tasks": HELD_TASKS})
+    ledger = FakeLedger(dict(ANSWERS))
+    built: list[str] = []
+
+    def client_ledger(slug: str, clients: object) -> FakeLedger:
+        built.append(slug)
+        return ledger
+
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", client_ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    monkeypatch.setattr(enhance_sweep, "principal", lambda: MASTER)
+    assert cli.main(["sw", "enhance", "sweep", *(["--dry-run"] if dry_run else [])]) == 0
+    captured = capsys.readouterr()
+    lines = [] if dry_run else [f"released thin task {tid}: its spec states its proof" for tid in RELEASED]
+    assert json.loads(captured.out) == {
+        "dry_run": dry_run,
+        "held": 5,
+        "lanes": {"eng": {"count": 0, "ids": []}, "ci": {"count": 0, "ids": []}},
+        "release": {"count": 4, "ids": RELEASED, "released": len(lines), "failed": 0},
+        "actions": lines,
+        "counts": {"queued": 0, "failed": 0, "skipped": 0},
+    }
+    assert captured.err.splitlines() == lines
+    assert (built, _calls(ledger)) == (([], []) if dry_run else (["sw"], RELEASE_CALLS))
+    assert swarm == ([] if dry_run else [3.0, 3.0, 3.0])
+
+
+@pytest.mark.feature("swarm-enhance-release")
+@pytest.mark.usefixtures("swarm")
+def test_the_command_releases_as_the_swarm_when_no_agent_is_pinned(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serve(monkeypatch, {"tasks": HELD_TASKS[:2]})
+    ledger = FakeLedger(dict(ANSWERS))
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    monkeypatch.setattr(enhance_sweep, "principal", lambda: "")
+    assert cli.main(["sw", "enhance", "sweep"]) == 0
+    capsys.readouterr()
+    [(operation, (operations,))] = _calls(ledger)
+    assert (operation, [op["by"] for op in operations]) == ("mutate", ["swarm", "swarm"])

@@ -14,6 +14,54 @@ FULL = (
     "enhances it, and cover every rule and every exemption with a unit test that plants exactly one fault each. "
     "Tests assert thin(task) returns each failed rule. Done when the pull request is merged with CI green."
 )
+UNSTATED = FULL.replace("Done when", "Finished after")
+BARE = UNSTATED.replace("Tests assert thin(task) returns each failed rule. ", "")
+CONTRACT = {"must": "The held task is released", "check": "The sweep report names it", "judge": "master"}
+T2929 = {
+    "id": "t2929",
+    "lane": "eng",
+    "kind": "code",
+    "state": "open",
+    "territory": [".github/workflows/lab-check.yml", "tests/contracts", "tests/ci_lab", "feature-map.d", "changelog.d"],
+    "description": (
+        "Master text, refiled in the engineer lane from the ci copy, which was claimed and released 120 times without"
+        " a launch. Proven: all five Lab check runs so far failed; runs 46074011369 and 46074011786 end in "
+        "ModuleNotFoundError no module named jsonschema, because the lab check post step runs the lab checks module, "
+        "whose import chain reaches the lab delivery module that imports jsonschema, while the workflow install step "
+        "pins only requests and PyJWT. Change: the workflow installs jsonschema from the same lock constraint, or the"
+        " import chain stops needing it; pick the smaller root fix and say why. Seams: a contract test that fails "
+        "today asserts every third party module the lab checks entry imports, followed through its local imports, is "
+        "installed by the Lab check workflow; a feature map entry. Proof: after the fix reaches main by promotion, "
+        "one relayed head shows its lab gate and lab required check runs. Done when merged and that proof is on the "
+        "task."
+    ),
+}
+T2928 = {
+    "id": "t2928",
+    "lane": "eng",
+    "kind": "troubleshoot",
+    "state": "open",
+    "territory": [
+        "scripts/tick/steps/agents.py",
+        "scripts/tick/steps/common.py",
+        "scripts/hub/admission.py",
+        "scripts/hub/offer_quota.py",
+    ],
+    "contract": {
+        "must": "The branch that released each claim and its reason are named with evidence",
+        "check": "Log, Redis or metric lines that tie each release to that branch, plus the code path read",
+        "judge": "master",
+    },
+    "description": (
+        "Master text. On 27 November the urgent fixer for the hierarchy cpu promotion red was claimed and released "
+        "six times between 22:54 and 23:31 UTC with no launch failure recorded, while two non urgent tasks launched "
+        "on the seats preemption freed. Master scouter proof: CONFIRMED each cycle is a claim then reopen (ledger "
+        "claim generation rises two per cycle, Redis claim generation one); CONFIRMED no launch failure entry exists "
+        "for either task; REFUTED the thin task gate and the claim cap; UNPROVEN which tick reap branch released the "
+        "starting claim. Scope: name the branch and reason from live data and code, and whether an account seat race "
+        "between admission and harness start explains it."
+    ),
+}
 NAMED_SEAMS = (
     "Tests assert `thin_task.thin(task)` returns reasons and `thin_task.section_complete(text)` returns omissions."
 )
@@ -89,30 +137,33 @@ def test_a_description_without_a_done_when_sentence_is_named() -> None:
 @pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("territory", [[], None])
 def test_a_task_without_territory_is_named(territory: list[str] | None) -> None:
-    assert thin(task(territory=territory)) == ["Task a names no territory."]
+    assert thin(task(description=UNSTATED, territory=territory)) == [
+        "Task a has no done when sentence.",
+        "Task a names no territory.",
+    ]
 
 
 def test_a_task_without_a_territory_field_is_named() -> None:
-    bare = {k: v for k, v in task().items() if k != "territory"}
-    assert thin(bare) == ["Task a names no territory."]
+    bare = {k: v for k, v in task(description=UNSTATED).items() if k != "territory"}
+    assert thin(bare) == ["Task a has no done when sentence.", "Task a names no territory."]
 
 
 @pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_code_and_ci_work_without_a_named_seam_is_named(kind: str) -> None:
-    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
-    assert thin(task(kind=kind, description=unnamed)) == [f"Task a is {kind} work that names no seam."]
+    assert thin(task(kind=kind, description=BARE)) == [
+        "Task a has no done when sentence.",
+        f"Task a is {kind} work that names no seam.",
+    ]
 
 
 def test_work_beyond_code_needs_no_seam() -> None:
-    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
-    assert thin(task(kind="ops", description=unnamed)) == []
+    assert thin(task(kind="ops", description=BARE)) == ["Task a has no done when sentence."]
 
 
 def test_a_task_without_a_kind_reads_as_code() -> None:
-    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
-    bare = {k: v for k, v in task(description=unnamed).items() if k != "kind"}
-    assert thin(bare) == ["Task a is code work that names no seam."]
+    bare = {k: v for k, v in task(description=BARE).items() if k != "kind"}
+    assert thin(bare) == ["Task a has no done when sentence.", "Task a is code work that names no seam."]
 
 
 @pytest.mark.feature("swarm-thin-task-check")
@@ -142,8 +193,8 @@ def test_a_task_without_a_kind_reads_as_code() -> None:
     ],
 )
 def test_each_seam_shape_names_a_seam(named: str) -> None:
-    text = FULL.replace("Tests assert thin(task) returns each failed rule.", named)
-    assert thin(task(description=text)) == []
+    text = UNSTATED.replace("Tests assert thin(task) returns each failed rule.", named)
+    assert thin(task(description=text)) == ["Task a has no done when sentence."]
     assert section_complete(SECTION.replace(NAMED_SEAMS, named)) == []
 
 
@@ -158,8 +209,11 @@ def test_each_seam_shape_names_a_seam(named: str) -> None:
     ],
 )
 def test_plain_words_name_no_seam(unnamed: str) -> None:
-    text = FULL.replace("Tests assert thin(task) returns each failed rule.", unnamed)
-    assert thin(task(description=text)) == ["Task a is code work that names no seam."]
+    text = UNSTATED.replace("Tests assert thin(task) returns each failed rule.", unnamed)
+    assert thin(task(description=text)) == [
+        "Task a has no done when sentence.",
+        "Task a is code work that names no seam.",
+    ]
 
 
 @pytest.mark.feature("swarm-thin-task-check")
@@ -190,8 +244,11 @@ def test_plain_words_name_no_seam(unnamed: str) -> None:
 )
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_a_thin_seam_needs_a_boundary_and_observation(seam: str, kind: str) -> None:
-    text = FULL.replace("Tests assert thin(task) returns each failed rule.", seam)
-    assert thin(task(kind=kind, description=text)) == [f"Task a is {kind} work that names no seam."]
+    text = UNSTATED.replace("Tests assert thin(task) returns each failed rule.", seam)
+    assert thin(task(kind=kind, description=text)) == [
+        "Task a has no done when sentence.",
+        f"Task a is {kind} work that names no seam.",
+    ]
 
 
 @pytest.mark.feature("swarm-thin-task-check")
@@ -258,6 +315,58 @@ def test_an_unchecked_or_needed_task_is_still_graded(mark: str) -> None:
         "Task a has no done when sentence.",
         "Task a is code work that names no seam.",
     ]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize("held", [T2929, T2928], ids=["t2929", "t2928"])
+def test_a_held_urgent_task_whose_spec_states_its_proof_is_not_thin(held: dict[str, Any]) -> None:
+    assert thin(held) == []
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"contract": CONTRACT},
+        {"description": f"{BARE} Proof: the sweep report names the released task."},
+        {"description": f"{BARE} The proof : the sweep report names the released task."},
+        {"description": f"{BARE} Done when the sweep report names the released task."},
+    ],
+    ids=["contract", "proof label", "lowercase proof label", "done when sentence"],
+)
+def test_a_task_stating_its_proof_one_way_alone_fails_no_rule_but_length(fields: dict[str, Any]) -> None:
+    assert thin({**task(description=BARE, territory=[]), **fields}) == []
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize(
+    "contract",
+    [{"must": "The held task is released", "check": "The sweep report names it"}, {**CONTRACT, "judge": ""}],
+    ids=["no judge", "empty judge"],
+)
+def test_a_partial_contract_states_no_proof(contract: dict[str, str]) -> None:
+    assert thin({**task(description=BARE, territory=[]), "contract": contract}) == [
+        "Task a has no done when sentence.",
+        "Task a names no territory.",
+        "Task a is code work that names no seam.",
+    ]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+def test_a_truly_vague_task_is_still_thin() -> None:
+    vague = {"id": "v", "lane": "eng", "kind": "code", "state": "open", "description": "Make the board better."}
+    assert thin(vague) == [
+        "Task v has a description under 40 words.",
+        "Task v has no done when sentence.",
+        "Task v names no territory.",
+        "Task v is code work that names no seam.",
+    ]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+def test_a_short_task_stating_its_done_condition_still_fails_the_length_rule() -> None:
+    short = task(description="Fix the hold. Done when merged.", territory=[], contract=CONTRACT)
+    assert thin(short) == ["Task a has a description under 40 words."]
 
 
 @pytest.mark.feature("swarm-thin-task-check")

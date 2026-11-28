@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import claim_hold, enhance_review, plan_review, prompt, slice_check
+from scripts.swarm import claim_hold, enhance_review, enhance_sweep, plan_review, prompt, slice_check
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger as ledger_cli
@@ -585,3 +585,41 @@ def test_the_enhancement_expectation_rejects_invalid_values(expected: Any) -> No
     with pytest.raises(ValueError) as error:
         ledger_enhancement.check({**VALID, "expected": expected})
     assert str(error.value) == ledger_enhancement.SHAPE
+
+
+STATED = (
+    "Release a held task whose spec already states its proof, so the enhancement sweep marks it skipped and scopes "
+    "out its open enhancement plan task, and no engineer claim waits on a planner for work the master already "
+    "specified in full. Done when the release lands through the ledger."
+)
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_the_master_release_frees_a_held_task_whose_spec_states_its_proof_through_the_ledger(seats: Seats) -> None:
+    _, ledger = seats
+    target = {"task": TARGET, "title": "Task t1", "lane": "eng", "phase": "p1", "description": STATED}
+    ledger.add_task(SLUG, target, "swarm")
+    plan = {"task": ENHANCE, "title": "Enhance task t1", "lane": "plan", "kind": "plan", "phase": "p1"}
+    ledger.add_task(
+        SLUG, {**plan, "enhances": TARGET, "description": "Enhance task t1 into a full plan section."}, "swarm"
+    )
+    ledger.set_enhancement(SLUG, TARGET, "needed", "swarm")
+    assert hold(TARGET) == HELD
+    released: list[list[dict[str, Any]]] = []
+
+    class Checked(Applying):
+        def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
+            ops = [dict(operation) for operation in operations]
+            schemas.check_operations({"operation_id": "release", "ops": ops, "guards": {}}, core, (TARGET, ENHANCE))
+            released.append(ops)
+            return super().mutate(operations, deadline=deadline)
+
+    result = enhance_sweep.release(state(SLUG)["tasks"], Checked(), MASTER, pause=lambda _: None)
+    assert (result.lines, result.released, result.failed) == (
+        ("released thin task t1: its spec states its proof",),
+        1,
+        0,
+    )
+    assert [op["op"] for op in released[0]] == ["task_enhancement", "set"]
+    assert (task(TARGET)["enhancement"], task(ENHANCE)["out_of_scope"]) == ("skipped", True)
+    assert hold(TARGET) == ""
