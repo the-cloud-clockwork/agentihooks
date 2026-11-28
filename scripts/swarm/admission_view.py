@@ -73,10 +73,8 @@ def admits(store: RedisStore, slug: str, config: SwarmConfig, rows: dict[str, An
     released = release_wait.checker(config)
     applied: Callable[[dict[str, Any]], bool] = apply_wait.checker(config, rows)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     unshared = fleet_red.checker(fleet_red.saved_reader(store, slug))
-    lab = claim_hold.lab_reason(store, slug, freeze.fix_phase(config))
-    return lambda task: (
-        config.state == "running" and released(task) and applied(task) and unshared(task) and not lab(task)
-    )
+    _lab = claim_hold.lab_reason(store, slug, freeze.fix_phase(config))
+    return lambda task: config.state == "running" and released(task) and applied(task) and unshared(task)
 
 
 def verdict(found: dict[str, Any] | None, task_id: str) -> str:
