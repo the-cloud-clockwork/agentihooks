@@ -14403,7 +14403,7 @@
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
-      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
+      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample and holds only the node mirror age of the node the pod names; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
       "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics serve_registry and expose, and scripts.ci_lab.contract METRICS_PORT",
       "tests": [
         "tests/ci_lab/test_executors.py::test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains",
