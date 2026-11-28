@@ -1,6 +1,7 @@
 """The host's warm ledger writer."""
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -45,7 +46,8 @@ class Answering(socketserver.StreamRequestHandler):
             try:
                 self.answer(asked)
             finally:
-                self.connection.shutdown(socket.SHUT_WR)
+                with contextlib.suppress(OSError):
+                    self.connection.shutdown(socket.SHUT_WR)
 
     def answer(self, asked: dict[str, Any]) -> None:
         """Write the in process answer to ``asked``, or the error the in process call raises, as this request's reply."""

@@ -321,13 +321,13 @@ def compacted(path: Path) -> list[list[Any]]:
     return [row for row in rows if row[1] >= floor][-MAX_SAMPLES:]
 
 
-def drained(spool: Path) -> list[Row]:
-    """The sample rows spooled at ``spool``, read and emptied under its lock; none while nothing is spooled."""
-    if not (spool.is_file() and spool.stat().st_size):
+def drained(path: Path) -> list[Row]:
+    """The sample rows spooled at ``path``, read and emptied under its lock; none while nothing is spooled."""
+    if not (path.is_file() and path.stat().st_size):
         return []
-    with exclusive(spool):
-        rows = list(cast(Iterator[list[Any]], journal_rows(spool)))
-        spool.write_text("")
+    with exclusive(path):
+        rows = list(cast(Iterator[list[Any]], journal_rows(path)))
+        path.write_text("")
     return cast(list[Row], replay(iter(rows), STARTED_AT)[0])
 
 

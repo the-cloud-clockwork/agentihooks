@@ -2,6 +2,7 @@
 beside the ledger server's journal and returned once by the server's metrics reader, in this process and across
 processes."""
 
+import fcntl
 import json
 import os
 import subprocess
@@ -42,12 +43,27 @@ TASKS_PATH = "/api/v1/ledgers/spooled/tasks"
 CAPACITY = 128
 SERVED = 30
 PER_CHILD = 35
-CHILD = (
+DAEMON_WRITES = 12
+FALLBACK_CHILD = (
     "import sys, time\n"
-    "from scripts.swarm_ledger import request_metrics\n"
+    "from hooks import config\n"
+    "from scripts.tick.adapters import database_ledger, writer_client\n"
+    "config.AGENTIHOOKS_HOME = sys.argv[2]\n"
+    "database_ledger.answered = lambda slug, path, payload=None: {'data': {}}\n"
     "for _ in range(int(sys.argv[1])):\n"
-    f"    with request_metrics.command('POST', {TASKS_PATH!r}):\n"
-    "        time.sleep(0.005)\n"
+    "    writer_client.routed(5.0, 'spooled', 'tasks', {'ops': []})\n"
+    "    time.sleep(0.005)\n"
+)
+WRITER_CHILD = (
+    "import sys, threading, time\n"
+    "from pathlib import Path\n"
+    "from scripts.swarm_ledger import ledger_server, warm_writer\n"
+    "from scripts.tick.adapters import database_ledger\n"
+    "database_ledger.replied = lambda slug, path, payload, headers: (None, 201, b'{}')\n"
+    "database_ledger.services = lambda: None\n"
+    "warm_writer.revision = lambda root: 'same'\n"
+    "ledger_server.scheduled_wait = lambda interval, timeout=None: time.sleep(interval)\n"
+    "warm_writer.serve(Path(sys.argv[1]), threading.Event(), 0.05)\n"
 )
 
 
@@ -139,12 +155,12 @@ def refusing(path: Path) -> Iterator[None]:
     yield
 
 
-def children(count: int, folder: Path) -> list[subprocess.Popen[bytes]]:
-    """``count`` fresh interpreters each answering ``PER_CHILD`` command line writes that spool into ``folder``."""
+def spawned(script: str, *args: str) -> subprocess.Popen[bytes]:
+    """A fresh interpreter running ``script`` with ``args`` from the repository root, spooling into the ledger folder
+    this test names."""
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_"))}
-    env["LEDGER_DIR"] = str(folder)
     root = ROOT.parent if ROOT.name == "mutants" else ROOT
-    return [subprocess.Popen([sys.executable, "-c", CHILD, str(PER_CHILD)], cwd=root, env=env) for _ in range(count)]
+    return subprocess.Popen([sys.executable, "-c", script, *args], cwd=root, env=env)
 
 
 def counted(found: dict[str, Any]) -> dict[str, int]:
@@ -263,9 +279,12 @@ def test_an_owner_returns_each_sample_child_writers_spool_during_its_rewrites_on
         real(path, lines)
 
     monkeypatch.setattr(request_metrics, "replace_lines", rewritten)
-    running = children(2, folder)
+    home = folder / "home"
+    home.mkdir()
+    running = [spawned(FALLBACK_CHILD, str(PER_CHILD), str(home)) for _ in range(2)]
     served = 0
-    while any(child.poll() is None for child in running) or served < SERVED:
+    deadline = time.monotonic() + 120.0
+    while (any(child.poll() is None for child in running) or served < SERVED) and time.monotonic() < deadline:
         if served < SERVED:
             request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
             served += 1
@@ -282,6 +301,30 @@ def test_an_owner_returns_each_sample_child_writers_spool_during_its_rewrites_on
     monkeypatch.setattr(request_metrics, "SAMPLES", deque(maxlen=CAPACITY))
     request_metrics.restore(owner)
     assert counted(request_metrics.records(1.0, None, 1000)) == {OPERATIONS: SERVED, TASKS: 2 * PER_CHILD}
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
+def test_an_owner_returns_each_sample_a_writer_in_another_process_spools_once_through_its_metrics_reader(
+    folder: Path, owner: Path, metrics_url: str, memory_path: Path
+) -> None:
+    where = memory_path / "c.sock"
+    daemon = spawned(WRITER_CHILD, str(where))
+    try:
+        deadline = time.monotonic() + 60.0
+        while not test_warm_writer.answering(where) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        replies = [
+            writer_client.ask(warm_writer.connected(10.0, where), "spooled", "operations", {"ops": []})[0]
+            for _ in range(DAEMON_WRITES)
+        ]
+        taken = written(DAEMON_WRITES)
+    finally:
+        daemon.terminate()
+        daemon.wait(30)
+    assert replies == [201] * DAEMON_WRITES
+    assert [(method, route) for method, route, _, _ in taken] == [("POST", OPERATIONS)] * DAEMON_WRITES
+    with urlopen(f"{metrics_url}/api/v1/metrics?view=writes&hours=1&limit=1000") as response:
+        assert counted(json.load(response)) == {OPERATIONS: DAEMON_WRITES}
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
@@ -313,15 +356,12 @@ def test_a_spool_no_server_takes_keeps_only_its_newest_samples_under_its_cap(
 ) -> None:
     clock = Clock()
     monkeypatch.setattr(request_metrics, "time", clock)
-    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", 1000)
+    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", 1)
     monkeypatch.setattr(request_metrics, "MAX_SAMPLES", 4)
     for turn in range(1, 31):
         with request_metrics.command("POST", TASKS_PATH):
             clock.wall += float(turn)
-    walls, size = spooled(folder)
-    assert size <= request_metrics.SPOOL_BYTES + 200
-    assert 4 < len(walls) <= 20
-    assert walls == [float(turn) for turn in range(31 - len(walls), 31)]
+    assert spooled(folder)[0] == [26.0, 27.0, 28.0, 29.0, 30.0]
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
@@ -330,13 +370,28 @@ def test_a_spool_no_server_takes_drops_samples_past_retention_when_it_compacts(
 ) -> None:
     clock = Clock()
     monkeypatch.setattr(request_metrics, "time", clock)
-    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", 1000)
+    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", 1)
     for turn in range(1, 21):
         if turn == 11:
             clock.wall += request_metrics.RETENTION_SECONDS + 1.0
         with request_metrics.command("POST", TASKS_PATH):
             clock.wall += float(turn)
     assert spooled(folder)[0] == [float(turn) for turn in range(11, 21)]
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
+def test_a_spool_no_server_takes_keeps_a_sample_exactly_at_the_retention_floor_when_it_compacts(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    monkeypatch.setattr(request_metrics, "time", clock)
+    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", 1)
+    with request_metrics.command("POST", TASKS_PATH):
+        clock.wall += 1.0
+    clock.wall += request_metrics.RETENTION_SECONDS - 1.0
+    with request_metrics.command("POST", TASKS_PATH):
+        clock.wall += 1.0
+    assert spooled(folder)[0] == [1.0, 1.0]
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
@@ -358,15 +413,26 @@ def test_spooled_samples_take_their_time_order_among_the_held_samples(
 ) -> None:
     clock = Clock()
     monkeypatch.setattr(request_metrics, "time", clock)
-    clock.wall = 10.0
-    with request_metrics.command("POST", TASKS_PATH):
-        pass
+    for wall in (10.0, 25.0):
+        clock.wall = wall
+        with request_metrics.command("POST", TASKS_PATH):
+            pass
     for wall in (20.0, 30.0):
         clock.wall = wall
         request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
     request_metrics.persist()
     held_rows = [(row[0] - BASE, row[2]) for row in request_metrics.SAMPLES]
-    assert held_rows == [(10.0, TASKS), (20.0, OPERATIONS), (30.0, OPERATIONS)]
+    assert held_rows == [(10.0, TASKS), (20.0, OPERATIONS), (25.0, TASKS), (30.0, OPERATIONS)]
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
+def test_the_spool_lock_keeps_every_other_holder_out_until_it_is_released(tmp_path: Path) -> None:
+    lock = tmp_path / "metrics.lock"
+    with request_metrics.exclusive(tmp_path / "metrics.spool"), lock.open("a") as other:
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(other, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    with lock.open("a") as other:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
