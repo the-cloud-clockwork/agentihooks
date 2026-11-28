@@ -267,10 +267,13 @@ def comments(*texts: str, deleted: int = -1) -> list[dict[str, Any]]:
 
 def planned(found: dict[str, Any]) -> None:
     """Phase p4 holds a plan task enhancing t5 and a published plan; it depends on p3 and p2, p3 on p2 and back on
-    p4, p2 on p1; dependency phases carry comments, one deleted, and tasks with proofs and pull requests."""
+    p4, p2 on p1 twice and on itself; dependency phases carry comments, one deleted, and tasks with proofs and pull
+    requests."""
     phases = {phase["id"]: phase for phase in found["phases"]}
     phases["p1"]["comments"] = comments("p1 started")
-    phases["p2"]["comments"] = comments(*(f"p2 note {n}" for n in range(7)), deleted=6)
+    phases["p2"].update(
+        depends_on=["p1", "p1", "p2"], comments=comments(*(f"p2 note {n}" for n in range(7)), deleted=6)
+    )
     found["phases"] += [
         {"id": "p3", "title": "wire", "depends_on": ["p2", "p4"], "comments": comments("wired")},
         {
