@@ -49,7 +49,8 @@ LEDGER_PUBLISH = (
 LEDGER_SUBSCRIBE = ("swarm.>", "_INBOX.>")
 EVERYTHING = frozenset({">"})
 LAB_USER = "swarm-ci-lab-scheduler"
-LAB_NAMES = (("scripts/events/nats.py", "LAB_STREAM"), ("scripts/ci_lab/scheduler.py", "DURABLE"))
+LAB_LEAF = "scripts/events/lab_names.py"
+LAB_NAMES = ((LAB_LEAF, "LAB_STREAM"), (LAB_LEAF, "LAB_CONSUMER"))
 LAB_SOURCE = ", ".join(f"{source} {name}" for source, name in LAB_NAMES)
 
 
