@@ -532,6 +532,17 @@ def test_a_planned_phase_grades_an_enhanced_task_by_the_plan_published_for_it(
     assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a"]) == []
 
 
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_a_target_section_in_its_own_plan_shares_no_slice_with_a_sibling_on_the_same_phase_lines() -> None:
+    from scripts.swarm_ledger import plan_read
+
+    target = {"id": "a", "phase": "p1", "plan_url": ISSUE_URL, "plan_slice": "own", "plan_lines": "2-3"}
+    sibling = {"id": "b", "phase": "p1", "plan_url": SLICED_URL, "plan_slice": "one", "plan_lines": "2-3"}
+    plan = {"id": "plan-own", "title": "Own", "artifact": OWN_URL, "url": ISSUE_URL, "task": "a"}
+    doc = {"phases": [PLANNED], "plans": [plan], "tasks": [target, sibling]}
+    assert (plan_read.sharers(doc, target), plan_read.sharers(doc, sibling)) == ([], [])
+
+
 MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
 
 
