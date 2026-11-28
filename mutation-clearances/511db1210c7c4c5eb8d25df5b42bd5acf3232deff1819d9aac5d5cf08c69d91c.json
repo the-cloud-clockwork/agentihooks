@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/cache.py:scripts.ci_lab.cache.x__owned:a9cb093f7d5af4dcd752e4aff85a68614d63e0b0aba18db0714da813d740ac3d": {
+    "reader": "standards_reader",
+    "reason": "The local fdopen wrapper is used only for fileno and context-manager close. The descriptor was already opened read-write; changing the unused wrapper mode to read leaves fstat, flock, cleanup and descriptor lifetime unchanged."
+  }
+}
