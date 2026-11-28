@@ -129,6 +129,8 @@ def flips(value: Any) -> list[Any]:
     if isinstance(value, str):
         return [value + "x"]
     if isinstance(value, Mapping):
+        if not value:
+            return [{"added": "value"}]
         first = next(iter(value))
         rest = {name: item for name, item in value.items() if name != first}
         return [
