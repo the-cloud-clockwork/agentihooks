@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from scripts import claude_quota_balancer as balancer
-from scripts import claude_usage
+from scripts import claude_usage, session_bands
 from scripts.routing import place
 from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
@@ -944,18 +944,18 @@ def test_a_non_primary_login_at_the_same_usage_is_unaffected(monkeypatch):
 def test_a_ceiling_scales_the_cap_with_the_tighter_window():
     full = balancer.ProbeResult("a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0))
     assert balancer.account_cap(full, 1000) == 6
-    assert balancer.account_cap(full, 1000, ceiling=12) == 11
-    assert balancer.account_cap(full, 1000, ceiling=0) == 0
+    assert balancer.account_cap(full, 1000, environ={}) == 11
+    assert balancer.account_cap(full, 1000, environ={session_bands.HIVE_CEILING_ENV: "0"}) == 0
     spent = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 0.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(100.0, 2000)
     )
-    assert balancer.account_cap(spent, 1000, ceiling=12) == 0
+    assert balancer.account_cap(spent, 1000, environ={}) == 0
     fable = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 96.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(2.0), balancer.QuotaWindow(50.0)
     )
-    assert balancer.account_cap(fable, 1000, include_fable=True, ceiling=12) == 6
+    assert balancer.account_cap(fable, 1000, include_fable=True, environ={}) == 6
     rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, full.five_hour, full.seven_day)
-    assert balancer.account_cap(rejected, 1000, ceiling=12) == 0
+    assert balancer.account_cap(rejected, 1000, environ={}) == 0
 
 
 def test_fable_routing_caps_on_the_tighter_weekly_window():

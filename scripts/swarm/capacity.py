@@ -78,7 +78,7 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True, worker: bool = False) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     if refresh:
@@ -93,7 +93,7 @@ def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
         listed = result.account in routed
         if not listed and (token or not counts.get(result.account)):
             continue
-        cap = tokens.cap(result, now) if listed and session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now, environ if worker else None) if listed and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
@@ -190,7 +190,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
             cap = (
                 session_bands.week_cap(week)
                 if row["harness"] == "codex"
-                else session_bands.scaled_cap(five, week, session_bands.hive_ceiling(environ))
+                else session_bands.worker_cap(five, week, environ)
             )
         weight = None
         if row["kind"] == API:
@@ -234,17 +234,18 @@ def probe(environ: dict[str, str], now: float) -> list[Account]:
     return _claude(environ, now, True) + _codex(environ, now, True)
 
 
-def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None) -> list[Account]:
+def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None, worker: bool = False) -> list[Account]:
     """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
 
-    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says.
+    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says; ``worker`` gives
+    a local Claude reading the swarm worker cap the hive reports carry.
     """
     from scripts.routing import aggregate
 
     rows = (
         _global(environ, now, redis)
         if redis is not None or aggregate.enabled(environ)
-        else _claude(environ, now, refresh) + _codex(environ, now, refresh)
+        else _claude(environ, now, refresh, worker) + _codex(environ, now, refresh)
     )
     return reserved_accounts(rows, environ)
 
@@ -269,6 +270,11 @@ def hive_accounts(store: RedisStore) -> Callable[..., list[Account]]:
         return accounts(environ, now, refresh=refresh, redis=store.redis)
 
     return read
+
+
+def worker_accounts(environ: dict[str, str], now: float, refresh: bool = True) -> list[Account]:
+    """The quota reader of a hive spawn: every account with the Claude cap the hub admits that hive's workers by."""
+    return accounts(environ, now, refresh, worker=True)
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:

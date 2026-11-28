@@ -2,7 +2,7 @@ rules:
   - id: hive-spawn-claude-cap-one-computation
     languages: [python]
     severity: ERROR
-    message: A hive spawn runtime reads the Claude cap the hub admits by. Build it with quota_accounts=capacity.worker_accounts and compute a worker Claude cap only through session_bands.worker_cap, or the hub admits seats the hive spawn refuses.
+    message: A hive spawn runtime reads the Claude cap the hub admits by. Build it from runtime.worker_runtime and compute a worker Claude cap only through session_bands.worker_cap, or the hub admits seats the hive spawn refuses.
     paths:
       include:
         - /scripts/hive/
@@ -13,8 +13,6 @@ rules:
         - /scripts/claude_quota_balancer.py
         - hive-spawn-claude-cap-one-computation.py
     pattern-either:
-      - patterns:
-          - pattern: LocalHerdrRuntime(HerdrRuntime(...))
-          - pattern-not: LocalHerdrRuntime(HerdrRuntime(..., quota_accounts=$READ, ...))
+      - pattern: LocalHerdrRuntime(HerdrRuntime(...))
       - pattern: session_bands.scaled_cap(...)
       - pattern: session_bands.hive_ceiling(...)

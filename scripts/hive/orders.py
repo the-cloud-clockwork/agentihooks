@@ -206,10 +206,10 @@ class Consumer:
 
     @classmethod
     def local(cls, redis: "Redis", hive: str) -> "Consumer":
-        from scripts.swarm.runtime import HerdrRuntime
+        from scripts.swarm.runtime import worker_runtime
         from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
-        return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
+        return cls(redis, hive, LocalHerdrRuntime(worker_runtime()))
 
     def poll(self) -> int:
         entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)

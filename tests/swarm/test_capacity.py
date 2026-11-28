@@ -2628,7 +2628,7 @@ def test_a_hive_worker_spawn_reads_the_claude_cap_the_hub_admits_by(
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
 
     hub = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
-    hive = getattr(capacity, "worker_accounts")({"AH_CC_TOKEN_a": "fake"}, 100, refresh=False)
+    hive = capacity.worker_accounts({"AH_CC_TOKEN_a": "fake"}, 100, refresh=False)
 
     assert [(row.name, row.cap, capacity.free_seats(row)) for row in hub] == [("a", cap, free)]
     assert [(row.name, row.cap, capacity.free_seats(row)) for row in hive] == [("a", cap, free)]

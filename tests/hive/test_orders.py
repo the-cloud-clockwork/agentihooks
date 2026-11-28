@@ -667,7 +667,7 @@ def test_the_local_order_consumer_spawns_on_the_worker_claude_cap(setup: SimpleN
 
     consumer = Consumer.local(setup.redis, "selected-host")
 
-    assert consumer.runtime.herdr.quota_accounts is getattr(capacity, "worker_accounts")
+    assert consumer.runtime.herdr.quota_accounts is capacity.worker_accounts
 
 
 def test_order_keys_isolate_hives_and_execution_receipts(setup):

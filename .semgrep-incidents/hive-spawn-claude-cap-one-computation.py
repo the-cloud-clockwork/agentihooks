@@ -1,8 +1,7 @@
 from typing import Any
 
 from scripts import session_bands
-from scripts.swarm import capacity
-from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.runtime import HerdrRuntime, worker_runtime
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 
@@ -13,7 +12,7 @@ def band_spawn_runtime() -> Any:
 
 def worker_spawn_runtime() -> Any:
     # ok: hive-spawn-claude-cap-one-computation
-    return LocalHerdrRuntime(HerdrRuntime(quota_accounts=capacity.worker_accounts))
+    return LocalHerdrRuntime(worker_runtime())
 
 
 def own_scaled_cap(five: float, week: float, ceiling: int) -> int | None:

@@ -169,13 +169,13 @@ def _loop(environ: Mapping[str, str]) -> None:
     from scripts.events import factory
     from scripts.events.config import BusConfig
     from scripts.swarm import commands
-    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.runtime import worker_runtime
     from scripts.swarm.store import connect
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
     bus = factory.open_bus(replace(BusConfig.from_environ(environ), provision=False))
     try:
-        runtime = LocalHerdrRuntime(HerdrRuntime())
+        runtime = LocalHerdrRuntime(worker_runtime())
         run(connect(), bus, runtime, commands.hive_id(), lanes(environ.get(EXCLUDED_ENV)))
     finally:
         bus.close()

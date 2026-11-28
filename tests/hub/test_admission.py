@@ -695,12 +695,17 @@ def _refused_give_back(rig: SimpleNamespace) -> None:
     assert rig.admitter.reopen(SLUG, ask(refused=REFUSAL)) is True
 
 
+def again(**fields: str) -> dict[str, Any]:
+    """The next offer of t1 after a give back, at the claim generation its claim advanced."""
+    return ask(generation=1, **fields)
+
+
 @pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
 def test_a_give_back_without_a_refusal_is_admitted_again_on_the_same_hive(rig: SimpleNamespace) -> None:
     rig.admitter.admit(SLUG, ask())
     assert rig.admitter.reopen(SLUG, ask()) is True
 
-    assert rig.admitter.admit(SLUG, ask())["hive"] == "hive-a"
+    assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
 
 
 @pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
@@ -708,11 +713,11 @@ def test_a_refused_give_back_holds_the_lane_on_that_hive_and_another_hive_takes_
     _hive_sessions(rig, {"claude:a": 6})
     _refused_give_back(rig)
 
-    answer = rig.admitter.admit(SLUG, ask())
+    answer = rig.admitter.admit(SLUG, again())
     assert list(answer) == ["held"]
     assert answer["held"].endswith(REFUSAL)
     assert rig.store.claimant(SLUG, "t1") is None
-    assert rig.admitter.admit(SLUG, ask(hive="hive-b"))["hive"] == "hive-b"
+    assert rig.admitter.admit(SLUG, again(hive="hive-b"))["hive"] == "hive-b"
 
 
 @pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
@@ -723,14 +728,14 @@ def test_a_held_lane_is_admitted_once_the_hive_reports_changed_capacity(
     _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 10}])
     _hive_sessions(rig, {"claude:a": 6})
     _refused_give_back(rig)
-    assert "held" in rig.admitter.admit(SLUG, ask())
+    assert "held" in rig.admitter.admit(SLUG, again())
 
     if change == "sessions":
         _hive_sessions(rig, {"claude:a": 5})
     else:
         _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 11}])
 
-    assert rig.admitter.admit(SLUG, ask())["hive"] == "hive-a"
+    assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
 
 
 @pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
@@ -742,11 +747,11 @@ def test_a_held_lane_spares_a_task_that_permits_a_harness_the_refused_task_could
     monkeypatch.setattr(plugins, "claude_only", lambda name: False)
     rig.rows["t1"]["requires_harness"] = "claude"
     _refused_give_back(rig)
-    assert "held" in rig.admitter.admit(SLUG, ask())
+    assert "held" in rig.admitter.admit(SLUG, again())
 
     del rig.rows["t1"]["requires_harness"]
 
-    assert rig.admitter.admit(SLUG, ask())["hive"] == "hive-a"
+    assert rig.admitter.admit(SLUG, again())["hive"] == "hive-a"
 
 
 @pytest.mark.feature("hub-holds-lane-after-spawn-refusal")
