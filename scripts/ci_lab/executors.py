@@ -412,10 +412,16 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
     return pod, suite, Mutation(Path(allowed[contract.MUTATION_CACHE]), Path(allowed[contract.KILLERS]), budget, cap)
 
 
+def _observe_node_mirror(registry: metrics.Registry, mirror: Path, node: str) -> None:
+    """Set the node mirror age of node from the mirror's fetched-at stamp at the wall clock of this scrape."""
+    metrics.observe_mirror(registry, mirror, int(time.time() * 1000), node)
+
+
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract
-    metrics port serves the worker's registry until the drain ends. The work root is emptied first, so a restart on
-    another image starts from an empty root as a new pod would."""
+    metrics port serves the worker's registry until the drain ends, observing the node mirror age at each scrape
+    when the pod names its node. The work root is emptied first, so a restart on another image starts from an empty
+    root as a new pod would."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
     worktrees.empty(Path(worker.environment(environ)[contract.WORK_ROOT]))
     pod, suite, graded = settings(environ)
@@ -429,7 +435,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         service.stop()
 
     signal.signal(signal.SIGTERM, stop)
-    with metrics.serve_registry("", contract.METRICS_PORT, metrics.Registry()) as exposition:
+    registry = metrics.Registry()
+    node = worker.environment(environ).get(contract.NODE_NAME)
+    observe = (partial(_observe_node_mirror, registry, pod.trees.worktrees.mirror.node, node),) if node else ()
+    with metrics.serve_registry("", contract.METRICS_PORT, registry, *observe) as exposition:
         threading.Thread(target=exposition.serve_forever).start()
         try:
             service.run()
