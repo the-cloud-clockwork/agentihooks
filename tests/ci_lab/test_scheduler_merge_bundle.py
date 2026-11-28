@@ -207,7 +207,7 @@ def test_the_bundle_route_answers_the_bundle_of_a_real_store_with_no_usable_temp
     assert _git(store, "bundle", "list-heads", str(bundle_file)).split()[0] == sha
 
 
-def test_bundle_raises_when_creating_the_bundle_file_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bundle_raises_when_git_cannot_write_the_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "stores"
     store = _store(tmp_path, root, "only-store")
     sha = _commit(store, {"a.txt": "1\n"})

@@ -2321,9 +2321,8 @@ class MirrorExpander:
     def bundle(self, sha: str) -> bytes | None:
         """Return the git bundle of a commit prerequisite on its two parents, from whichever served repository's
         store under root holds it, or None when none does. Git writes the bundle to standard output, so the call
-        makes no file and needs no temp folder: the scheduler's container has a read only root. The ref it bundles
-        from is unique to the call, so two requests for the same commit at once never create or delete each other's
-        ref."""
+        makes no file and needs no temp folder. The ref it bundles from is unique to the call, so two requests for
+        the same commit at once never create or delete each other's ref."""
         if not self.root.is_dir():
             return None
         for store in sorted(self.root.iterdir()):
