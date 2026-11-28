@@ -1,0 +1,27 @@
+{
+  "id": "swarm-urgent-lane-first",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lane-urgent-first",
+  "behaviour": "When quota seats are scarce, a lane holding ready urgent tasks takes the next free seat before any lane without urgent ready work, ties keeping the fewest effective agents rule; the autoscale ceiling split raises that lane's ceiling to fit its urgent work before the ci or plan lanes take the remaining room; the planner floor never cuts an urgent lane's ceiling, and when both the eng and ci lanes hold urgent work it grants its one plan ceiling without a donor, so the ceilings may exceed the total by one while spawns stay bounded by the free seats; without urgent work every result equals the plain count result.",
+  "seam": "capacity.calculate through _allocate, capacity.apply and live_inputs through ready_demand, capacity.autoscaled, autoscale.calculate through _ceilings, and plan_cap_floor.ceilings, given an autoscale.Demand carrying urgent ready counts per lane",
+  "tests": [
+    "tests/swarm/test_urgent_lane_first.py::test_one_free_seat_goes_to_the_urgent_engineer_lane_before_emptier_ci_and_plan_lanes",
+    "tests/swarm/test_urgent_lane_first.py::test_an_urgent_lane_takes_seats_up_to_its_urgent_tasks_then_the_fewest_effective_lane_takes_the_rest",
+    "tests/swarm/test_urgent_lane_first.py::test_urgent_work_in_two_lanes_shares_the_seats_by_fewest_effective_agents",
+    "tests/swarm/test_urgent_lane_first.py::test_scarce_seats_without_urgent_work_keep_the_fewest_effective_pick_after_each_placement",
+    "tests/swarm/test_urgent_lane_first.py::test_a_demand_without_urgent_work_places_exactly_as_its_plain_counts",
+    "tests/swarm/test_urgent_lane_first.py::test_urgent_engineer_work_takes_the_scarce_ceiling_room_before_ci_and_plan",
+    "tests/swarm/test_urgent_lane_first.py::test_scarce_ceiling_room_without_urgent_work_goes_one_seat_each_to_plan_then_ci_then_eng",
+    "tests/swarm/test_urgent_lane_first.py::test_urgent_lanes_fill_their_ceiling_room_lowest_ceiling_first",
+    "tests/swarm/test_urgent_lane_first.py::test_a_lane_raised_for_urgent_work_leaves_the_one_seat_pass_to_the_other_lanes",
+    "tests/swarm/test_urgent_lane_first.py::test_autoscale_without_urgent_work_splits_exactly_as_its_plain_counts",
+    "tests/swarm/test_urgent_lane_first.py::test_autoscaled_keeps_the_urgent_counts_and_the_plan_floor_spares_the_urgent_lane",
+    "tests/swarm/test_urgent_lane_first.py::test_the_plan_floor_takes_its_seat_from_the_lane_without_urgent_work",
+    "tests/swarm/test_urgent_lane_first.py::test_the_plan_floor_cuts_neither_lane_when_both_hold_urgent_work",
+    "tests/swarm/test_urgent_lane_first.py::test_the_plan_floor_without_urgent_work_takes_from_the_larger_lane_as_before",
+    "tests/swarm/test_urgent_lane_first.py::test_ready_demand_counts_each_lanes_ready_tasks_and_the_urgent_ones_among_them",
+    "tests/swarm/test_urgent_lane_first.py::test_a_plain_demand_carries_no_urgent_counts",
+    "tests/swarm/test_urgent_lane_first.py::test_the_capacity_pass_seats_an_urgent_engineer_task_ahead_of_ready_ci_work",
+    "tests/swarm/test_urgent_lane_first.py::test_live_inputs_carry_the_urgent_ready_counts_per_lane"
+  ]
+}

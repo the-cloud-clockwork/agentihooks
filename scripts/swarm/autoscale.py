@@ -1,4 +1,5 @@
 import math
+from collections.abc import Mapping
 from typing import NamedTuple, NotRequired, TypedDict
 
 from scripts.swarm import elapsed
@@ -29,6 +30,19 @@ class Decision(TypedDict):
     reason: str
 
 
+class Demand(dict[str, int]):
+    """Each lane's ready task count, carrying how many of those ready tasks are urgent in each lane."""
+
+    def __init__(self, counts: Mapping[str, int], urgent: Mapping[str, int]) -> None:
+        super().__init__(counts)
+        self.urgent = dict(urgent)
+
+
+def urgent_counts(demand: Mapping[str, int] | None) -> dict[str, int]:
+    """The ready urgent tasks per lane that a demand carries; a plain count carries none."""
+    return dict(demand.urgent) if isinstance(demand, Demand) else {}
+
+
 def _held(
     live: dict[str, int], demand: dict[str, int], total: int, free: dict[str, int], review: Review | None
 ) -> Held | None:
@@ -43,19 +57,8 @@ def _held(
     return Held(min(total, limit, wanted), limit)
 
 
-def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: Held | None = None) -> dict[str, int]:
-    ceilings: dict[str, int] = {}
-    room = total - (held.seats if held else 0)
-    for lane in ("plan", "ci", "eng"):
-        ceilings[lane] = min(room, live.get(lane, 0))
-        room -= ceilings[lane]
-    for lane in ("plan", "ci", "eng"):
-        added = min(room, bool(demand.get(lane)))
-        ceilings[lane] += added
-        room -= added
-    wants = {lane: live.get(lane, 0) + demand.get(lane, 0) for lane in ceilings}
-    if held is not None:
-        ceilings[REVIEW], wants[REVIEW] = held.seats, held.limit
+def _fill(ceilings: dict[str, int], wants: dict[str, int], room: int) -> int:
+    """Gives the room one seat at a time to the lowest ceiling still below its wanted seats; returns the room left."""
     while room:
         ready = [lane for lane in ceilings if ceilings[lane] < wants[lane]]
         if not ready:
@@ -63,6 +66,25 @@ def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: He
         lane = min(ready, key=ceilings.get)
         ceilings[lane] += 1
         room -= 1
+    return room
+
+
+def _ceilings(live: dict[str, int], demand: dict[str, int], total: int, held: Held | None = None) -> dict[str, int]:
+    ceilings: dict[str, int] = {}
+    urgent = urgent_counts(demand)
+    room = total - (held.seats if held else 0)
+    for lane in ("plan", "ci", "eng"):
+        ceilings[lane] = min(room, live.get(lane, 0))
+        room -= ceilings[lane]
+    room = _fill(ceilings, {lane: live.get(lane, 0) + urgent.get(lane, 0) for lane in ceilings}, room)
+    for lane in ("plan", "ci", "eng"):
+        added = min(room, bool(demand.get(lane)) and not urgent.get(lane))
+        ceilings[lane] += added
+        room -= added
+    wants = {lane: live.get(lane, 0) + demand.get(lane, 0) for lane in ceilings}
+    if held is not None:
+        ceilings[REVIEW], wants[REVIEW] = held.seats, held.limit
+    _fill(ceilings, wants, room)
     return ceilings
 
 
