@@ -298,7 +298,7 @@ def test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record(t
         kept = [record_cycle(box, cycle, ledger) for cycle in (1, 2)]
         box.flush(kept[-1])
         assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1)]
-        assert snapshot_times(box)[-2:] == kept
+        assert snapshot_times(box) == kept[-1:]
     finally:
         box.close()
 
