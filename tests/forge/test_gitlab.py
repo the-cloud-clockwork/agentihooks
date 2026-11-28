@@ -1,6 +1,7 @@
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import asdict
 from email.message import Message
 from typing import Any
 from urllib.error import HTTPError
@@ -282,8 +283,8 @@ def test_the_state_read_sends_through_urlopen_by_default(monkeypatch: pytest.Mon
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_the_state_read_carries_the_draft_flag_description_and_merge_time() -> None:
     merge = {**answer("merged", "success"), "draft": True, "merged_at": "2026-11-20T10:00:00.000Z"}
-    read = gitlab.merge_request_state(LINK, "fake-token", Sent(merge))
-    assert (read.draft, read.description, read.merged_at) == (
+    read = asdict(gitlab.merge_request_state(LINK, "fake-token", Sent(merge)))
+    assert (read["draft"], read["description"], read["merged_at"]) == (
         True,
         "Reviewer seats read the change through the forge.",
         "2026-11-20T10:00:00.000Z",
@@ -293,5 +294,5 @@ def test_the_state_read_carries_the_draft_flag_description_and_merge_time() -> N
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_an_answer_without_draft_merge_time_or_description_reads_ready_unmerged_and_empty() -> None:
     merge = {**answer(), "description": None}
-    read = gitlab.merge_request_state(LINK, "fake-token", Sent(merge))
-    assert (read.draft, read.description, read.merged_at) == (False, "", None)
+    read = asdict(gitlab.merge_request_state(LINK, "fake-token", Sent(merge)))
+    assert (read["draft"], read["description"], read["merged_at"]) == (False, "", None)

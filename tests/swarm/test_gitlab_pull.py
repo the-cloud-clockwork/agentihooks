@@ -1,7 +1,7 @@
 """Swarm reads of a GitLab merge request: the pull request view and the intent gate head and merged reads."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -9,6 +9,7 @@ from scripts.gates.intent import pr_head, pr_merged
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_view
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import SourceControl
 from tests.forge.fakes import API, HEADERS, Sent
 from tests.forge.test_gitlab import HEAD, LINK, Refused, answer
 
@@ -29,6 +30,11 @@ class Port:
         raise OSError("GitHub is not reachable")
 
 
+def github(port: Port) -> SourceControl:
+    """Return ``port`` as the GitHub source control the view takes."""
+    return cast(SourceControl, port)
+
+
 def sent(monkeypatch: pytest.MonkeyPatch, transport: Any) -> Any:
     """Make the GitLab adapter talk through ``transport`` and return it."""
     monkeypatch.setattr("scripts.swarm.gitlab_pull.TRANSPORT", transport)
@@ -43,7 +49,7 @@ def token(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_a_gitlab_link_without_a_token_reads_no_pull_request(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
-    assert read_view(LINK, Port()) is None
+    assert read_view(LINK, github(Port())) is None
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
@@ -51,7 +57,7 @@ def test_the_view_reads_an_opened_gitlab_merge_request_without_github(
     monkeypatch: pytest.MonkeyPatch, token: None
 ) -> None:
     port, transport = Port(), sent(monkeypatch, Sent(answer()))
-    assert read_view(LINK, port) == PullRequest("OPEN", None, None, False, head=HEAD, body=DESCRIPTION)
+    assert read_view(LINK, github(port)) == PullRequest("OPEN", None, None, False, head=HEAD, body=DESCRIPTION)
     assert transport.calls == [("GET", f"{API}/12", HEADERS, None)]
     assert port.calls == []
 
@@ -61,41 +67,43 @@ def test_the_view_reads_a_merged_gitlab_merge_request_with_its_merge_time(
     monkeypatch: pytest.MonkeyPatch, token: None
 ) -> None:
     sent(monkeypatch, Sent({**answer("merged", "success"), "merged_at": MERGED_AT}))
-    assert read_view(LINK, Port()) == PullRequest("MERGED", MERGED_MS, None, False, head=HEAD, body=DESCRIPTION)
+    assert read_view(LINK, github(Port())) == PullRequest("MERGED", MERGED_MS, None, False, head=HEAD, body=DESCRIPTION)
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_the_view_reads_a_closed_gitlab_merge_request_as_closed(monkeypatch: pytest.MonkeyPatch, token: None) -> None:
     sent(monkeypatch, Sent(answer("closed", "canceled")))
-    pull = read_view(LINK, Port())
+    pull = read_view(LINK, github(Port()))
     assert pull is not None and (pull.state, pull.merged_at, pull.queued) == ("CLOSED", None, False)
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_the_view_carries_the_gitlab_draft_flag(monkeypatch: pytest.MonkeyPatch, token: None) -> None:
     sent(monkeypatch, Sent({**answer(), "draft": True}))
-    assert read_view(LINK, Port()) == PullRequest("OPEN", None, None, False, head=HEAD, draft=True, body=DESCRIPTION)
+    assert read_view(LINK, github(Port())) == PullRequest(
+        "OPEN", None, None, False, head=HEAD, draft=True, body=DESCRIPTION
+    )
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_a_missing_token_reads_nothing_from_gitlab_or_github(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     port, transport = Port(), sent(monkeypatch, Sent())
-    assert read_view(LINK, port) is None
+    assert read_view(LINK, github(port)) is None
     assert transport.calls == [] and port.calls == []
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_a_missing_gitlab_merge_request_reads_no_pull_request(monkeypatch: pytest.MonkeyPatch, token: None) -> None:
     port, transport = Port(), sent(monkeypatch, Refused(404))
-    assert read_view(LINK, port) is None
+    assert read_view(LINK, github(port)) is None
     assert transport.calls == [f"{API}/12"] and port.calls == []
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
 def test_a_gitlab_server_error_reads_no_pull_request(monkeypatch: pytest.MonkeyPatch, token: None) -> None:
     sent(monkeypatch, Refused(500))
-    assert read_view(LINK, Port()) is None
+    assert read_view(LINK, github(Port())) is None
 
 
 @pytest.mark.feature("swarm-gitlab-change-close")
