@@ -1,0 +1,26 @@
+rules:
+  - id: lab-merge-keep-rule-reads-the-answer
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab kept the finished merge resolution of another head only when it had found a merge. On 28 November a
+      failed or absent answer was therefore dropped before its own head read it: with several pull request heads
+      waiting, no head counted a try and none was graded. Whether a resolution the call was not made for stays
+      depends on its age and on whether its head has read it, never on what it answered.
+    paths:
+      include:
+        - /scripts/ci_lab/merges.py
+        - lab-merge-keep-rule-reads-the-answer.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              def _fresh(...):
+                  ...
+          - pattern-inside: |
+              {$KEY: $VALUE for $EACH in $TABLE.resolutions.items() if $KEPT}
+          - pattern-inside: |
+              for $EACH in <... $TABLE.resolutions.items() ...>:
+                  ...
+      - pattern-either:
+          - pattern: $FUTURE.result()
+          - pattern: $FUTURE.exception()

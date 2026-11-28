@@ -2809,9 +2809,12 @@ repository's store under its root already holds it.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,
-each held under `merges.Background` and reused until `FRESH_S` (30) seconds after a thread began its resolution, so
-a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
-answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again.
+each held under `merges.Background`. A finished resolution, whether it found a merge, found none or failed, waits
+for the head it was started for while the scheduler asks its other waiting heads, and one no head reads is
+forgotten `KEPT_S` (3600) seconds after a thread began it. A found merge its head has read is reused until
+`FRESH_S` (30) seconds after a thread began its resolution, so a rerequest asking again inside that window grades
+that same merge instead of reading GitHub again; an absent answer or a failed resolution is read once by its head
+and forgotten, so the next pass that asks always reads GitHub again.
 The scheduler names the repository by the address its webhook carried; `merges.Resolver` reads GitHub by the
 owner and name in that address, with a token scoped to pull requests read on that one repository, and asks its
 mirror by the address itself.
