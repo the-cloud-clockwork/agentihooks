@@ -1,6 +1,7 @@
 """Plans and slices: the ledger resources a phase and a task name as their parents."""
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger.op_context import OpContext
 
@@ -280,7 +281,7 @@ def add_plan(doc: dict, op: dict, ctx: OpContext) -> str:
     return ""
 
 
-def own_artifact(doc: dict, task: str, plan_url: str) -> str:
+def own_artifact(doc: dict[str, Any], task: str, plan_url: str) -> str:
     """Return the artifact of a plan published for task whose link or artifact is plan_url, else an empty string."""
     return next(
         (
