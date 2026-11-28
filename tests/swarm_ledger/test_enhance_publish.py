@@ -151,3 +151,16 @@ def test_an_enhancement_publish_into_a_phase_without_a_plan_still_links_the_phas
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
     printed = json.loads(capsys.readouterr().out)
     assert (printed["phases"], item(ledger, "phases/p1")["plan_url"]) == (["p1"], printed["plan_url"])
+
+
+@pytest.mark.feature("enhance-publish-keeps-phase-plan")
+def test_only_the_claimant_of_an_enhancement_plan_task_publishes_for_its_target() -> None:
+    from scripts.swarm_ledger import ledger
+
+    plan_task = {"id": "enhance-t3", "phase": "p1", "enhances": "t3", "claimed_by": PLANNER, "state": "claimed"}
+    phases = [{"id": "p1", "plan_url": "http://127.0.0.1:8765/artifacts/s/f1"}, {"id": "p2"}]
+    doc = {"phases": phases, "tasks": [{"id": "t3", "phase": "p1"}, plan_task]}
+    released = {**doc, "tasks": [{"id": "t3", "phase": "p1"}, {**plan_task, "state": "done"}]}
+    assert ledger.enhanced(doc, PLANNER, ["p1"]) == {"id": "t3", "phase": "p1"}
+    assert [ledger.enhanced(doc, "boss", ["p1"]), ledger.enhanced(released, PLANNER, ["p1"])] == [None, None]
+    assert [ledger.enhanced(doc, PLANNER, ["p2"]), ledger.enhanced(doc, PLANNER, ["p1", "p2"])] == [None, None]
