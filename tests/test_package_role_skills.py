@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.forge.cli import parse as forge_parse
 from scripts.inbox.cli import build_parser as msg_parser
+from scripts.review.cli import parser as review_parser
 from scripts.seat_brief import build_parser as seat_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
@@ -51,6 +53,8 @@ LOOP = {
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
 PARSERS["seat"] = lambda argv: seat_parser().parse_args(argv)
+PARSERS["forge"] = lambda argv: forge_parse(argv)
+PARSERS["review"] = lambda argv: review_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:
@@ -94,7 +98,24 @@ def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance: 
 
 
 def _commands(text: str) -> list[str]:
-    return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
+    inline = re.findall(r"`([^`\n]+)`", text)
+    return [span for span in [*inline, *_fenced(text)] if span.startswith("agentihooks ")]
+
+
+def _fenced(text: str) -> list[str]:
+    lines: list[str] = []
+    pending = ""
+    inside = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            inside, pending = not inside, ""
+        elif inside and line.endswith("\\"):
+            pending += line[:-1].rstrip() + " "
+        elif inside:
+            lines.append(pending + line)
+            pending = ""
+    return lines
 
 
 def _argv(command: str) -> tuple[str, list[str]]:
