@@ -2816,9 +2816,9 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert grace_s == 12.0
     assert scheduler.main([], requested) == 7
     assert calls["serve"][2:4] == (scheduler.INTERVAL_S, 0)
-    for name in (scheduler.contract.CONTROL_TOKEN, "CI_LAB_REDIS_GRACE_S"):
-        del requested[name]
-        environ.pop(name, None)
+    del requested[scheduler.contract.CONTROL_TOKEN], requested["CI_LAB_REDIS_GRACE_S"]
+    environ.pop(scheduler.contract.CONTROL_TOKEN, None)
+    environ.pop("CI_LAB_REDIS_GRACE_S", None)
     assert scheduler.main([], environ) == 7
     assert calls["listen"][2].token == ""
     assert calls["serve"][6] == redis_grace.DEFAULT_GRACE_S
