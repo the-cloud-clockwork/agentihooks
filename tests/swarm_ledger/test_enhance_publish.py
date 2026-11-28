@@ -1,6 +1,7 @@
 """An enhancement planner's publish into its target's phase, driven through the live ledger API server."""
 
 import json
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,10 @@ PLAN_TASK = [
 ]
 
 
+def fresh(op: dict[str, Any]) -> dict[str, Any]:
+    return {**op, "id": f"{op['id']}-{uuid.uuid4().hex[:8]}"}
+
+
 def item(ledger: Any, path: str) -> dict[str, Any]:
     found: dict[str, Any] = ledger.resource(SLUG, path)
     return found
@@ -96,7 +101,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Any,
     )
     for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
         monkeypatch.delenv(name, raising=False)
-    assert [client.mutate(SLUG, [op]).get("rejected") for op in SEED] == [[], []]
+    assert [client.mutate(SLUG, [fresh(op)]).get("rejected") for op in SEED] == [[], []]
     section = tmp_path / "enhance.md"
     section.write_text(SECTION, encoding="utf-8")
     return ledger, client, ledger.build_parser().parse_args, section
@@ -115,7 +120,7 @@ def test_an_enhancement_publish_into_a_planned_phase_keeps_the_phase_plan_and_si
     for task, anchor, title in SIBLINGS:
         add = ["task", "add", task, title, "--lane", "eng", "--phase", "p1", "--plan-slice", anchor]
         ledger.cmd_task(parse(["--slug", SLUG, "--as", "boss", *add]))
-    assert [client.mutate(SLUG, [op]).get("rejected") for op in (DONE, *PLAN_TASK)] == [[], [], []]
+    assert [client.mutate(SLUG, [fresh(op)]).get("rejected") for op in (DONE, *PLAN_TASK)] == [[], [], []]
     before = held(ledger)
     capsys.readouterr()
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
@@ -141,7 +146,7 @@ def test_an_enhancement_publish_into_a_phase_without_a_plan_still_links_the_phas
     live: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ledger, client, parse, section = prepared(monkeypatch, tmp_path)
-    assert [client.mutate(SLUG, [op]).get("rejected") for op in (TARGET, *PLAN_TASK)] == [[], [], []]
+    assert [client.mutate(SLUG, [fresh(op)]).get("rejected") for op in (TARGET, *PLAN_TASK)] == [[], [], []]
     capsys.readouterr()
     ledger.cmd_publish_plan(parse(["--slug", SLUG, "--as", PLANNER, "publish-plan", str(section), "--phase", "p1"]))
     printed = json.loads(capsys.readouterr().out)
