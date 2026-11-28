@@ -16,6 +16,21 @@ it. New or changed behaviours edit only their own record, leaving unrelated
 entries and the root metadata untouched. The root keeps retired records and
 the unmapped rule list. Duplicate ids and mismatched filenames fail validation.
 
+This repository sets `"fragments": true`, so a new feature gets its own record.
+Run the record path command from the repository root to get its path:
+
+```bash
+python -m scripts.feature_map --record FEATURE_ID
+```
+
+It prints the path relative to the working folder, `feature-map.d/` followed by
+the SHA256 of the id and `.json`, and writes nothing. Write the entry object
+alone, without a `features` list around it, to a new file at that path, and
+leave `feature-map.json` unchanged. An entry that already sits in the root
+`features` list stays there and is edited in place. The
+[tick step scaffold](tick-step-scaffold.md) writes a new feature's record
+itself.
+
 ## Origins
 
 Every entry names where it came from in `origin`:

@@ -9,7 +9,8 @@ argument-hint: "STEP_NAME"
 A tick step is five artefacts: the registered step in a `scripts/tick/steps/<module>.py`
 module, its floor row in `scripts/tick/steps/budgets.py`, its feature test in
 `tests/tick/steps/test_<name>.py`, its row in `tests/swarm/tick_scenarios/steps.json`
-and its `feature-map.json` entry. Code writes all five; you write only the body.
+and its feature map entry, in the feature's record under `feature-map.d/` or in
+`feature-map.json`. Code writes all five; you write only the body.
 
 ## 1. Scaffold
 
@@ -24,6 +25,11 @@ python -m scripts.tick.new_step --check <name>
 - The task spec names the step, group, lane, effects and feature. Take them from it;
   an effect is a field name of `scripts.tick.ports.tools.Tools`.
 - A module the steps package lacks is created and joins `MODULES`.
+- The feature entry goes to the feature's record under `feature-map.d/` when
+  `feature-map.json` sets `"fragments": true` and its root `features` list has
+  no entry for the id; otherwise the entry in `feature-map.json` gains the
+  test. `python -m scripts.feature_map --record <feature id>` prints the
+  record path and writes nothing. Commit the record with the other printed files.
 - The command refuses a name any artefact already holds. A changed step keeps
   its artefacts: edit them, then run `--check`.
 - `--check` must report all five `true`.
@@ -46,8 +52,8 @@ python -m scripts.tick.new_step --check <name>
   A write on an undeclared port raises `UndeclaredEffect`.
 - Add no function to `scripts/swarm/tick.py`. A body that needs one of its
   functions moves that function into the step module in the same pull request.
-- Fill the scaffolded test with the behaviour the feature entry names, keeping its
-  `@pytest.mark.feature` marker.
+- Fill the scaffolded test with the behaviour the feature entry names, in its
+  record or in `feature-map.json`, keeping its `@pytest.mark.feature` marker.
 
 ## 3. Check locally
 
