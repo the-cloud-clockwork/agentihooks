@@ -38,7 +38,7 @@ class Tasks(Protocol):
 
     def reopen(self, event: Envelope, refused: str = "") -> None:
         """Asks the hub to reopen a task whose launch failed; ``refused`` is the runtime's refusal, which holds the
-        lane on this hive until its capacity changes."""
+        task off this hive until its capacity changes."""
         ...
 
     def dead_lettered(self, event: Envelope) -> None:

@@ -381,7 +381,9 @@ def test_a_recovered_started_claim_reports_its_launch_decision_before_taking_wor
 @pytest.mark.parametrize(
     ("failure", "refused"), [("request", ()), ("outcome", ("no room",))], ids=["request", "outcome"]
 )
-def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure, refused):
+def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(
+    rig: SimpleNamespace, failure: str, refused: tuple[str, ...]
+) -> None:
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     if failure == "request":

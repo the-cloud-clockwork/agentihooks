@@ -744,9 +744,31 @@ def test_a_held_task_is_admitted_once_the_hive_capacity_changes(
         _advertise_seats(rig, [{"harness": "claude", "account": "a", "cap": 11}])
     else:
         rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
-        assert rig.admitter.reopen(SLUG, ask(task="t2", lane="ci")) is True
+        _end_started(rig, "t2")
 
     assert rig.admitter.admit(SLUG, again(rig))["hive"] == "hive-a"
+
+
+def _end_started(rig: SimpleNamespace, task_id: str) -> None:
+    """Ends the admitted agent of task_id the way an agent leaves after it started working."""
+    from dataclasses import replace
+
+    agent = next(agent for agent in rig.store.agents(SLUG) if agent.task == task_id)
+    rig.store.put_agent(SLUG, replace(agent, state="working"))
+    assert rig.store.release(SLUG, task_id, agent.name)
+    assert rig.store.drop_agent(SLUG, agent.name)
+
+
+@pytest.mark.feature("hub-holds-task-after-spawn-refusal")
+@pytest.mark.parametrize("hive", ["hive-a", "hive-b"])
+def test_another_task_refused_and_given_back_leaves_a_held_task_held(rig: SimpleNamespace, hive: str) -> None:
+    _refused_give_back(rig)
+    other = ask(task="t2", lane="ci", hive=hive)
+
+    rig.admitter.admit(SLUG, other)
+    assert rig.admitter.reopen(SLUG, {**other, "refused": REFUSAL}) is True
+
+    assert "held" in rig.admitter.admit(SLUG, again(rig))
 
 
 @pytest.mark.feature("hub-holds-task-after-spawn-refusal")

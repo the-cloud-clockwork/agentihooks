@@ -2,7 +2,7 @@
   "id": "hub-holds-task-after-spawn-refusal",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-hive-cap-agree",
-  "behaviour": "A hive spoke gives a refused spawn back with its refusal, and the hub then holds that task off that hive until the hive's reported caps or session counts change or an agent of the swarm ends, with a one day key bound, while other hives, other tasks on the hive and a plain give back are admitted at once.",
+  "behaviour": "A hive spoke gives a refused spawn back with its refusal, and the hub then holds that task off that hive until the hive's reported caps or session counts change or an agent of the swarm that had started ends, with a one day key bound, another task's refused give back leaving it held, while other hives, other tasks on the hive and a plain give back are admitted at once.",
   "seam": "Spoke give back, LaneTasks.reopen, and Admission.reopen and Admission.admit over the refusal hold",
   "tests": [
     "tests/hive/test_spoke.py::test_a_refused_spawn_gives_its_claim_back_with_the_refusal",
@@ -11,6 +11,7 @@
     "tests/hub/test_admission.py::test_a_refused_give_back_holds_the_task_on_that_hive_and_another_hive_takes_it",
     "tests/hub/test_admission.py::test_a_held_task_leaves_other_tasks_admitted_on_that_hive",
     "tests/hub/test_admission.py::test_a_held_task_is_admitted_once_the_hive_capacity_changes",
+    "tests/hub/test_admission.py::test_another_task_refused_and_given_back_leaves_a_held_task_held",
     "tests/hub/test_admission.py::test_a_refusal_hold_outlives_thirty_minutes_and_still_expires"
   ]
 }

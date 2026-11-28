@@ -36,6 +36,7 @@ NO_HARNESS = "the lane agent, required harness and profile permit no harness"
 REFUSAL_HOLD = "spawn-refusal-hold"
 REFUSAL_HELD = "a spawn on the asking hive refused this task"
 HOLD_MS = 24 * 60 * 60 * 1000
+ENDED_ROWS = 100  # pragma: no mutate
 
 
 def release_key(text: str) -> Version | None:
@@ -303,8 +304,8 @@ class Admission:
         return self.store.key(slug, REFUSAL_HOLD, request["task"], request["hive"])
 
     def _capacity(self, slug: str, hive: str) -> list[Any]:
-        """The hive's reported account caps and session counts and the swarm's latest ended agent, which a refusal
-        hold waits to see change."""
+        """The hive's reported account caps and session counts and the swarm's latest ended agent that had started,
+        which a refusal hold waits to see change."""
         from scripts.hive import registry
 
         redis: Any = cast(Any, self.store).redis
@@ -313,7 +314,15 @@ class Admission:
         slots: list[dict[str, Any]] = record.get("slots") or []
         caps = sorted([slot["harness"], slot["account"], slot.get("cap")] for slot in slots)
         counts = sorted([name, count] for name, count in sessions.items() if isinstance(count, int))
-        return [caps, counts, redis.lindex(self.store.key(slug, "history"), -1)]
+        return [caps, counts, self._ended(slug)]
+
+    def _ended(self, slug: str) -> list[Any]:
+        """The name and end time of the newest of the swarm's last ENDED_ROWS history rows whose agent had started;
+        a give back retires an agent still starting, so another task's refusal never lifts a hold."""
+        redis: Any = cast(Any, self.store).redis
+        rows = [json.loads(row) for row in redis.lrange(self.store.key(slug, "history"), -ENDED_ROWS, -1)]
+        started = [row for row in rows if row["state"] != "starting"]
+        return [started[-1]["name"], started[-1]["ended_at"]] if started else []
 
     def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
         """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through
