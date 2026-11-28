@@ -159,6 +159,7 @@ def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
         ("call", sweep.sweep, STORE, 7),
+        ("call", sweep.notify_drains, STORE),
     ]
 
 
