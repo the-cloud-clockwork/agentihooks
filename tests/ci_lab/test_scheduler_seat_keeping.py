@@ -77,7 +77,7 @@ def run_main(
     monkeypatch.setattr(scheduler, "_now_ms", lambda: DAY_MS)
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
-    monkeypatch.setattr(scheduler, "serve", lambda *args: 7)
+    monkeypatch.setattr(scheduler, "serve", lambda *args, **options: 7)
     monkeypatch.setattr(relay, "build", RelayBuilds())
 
     assert scheduler.main([], environ | APP_SETTINGS) == 7
