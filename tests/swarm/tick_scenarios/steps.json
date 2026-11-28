@@ -15,6 +15,9 @@
   "focus unclaimed": [
    "running"
   ],
+  "hive drain notice": [
+   "running"
+  ],
   "hive sweep": [
    "running"
   ],
