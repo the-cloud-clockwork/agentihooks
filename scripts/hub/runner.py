@@ -213,7 +213,12 @@ def _issued_credential(holder: str) -> tuple["Redis", str] | None:
 
 def _renew_forever(redis: "Redis", credential: str) -> None:
     while True:
-        scheduled_wait(KEEP_S)
+        try:
+            scheduled_wait(KEEP_S)
+        except Exception:
+            print("hub: service credential renewal wait failed", file=sys.stderr)
+            traceback.print_exc()
+            sleep(KEEP_S)
         try:
             auth.keep_service(redis, credential)
         except Exception:

@@ -1,0 +1,26 @@
+rules:
+  - id: renewal-wait-outside-handler
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An endless renewal loop waits on the Redis backed scheduler timer outside any handler. A store error from the
+      wait leaves the loop and ends its daemon thread for good, so the hub service credential expires within its 300
+      second lifetime and the hub loses controller authority until the pod restarts. Catch the wait failure inside
+      the loop, log it with its traceback, wait the interval on the local clock and renew.
+    paths:
+      include:
+        - /scripts/hub/runner.py
+        - renewal-wait-outside-handler.py
+    patterns:
+      - pattern-inside: |
+          while True:
+              ...
+      - pattern-either:
+          - pattern: scheduled_wait(...)
+          - pattern: process_timer.wait(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except $EXC:
+              ...
+              sleep(...)
