@@ -21,7 +21,7 @@ BACKFILL_MAX_WRITE = 2.0
 THIN_WORDS = 40
 ENHANCE = "enhance-{}"
 EXEMPT = ("planned", "skipped")
-PROOF = re.compile(r"\bproof\s*:", re.I)
+PROOF = re.compile(r"\bproof\s*:\s*\w+(?:\W+\w+){2}", re.I)
 NAMED = re.compile(
     r"\b[A-Za-z]\w*\("
     r"|\b[a-z][a-z0-9]+(?:[._][a-z0-9]+)+"
@@ -69,7 +69,7 @@ def thin(task: dict[str, Any]) -> list[str]:
 
 def stated(task: dict[str, Any]) -> bool:
     """Whether the task states how it is proven: a contract carrying must, check and judge, or a description with a
-    proof label or a done when sentence."""
+    proof label followed by at least three words or a done when sentence."""
     contract: dict[str, Any] = task.get("contract") or {}
     keys: tuple[str, ...] = ledger_kinds.CONTRACT_KEYS  # pyright: ignore[reportUnknownMemberType]
     description: str = task["description"]

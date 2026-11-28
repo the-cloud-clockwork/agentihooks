@@ -2,11 +2,12 @@
   "id": "swarm-enhance-release",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-contract-read",
-  "behaviour": "agentihooks swarm <slug> enhance sweep reports the held count, the open in scope engineer and ci tasks with no pull request that the claim hold keeps for an enhancement mark of needed, and releases each one whose thin task check now passes: one ledger write per task, authored by the calling agent or the swarm when none is pinned, sets its enhancement to skipped guarded by the expected value needed and scopes out its open enhancement plan task, under its own thirty second deadline and three seconds after the previous write; a refused or failed write is reported and the next task is still released; with --dry-run it lists the release candidates and writes nothing.",
+  "behaviour": "agentihooks swarm <slug> enhance sweep reports the held count, the open in scope engineer and ci tasks with no pull request that the claim hold keeps for an enhancement mark of needed, and releases each one no freeze holds whose thin task check now passes, a task with no description staying held: one ledger write per task, authored by the calling agent or the swarm when none is pinned, sets its enhancement to skipped guarded by the expected value needed and scopes out its open enhancement plan task, under its own thirty second deadline and three seconds after the previous write; a refused or failed write is reported and the next task is still released; with --dry-run it lists the release candidates and writes nothing.",
   "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, held, releasable and release, applied by the ledger server's own checks",
   "tests": [
     "tests/swarm/test_enhance_sweep.py::test_the_held_tasks_are_the_open_in_scope_engineer_and_ci_tasks_the_claim_hold_keeps",
     "tests/swarm/test_enhance_sweep.py::test_a_held_task_is_released_once_its_thin_check_passes",
+    "tests/swarm/test_enhance_sweep.py::test_a_held_task_a_freeze_holds_is_never_released",
     "tests/swarm/test_enhance_sweep.py::test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_by_its_author",
     "tests/swarm/test_enhance_sweep.py::test_the_release_pauses_before_its_first_write_after_the_queue_wrote",
     "tests/swarm/test_enhance_sweep.py::test_a_dry_release_writes_nothing",

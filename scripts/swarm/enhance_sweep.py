@@ -43,6 +43,7 @@ class SweepResult:
 
 @dataclass(frozen=True)
 class Released:
+    ids: tuple[str, ...]
     lines: tuple[str, ...]
     released: int
     failed: int
@@ -110,13 +111,15 @@ def _held(task: dict[str, Any]) -> bool:
     return _open(task) and in_lane and task.get("enhancement") == NEEDED
 
 
-def releasable(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return each held task whose thin task check now passes, in ledger order."""
-    return [task for task in held(tasks) if not thin_task.thin({"description": "", **task})]
+def releasable(tasks: list[dict[str, Any]], unfrozen: Unfrozen) -> list[dict[str, Any]]:
+    """Return each held task no freeze holds whose thin task check now passes, in ledger order; a task with no
+    description stays held, as an empty description is thin."""
+    return [task for task in held(tasks) if unfrozen(task) and "description" in task and not thin_task.thin(task)]
 
 
 def release(
     tasks: list[dict[str, Any]],
+    unfrozen: Unfrozen,
     ledger: Ledger | None,
     by: str,
     *,
@@ -126,21 +129,22 @@ def release(
 ) -> Released:
     """Mark the enhancement of each releasable task skipped and scope out its open enhancement plan task, one ledger
     write by ``by`` per task, pausing before each write after the first, or before every write when an earlier pass
-    ``wrote``; with no ``ledger``, a dry run, nothing is written."""
+    ``wrote``; with no ``ledger``, a dry run, only the candidates are named."""
+    ids = tuple(task["id"] for task in releasable(tasks, unfrozen))
     if ledger is None:
-        return Released((), 0, 0)
+        return Released(ids, (), 0, 0)
     plans = {task["id"] for task in tasks if task.get("lane") == "plan" and _open(task)}
     lines: list[str] = []
     released = 0
-    for index, task in enumerate(releasable(tasks)):
+    for index, tid in enumerate(ids):
         if index or wrote:
             pause(PAUSE)
-        line, landed = _release(ledger, task["id"], _releasing(task["id"], plans, by))
+        line, landed = _release(ledger, tid, _releasing(tid, plans, by))
         lines.append(line)
         released += landed
         if emit is not None:
             emit(line)
-    return Released(tuple(lines), released, len(lines) - released)
+    return Released(ids, tuple(lines), released, len(lines) - released)
 
 
 def _open(task: dict[str, Any]) -> bool:
@@ -190,12 +194,11 @@ def command(store: Any, args: argparse.Namespace) -> None:
     tasks = client.tasks(args.slug)
     unfrozen = thin.unfrozen({"tasks": tasks, "freezes": client.freezes(args.slug), **client.work_tree(args.slug)})
     lanes = {lane: {"count": len(ids), "ids": ids} for lane, ids in thin_by_lane(tasks, unfrozen).items()}
-    candidates = [task["id"] for task in releasable(tasks)]
     ledger = None if args.dry_run else ClientLedger(args.slug, resource_client(args.slug))
     result = sweep(tasks, unfrozen, ledger, pause=time.sleep, emit=_emit)
     by = principal() or thin.SENDER
-    freed = release(tasks, ledger, by, pause=time.sleep, emit=_emit, wrote=result.wrote)
-    report = {"count": len(candidates), "ids": candidates, "released": freed.released, "failed": freed.failed}
+    freed = release(tasks, unfrozen, ledger, by, pause=time.sleep, emit=_emit, wrote=result.wrote)
+    report = {"count": len(freed.ids), "ids": list(freed.ids), "released": freed.released, "failed": freed.failed}
     print(
         json.dumps(
             {

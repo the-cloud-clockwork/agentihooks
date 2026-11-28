@@ -339,6 +339,16 @@ def test_a_task_stating_its_proof_one_way_alone_fails_no_rule_but_length(fields:
 
 
 @pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize("label", ["Proof:", "Proof: TBD.", "Proof: the run."], ids=["empty", "one word", "two words"])
+def test_a_proof_label_with_fewer_than_three_words_after_it_states_no_proof(label: str) -> None:
+    assert thin(task(description=f"{BARE} {label}", territory=[])) == [
+        "Task a has no done when sentence.",
+        "Task a names no territory.",
+        "Task a is code work that names no seam.",
+    ]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize(
     "contract",
     [{"must": "The held task is released", "check": "The sweep report names it"}, {**CONTRACT, "judge": ""}],

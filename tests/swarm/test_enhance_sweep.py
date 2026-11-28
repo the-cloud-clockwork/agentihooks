@@ -81,8 +81,10 @@ HELD_TASKS = [
     _task("enhance-r8", lane="plan", kind="plan", enhances="r8", out_of_scope=True),
     _task("r9", lane="plan", kind="plan", enhancement="needed", description=FULL),
     _task("r10", enhancement="planned", description=FULL),
+    {key: value for key, value in _task("r11", enhancement="needed").items() if key != "description"},
 ]
 RELEASED = ["r1", "r4", "r5", "r8"]
+ALL_THAWED = thin.unfrozen({"tasks": HELD_TASKS})
 
 
 def _mark(tid: str) -> dict[str, object]:
@@ -488,19 +490,29 @@ def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_held_tasks_are_the_open_in_scope_engineer_and_ci_tasks_the_claim_hold_keeps() -> None:
-    assert [task["id"] for task in enhance_sweep.held(HELD_TASKS)] == ["r1", "r2", "r4", "r5", "r8"]
+    assert [task["id"] for task in enhance_sweep.held(HELD_TASKS)] == ["r1", "r2", "r4", "r5", "r8", "r11"]
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_a_held_task_is_released_once_its_thin_check_passes() -> None:
-    assert [task["id"] for task in enhance_sweep.releasable(HELD_TASKS)] == RELEASED
+    assert [task["id"] for task in enhance_sweep.releasable(HELD_TASKS, ALL_THAWED)] == RELEASED
+
+
+@pytest.mark.feature("swarm-enhance-release")
+def test_a_held_task_a_freeze_holds_is_never_released() -> None:
+    tasks = [_task("f1", phase="p2", enhancement="needed", description=FULL), *HELD_TASKS[:2]]
+    unfrozen = thin.unfrozen({"tasks": tasks, **_frozen("phases/p2")})
+    assert [task["id"] for task in enhance_sweep.releasable(tasks, unfrozen)] == ["r1"]
+    ledger = FakeLedger(dict(ANSWERS))
+    result = enhance_sweep.release(tasks, unfrozen, ledger, MASTER, pause=lambda _: None)
+    assert (result.ids, _calls(ledger)) == (("r1",), RELEASE_CALLS[:1])
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_by_its_author() -> None:
     ledger = FakeLedger(dict(ANSWERS))
     pauses: list[float] = []
-    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=pauses.append)
+    result = enhance_sweep.release(HELD_TASKS, ALL_THAWED, ledger, MASTER, pause=pauses.append)
     assert result.lines == tuple(f"released thin task {tid}: its spec states its proof" for tid in RELEASED)
     assert (result.released, result.failed) == (4, 0)
     assert _calls(ledger) == RELEASE_CALLS
@@ -511,15 +523,15 @@ def test_the_release_skips_each_released_mark_and_scopes_out_its_open_plan_task_
 @pytest.mark.feature("swarm-enhance-release")
 def test_the_release_pauses_before_its_first_write_after_the_queue_wrote() -> None:
     pauses: list[float] = []
-    enhance_sweep.release(HELD_TASKS, FakeLedger(dict(ANSWERS)), MASTER, pause=pauses.append, wrote=True)
+    enhance_sweep.release(HELD_TASKS, ALL_THAWED, FakeLedger(dict(ANSWERS)), MASTER, pause=pauses.append, wrote=True)
     assert pauses == [3.0, 3.0, 3.0, 3.0]
 
 
 @pytest.mark.feature("swarm-enhance-release")
 def test_a_dry_release_writes_nothing() -> None:
     pauses: list[float] = []
-    result = enhance_sweep.release(HELD_TASKS, None, MASTER, pause=pauses.append)
-    assert (result.lines, result.released, result.failed, pauses) == ((), 0, 0, [])
+    result = enhance_sweep.release(HELD_TASKS, ALL_THAWED, None, MASTER, pause=pauses.append)
+    assert (result.ids, result.lines, result.released, result.failed, pauses) == (tuple(RELEASED), (), 0, 0, [])
 
 
 @pytest.mark.feature("swarm-enhance-release")
@@ -538,7 +550,7 @@ def test_a_dry_release_writes_nothing() -> None:
 def test_a_failed_release_write_is_counted_and_the_release_goes_on(error: Exception, failure: str) -> None:
     ledger = SecondWriteFails(dict(ANSWERS), error=error)
     emitted: list[str] = []
-    result = enhance_sweep.release(HELD_TASKS, ledger, MASTER, pause=lambda _: None, emit=emitted.append)
+    result = enhance_sweep.release(HELD_TASKS, ALL_THAWED, ledger, MASTER, pause=lambda _: None, emit=emitted.append)
     released = [f"released thin task {tid}: its spec states its proof" for tid in RELEASED]
     lines = (released[0], failure, *released[2:])
     assert (result.lines, result.released, result.failed) == (lines, 3, 1)
@@ -567,7 +579,7 @@ def test_the_command_reports_the_held_count_and_releases_as_its_caller(
     lines = [] if dry_run else [f"released thin task {tid}: its spec states its proof" for tid in RELEASED]
     assert json.loads(captured.out) == {
         "dry_run": dry_run,
-        "held": 5,
+        "held": 6,
         "lanes": {"eng": {"count": 0, "ids": []}, "ci": {"count": 0, "ids": []}},
         "release": {"count": 4, "ids": RELEASED, "released": len(lines), "failed": 0},
         "actions": lines,
