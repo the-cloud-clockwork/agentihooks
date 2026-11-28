@@ -713,6 +713,7 @@ def stop_after(passes):
     return run_once
 
 
+@pytest.mark.feature("hub-service-credential-renewal-survives-wait-failure")
 def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_credential(monkeypatch, hive):
     import json
     import os
@@ -830,6 +831,7 @@ def test_the_renewal_loop_keeps_renewing_after_its_timer_wait_raises(
     assert capsys.readouterr().err.startswith("hub: service credential renewal wait failed\nTraceback")
 
 
+@pytest.mark.feature("hub-service-credential-renewal-survives-wait-failure")
 def test_the_renewal_runs_on_a_daemon_thread(monkeypatch, hive):
     import threading
 
