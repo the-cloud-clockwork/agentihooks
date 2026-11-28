@@ -215,7 +215,7 @@ def _health(monkeypatch: pytest.MonkeyPatch, healthy: bool, metadata: object) ->
 
     monkeypatch.setattr(outage, "ledger_health", ledger_health)
     box: dict[str, Any] = {}
-    _run("wrapper probes", [], _pass(box, ledger=_Client(metadata)), monkeypatch)
+    _run("before", [], _pass(box, ledger=_Client(metadata)), monkeypatch)
     return box, seen
 
 
@@ -234,7 +234,7 @@ def test_a_healthy_ledger_leaves_the_tick_running(monkeypatch: pytest.MonkeyPatc
 def test_a_ledger_that_is_no_client_skips_the_health_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(outage, "ledger_health", lambda *args: pytest.fail("probed"))
     box: dict[str, Any] = {}
-    _run("wrapper probes", [], _pass(box), monkeypatch)
+    _run("before", [], _pass(box), monkeypatch)
     assert box == {}
 
 
