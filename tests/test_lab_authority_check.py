@@ -26,8 +26,16 @@ HELD = [
             f"the checkout holds the lab skip clause of the {gate} job",
         )
     ),
+    f"the checkout holds {check.COMMIT_ID_PART}",
 ]
 LINT_CLAUSE = check.CLAUSE.format(gate="lint")
+TRUST_STEP = "Require trusted actors before private runner admission"
+
+
+def _trust_step(document: Any) -> dict[str, Any]:
+    return next(step for step in document["jobs"]["lint"]["steps"] if step.get("name") == TRUST_STEP)
+
+
 DAMAGE: list[tuple[str, Callable[[Any], object], set[int]]] = [
     (delivery.DELIVERY, lambda document: document["lab"]["authoritative"].remove("test-count"), {0, 7}),
     (delivery.DELIVERY, lambda document: document["lab"]["authoritative"].append("docs"), {0}),
@@ -52,6 +60,13 @@ DAMAGE: list[tuple[str, Callable[[Any], object], set[int]]] = [
             {"if": "${{ always() || !cancelled() && " + LINT_CLAUSE + " }}"}
         ),
         {3},
+    ),
+    (
+        check.WORKFLOW,
+        lambda document: (
+            _trust_step(document).setdefault("env", {}).update({"OTHER": "${{ github.event.workflow_run.head_sha }}"})
+        ),
+        {10},
     ),
 ]
 
@@ -102,6 +117,7 @@ def test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed(
         "the list reordered",
         "a skip clause joined with or",
         "an or beside the terms that hold the skip clause",
+        "a commit id read outside the static key",
     ],
 )
 def test_a_part_the_checkout_lost_fails_by_name(
@@ -152,5 +168,19 @@ def test_a_job_whose_whole_condition_is_the_skip_clause_holds_it(
     copy: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _edit(copy / check.WORKFLOW, lambda document: document["jobs"]["lint"].update({"if": "${{ " + LINT_CLAUSE + " }}"}))
+    assert check.main(copy) == 0
+    assert capsys.readouterr().out.splitlines() == HELD
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_step_reading_an_earlier_steps_output_shaped_like_a_commit_id_holds_the_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _edit(
+        copy / check.WORKFLOW,
+        lambda document: (
+            _trust_step(document).setdefault("env", {}).update({"OTHER": "${{ steps.earlier.outputs.release_sha }}"})
+        ),
+    )
     assert check.main(copy) == 0
     assert capsys.readouterr().out.splitlines() == HELD

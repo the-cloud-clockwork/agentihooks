@@ -252,3 +252,19 @@ def test_the_specification_names_every_input_per_kind() -> None:
     for kind, name in re.findall(r"^\| `(\w+)` \| `(\w+)` \|", section, re.MULTILINE):
         listed.setdefault(kind, set()).add(name)
     assert listed == {kind: {item.name for item in fields(record)} for kind, record in RECORDS.items()}
+
+
+def test_a_gate_with_no_commit_id_read_hashes_as_it_did_before_the_commit_id_key() -> None:
+    _, inputs = cases()["static"]
+    assert inputs.commit_ids == {}
+    assert digests.static_key(inputs) == GOLDEN["static"]
+
+
+def test_two_head_shas_over_equal_trees_key_differently_and_one_head_sha_keys_once() -> None:
+    _, inputs = cases()["static"]
+    first = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    second = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "b" * 40})
+    repeated = replace(inputs, commit_ids={"github.event.pull_request.head.sha": "a" * 40})
+    assert digests.static_key(first) != digests.static_key(second)
+    assert digests.static_key(first) == digests.static_key(repeated)
+    assert digests.static_key(inputs) != digests.static_key(first)

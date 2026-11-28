@@ -16,13 +16,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.ci_lab import budget, merges, scheduler
+from scripts.ci_lab import budget, merges, scheduler, static_gates
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
-from scripts.ci_lab.digests import GradeInputs, grade_key
+from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.retry import Policy
+from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent
 from scripts.dep_manifest import _git
@@ -31,11 +32,13 @@ from tests.ci_lab.test_scheduler import (
     BASE,
     HEAD_A,
     HEAD_B,
+    LOCK,
     REPO,
     TREE,
     Consumer,
     FakeChecks,
     Run,
+    _blob,
     fake_redis,
     ref,
     unit,
@@ -572,6 +575,36 @@ def test_expand_reads_the_tree_and_diffs_against_the_first_parent_of_a_resolved_
     assert found.graded_commit == merge
     assert found.merge_base == fork
     assert found.tree == _tree(repo, head)
+
+
+def test_expand_keys_a_gate_reading_commit_ids_on_the_lease_head_and_the_graded_commit(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, fork, head = origin
+    merge = _synthetic_merge(repo, fork, head, monkeypatch)
+    reading = StaticGate(
+        "lint/trust",
+        "lint",
+        "trust",
+        (),
+        (),
+        "",
+        ("src",),
+        ("src",),
+        reads=(static_gates.COMMIT_ID_FIELDS[0], static_gates.COMMIT_ID_FIELDS[1]),
+    )
+    expander = _expander(tmp_path, monkeypatch)
+    monkeypatch.setattr(scheduler, "discover", lambda workflow, registry, reusable: [reading])
+    request = GradeRequest(f"file://{repo}", head, fork, Priority.PULL_REQUEST, ACTOR, False, graded_commit=merge)
+    found = expander.expand(request)
+    [found_unit] = found.gates["lint"]
+    at_merge = {"src/a.py": _blob(repo, merge, "src/a.py")}
+    at_fork = {"src/a.py": _blob(repo, fork, "src/a.py")}
+    chain = Toolchain("3.12", {}, _blob(repo, merge, LOCK), _blob(repo, merge, "pyproject.toml"), "image", {})
+    commit_ids = {"github.sha": merge, "github.event.pull_request.head.sha": head}
+    expected = StaticInputs("lint/trust", at_merge, at_fork, fork, chain, commit_ids)
+    assert found_unit.key == static_key(expected)
+    assert found_unit.members == ("lint/trust",)
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
