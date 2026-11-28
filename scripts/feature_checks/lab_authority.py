@@ -5,6 +5,7 @@ and reads only commit id context names its static key carries. It prints one lin
 the checkout; a delivery file its reader refuses fails with one line."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ HELD = "the checkout holds {part}"
 LACKS = "FAIL: the checkout lacks {part}"
 UNREAD = "a delivery file its reader accepts: {error}"
 COMMIT_ID_PART = "every gate of lint, type-gate and test-count reading only commit ids that its static key carries"
+SHELL_SHA = re.compile(r"\bGITHUB_SHA\b|\bgit\s+rev-parse\b")
 
 
 def _terms(condition: object) -> list[str]:
@@ -39,7 +41,10 @@ def _terms(condition: object) -> list[str]:
 
 
 def _registry(root: Path) -> dict[str, object]:
-    """The input-key registry at root, empty when the checkout carries none."""
+    """The input-key registry at root, empty when the checkout carries none, by design: an absent registry only
+    widens a gate's paths and base paths to the whole tree, never what it reads, so this check holds without one.
+    A malformed registry raises, uncaught, exactly as a malformed wiring file does: never reported as a delivery
+    fault."""
     path = root / static_gates.REGISTRY
     return json.loads(path.read_text()) if path.exists() else {}
 
@@ -57,11 +62,18 @@ def _unlisted(gate: static_gates.StaticGate) -> list[str]:
     ]
 
 
+def _shell_reads(gate: static_gates.StaticGate) -> bool:
+    """Whether the gate's own run text, or the run text of an earlier step whose output, outcome or conclusion it
+    reads, names GITHUB_SHA or runs git rev-parse: a commit id read in the shell, invisible to expressions.reads
+    and so to both the gate's reads and the static key."""
+    return any(SHELL_SHA.search(text) for text in (gate.run, *(producer.run for producer in gate.producers)))
+
+
 def parts(root: Path, workflow_text: str, registry: dict[str, object]) -> list[tuple[str, bool]]:
     """Each part of the feature with whether the checkout holds it: the list itself, then for each gate its kept
-    authority, the lab check that replaces its job and the skip clause of that job, then the commit id read of
-    every static gate of lint, type-gate and test-count, discovered from workflow_text with registry and the
-    reusable workflows at root."""
+    authority, the lab check that replaces its job and the skip clause of that job, then whether every static gate
+    of lint, type-gate and test-count, discovered from workflow_text with registry and the reusable workflows at
+    root, reads its commit ids only through names the static key carries and never through the shell."""
     listed = list(delivery.lab(root)["authoritative"])
     kept = delivery.authoritative(root)
     checks = json.loads((root / WIRING).read_text())["lab_gates"]
@@ -77,8 +89,10 @@ def parts(root: Path, workflow_text: str, registry: dict[str, object]) -> list[t
             (f"the lab skip clause of the {gate} job", skipped),
         ]
     gates = static_gates.discover(workflow_text, registry, ci_wiring.load(root))
-    unlisted = [name for gate in gates if gate.job.partition("/")[0] in GATES for name in _unlisted(gate)]
-    found.append((COMMIT_ID_PART, not unlisted))
+    scoped = [gate for gate in gates if gate.job.partition("/")[0] in GATES]
+    unlisted = [name for gate in scoped for name in _unlisted(gate)]
+    shelled = [gate.name for gate in scoped if _shell_reads(gate)]
+    found.append((COMMIT_ID_PART, not unlisted and not shelled))
     return found
 
 

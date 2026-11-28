@@ -2867,7 +2867,8 @@ rule `lab-authoritative-gate-the-lab-cannot-grade` refuses those three names in 
 gate's authority, its lab check and the skip clause of its job, and refuses a static gate step of those
 three jobs that reads a commit id context name outside `static_gates.COMMIT_ID_FIELDS` (one equal to
 `github.sha` or ending in `sha`, excluding an earlier step's `steps.<id>.outputs.*`, `.outcome` or
-`.conclusion`) with
+`.conclusion`), or whose own run text or that of an earlier step whose output it reads names `GITHUB_SHA`
+or runs `git rev-parse` in the shell, invisible to `reads` and so to the static key either way, with
 `FAIL: the checkout lacks every gate of lint, type-gate and test-count reading only commit ids that its static key carries`.
 Hazard: while the lab posts no `lab/lint`,
 `lab/type-gate` or `lab/test-count` check on pull request heads, `lab-verdict` reads each missing verdict as a
