@@ -1,6 +1,8 @@
 """The hub admission's narrow view: which rows it reads, the document its claim seeds read, the ledger's claim gate
 verdict it trusts and the root slots it keeps."""
 
+import json
+import time
 from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
@@ -8,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import admission_view, readiness
+from scripts.swarm import admission_view, lab_capacity, readiness
 from scripts.swarm.health import focus_check
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.api import resources
@@ -440,3 +442,27 @@ def test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear(
     assert ("release config", SLUG) in seen
     assert ("apply rows", ["t1"]) in seen
     assert ("lab fix", "") in seen
+
+
+def lab_behind(store: RedisStore, slug: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES", "10")
+    reading = {"at": int(time.time() * 1000), "capacity": {"classes": {"pull_request": {"predicted_wait_s": 900}}}}
+    store.redis.set(store.key(slug, lab_capacity.KEY), json.dumps(reading))
+
+
+@pytest.mark.feature("hub-admission-composed-admits-gate")
+def test_the_composed_admits_gate_holds_eng_behind_a_slow_lab_and_refuses_every_lane_while_paused(
+    narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eng, ci = task("t1"), task("t2", lane="ci")
+    rows = {row["id"]: row for row in (eng, ci)}
+    running = replace(narrow.store.config(SLUG), state="running")
+    clear = admission_view.admits(narrow.store, SLUG, running, rows)
+    lab_behind(narrow.store, SLUG, monkeypatch)
+
+    behind = admission_view.admits(narrow.store, SLUG, running, rows)
+    paused = admission_view.admits(narrow.store, SLUG, replace(running, state="paused"), rows)
+
+    assert (clear(eng), clear(ci)) == (True, True)
+    assert (behind(eng), behind(ci)) == (False, True)
+    assert (paused(eng), paused(ci)) == (False, False)
