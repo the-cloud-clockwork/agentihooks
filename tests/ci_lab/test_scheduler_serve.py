@@ -17,7 +17,7 @@ SKIPPED = "skipped on TimeoutError: Timeout reading from socket"
 
 
 @dataclass
-class Steps:
+class FakeClock:
     """A serve clock that each sleep moves on by its seconds, failing the test once serve sleeps past its limit."""
 
     limit: int
@@ -153,10 +153,10 @@ def test_serve_exits_1_once_redis_errors_outlast_the_grace_window(
     run = lab({})
     out = Stdout()
     monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(run.engine, "tick", scripted([TIMEOUT] * 6))
-    steps = Steps(limit=5)
-    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 0, steps.clock, steps.sleep, grace_s=2.0) == 1
-    assert steps.slept == [1.0, 1.0]
+    monkeypatch.setattr(run.engine, "tick", scripted([TIMEOUT] * 3))
+    fake = FakeClock(limit=2)
+    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 0, fake.clock, fake.sleep, grace_s=2.0) == 1
+    assert fake.slept == [1.0, 1.0]
     assert out.events == printed(
         f"pass 1 {SKIPPED}",
         f"pass 2 {SKIPPED}",
@@ -173,9 +173,9 @@ def test_serve_rides_out_redis_errors_shorter_than_the_grace_window(
     out = Stdout()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(run.engine, "tick", scripted([TIMEOUT] * 3))
-    steps = Steps(limit=3)
-    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 3, steps.clock, steps.sleep, grace_s=2.5) == 0
-    assert steps.slept == [1.0, 1.0, 1.0]
+    fake = FakeClock(limit=3)
+    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 3, fake.clock, fake.sleep, grace_s=2.5) == 0
+    assert fake.slept == [1.0, 1.0, 1.0]
     assert out.events == printed(f"pass 1 {SKIPPED}", f"pass 2 {SKIPPED}", f"pass 3 {SKIPPED}")
 
 
@@ -184,10 +184,10 @@ def test_a_good_pass_resets_the_grace_window(lab: Callable[..., Run], monkeypatc
     run = lab({})
     out = Stdout()
     monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(run.engine, "tick", scripted([TIMEOUT, TIMEOUT, None, TIMEOUT, TIMEOUT, TIMEOUT, TIMEOUT]))
-    steps = Steps(limit=6)
-    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 0, steps.clock, steps.sleep, grace_s=2.0) == 1
-    assert steps.slept == [1.0] * 5
+    monkeypatch.setattr(run.engine, "tick", scripted([TIMEOUT, TIMEOUT, None, TIMEOUT, TIMEOUT, TIMEOUT]))
+    fake = FakeClock(limit=5)
+    assert scheduler.serve(run.engine, SilentRelay(), 1.0, 0, fake.clock, fake.sleep, grace_s=2.0) == 1
+    assert fake.slept == [1.0] * 5
     assert out.events == printed(
         f"pass 1 {SKIPPED}",
         f"pass 2 {SKIPPED}",
