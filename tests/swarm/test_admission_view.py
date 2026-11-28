@@ -347,6 +347,7 @@ def test_a_plan_task_reads_each_dependency_phase_and_its_comments_once_and_never
         "tasks of p3,p2,p1",
         "artifacts",
     ]
+    assert set(narrow.ledger.slugs) == {SLUG}
     assert [phase["id"] for phase in view.doc["phases"]] == ["p4", "p3", "p2", "p1"]
     assert [entry["text"] for entry in view.doc["phases"][1]["comments"]] == ["wired"]
     assert [row["id"] for row in view.doc["artifacts"]] == ["artifact_add-a1", "artifact_add-a2"]
@@ -363,6 +364,13 @@ def test_a_dependency_task_the_view_already_holds_keeps_its_fields_under_the_evi
 
     assert len(tasks) == len(listed)
     assert [key for key in tasks if key.startswith("d")] == ["d3", "d2"]
+    assert tasks["d3"] == {
+        "id": "d3",
+        "phase": "p3",
+        "pr_url": "https://example.invalid/pull/31",
+        "state": "pr",
+        "title": "title d3",
+    }
     assert tasks["t5"]["description"] == "target work" and tasks["t5"]["territory"] == ["scripts/x"]
     assert tasks["t6"]["claimed_by"] == "engineer@h-1" and tasks["t6"]["proof"] == {"evidence": "run 9"}
 
@@ -414,6 +422,20 @@ def test_a_task_of_another_kind_in_a_phase_with_dependencies_reads_only_its_phas
     assert narrow.ledger.reads == ["phases/p4"]
     assert [phase["id"] for phase in view.doc["phases"]] == ["p4"]
     assert "artifacts" not in view.doc
+
+
+@pytest.mark.feature("plan-lane-admission-narrow-read")
+def test_a_plan_task_whose_phase_names_no_dependency_list_reads_only_its_phase(narrow: SimpleNamespace) -> None:
+    from scripts.swarm_ledger import ledger_workspace
+
+    narrow.found["phases"].append({"id": "p6", "title": "alone"})
+    narrow.found["tasks"].append(task("plan-p6", phase="p6", kind="plan", lane="plan"))
+
+    view = narrow.view.task(SLUG, "plan-p6", marks()[1])
+    row = view.rows["plan-p6"]
+
+    assert narrow.ledger.reads == ["phases/p6"]
+    assert ledger_workspace.steering(row, view.doc) == ledger_workspace.steering(row, narrow.found)
 
 
 @pytest.mark.feature("hub-admission-narrow-read")
