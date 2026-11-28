@@ -2813,9 +2813,15 @@ A pull request or hotfix head resolved against the test merge GitHub built for i
 gate's head files and its tree from that merge commit instead of the bare head, and its units diff against the
 merge's first parent instead of the git merge base of head and base; the grader revision a gate's workflow,
 registry and delivery.yaml come from stays the event's own base regardless. `MirrorExpander.bundle` answers a
-worker's request for the graded commit's git bundle, prerequisite on its two parents, from whichever served
-repository's store under its root already holds it. Git writes that bundle to standard output and the scheduler
-returns those bytes: its container has a read only root and no temp folder, so it makes no file for the bundle.
+worker's request for the graded commit's git bundle from whichever served repository's store under its root holds
+it. The bundle excludes the merge's first parent only, the base its units already diff against, so it carries the
+commits of the head side and is prerequisite on that parent and on the fork point of the head, never on the pushed
+head: a worker applies it before its node mirror, refreshed about once a minute, holds that head. When no store
+holds the commit, as after a new scheduler pod began with an empty store, the scheduler fetches it by its sha from
+the remote of each repository it serves, one request at a time and each fetch bound by `merges.GIT_TIMEOUT`, and
+answers from the store that got it; the route answers 404 only when no served remote gives the commit. Git writes
+that bundle to standard output and the scheduler returns those bytes: its container has a read only root and no
+temp folder, so it makes no file for the bundle.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,

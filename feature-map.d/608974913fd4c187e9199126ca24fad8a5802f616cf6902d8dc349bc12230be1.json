@@ -1,0 +1,24 @@
+{
+  "id": "lab-worker-fetches-a-test-merge-it-lacks",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+  "behaviour": "A lab worker gets the test merge of a pull request head from the scheduler's git bundle whenever GitHub still serves that merge. The bundle excludes the merge's first parent only, so it carries the head side and is prerequisite on that parent and on the fork point of the head, never on the pushed head: a worker whose node mirror does not hold the head yet applies it. When no store of the scheduler holds the commit, as after a new scheduler pod began with an empty store, the scheduler fetches it by its sha from the remote of each repository it serves, in their listed order, one request at a time and each fetch bound in time, and answers from the store that got it; it answers no bundle only when no served remote gives the commit.",
+  "seam": "scripts.ci_lab.scheduler.MirrorExpander.bundle over a real git repository, a real remote and a store that never fetched the commit; scripts.ci_lab.executors._ensure_graded over a real worker store without the pushed head with the real expander as its bundler; the /bundle route of scripts.ci_lab.lease_api over a real expander with an empty store; and scripts.ci_lab.scheduler.build naming the served repositories to the expander",
+  "rules": [
+    "lab-bundle-excludes-every-parent",
+    "lab-bundle-answers-a-store-miss-without-a-fetch"
+  ],
+  "tests": [
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_a_store_that_holds_the_first_parent_and_not_the_head_fetches_the_merge_from_its_bundle",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_the_bundle_of_a_test_merge_is_prerequisite_on_its_first_parent_and_the_fork_point_never_on_its_head",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_a_worker_store_without_the_pushed_head_holds_the_test_merge_after_ensure_graded",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_fetches_a_commit_no_store_holds_from_the_served_remote_that_holds_it",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_none_for_a_commit_no_served_remote_holds",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_bounds_each_fetch_of_a_missing_commit_and_answers_none_when_every_one_runs_past_the_bound",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_the_bundle_of_a_commit_a_store_holds_after_its_fetch_failed",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_bundle_answers_none_for_an_id_a_served_remote_gives_that_names_no_commit",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_two_requests_for_one_missing_commit_at_once_fetch_it_once",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_the_bundle_route_answers_the_bundle_of_a_commit_the_scheduler_store_never_held",
+    "tests/ci_lab/test_scheduler_bundle_fetch.py::test_build_names_every_served_repository_to_the_expander_for_the_fetch_of_a_missing_commit"
+  ]
+}

@@ -1,0 +1,22 @@
+rules:
+  - id: lab-bundle-answers-a-store-miss-without-a-fetch
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler answered a bundle request from the stores under its root alone. A new scheduler pod starts
+      with an empty store, so on 28 November the pod that inherited a pull request grade answered each of its 30
+      bundle requests with 404 and every unit of that grade ended lost by the lab. When no store holds the commit,
+      bundle fetches it from the remotes of the served repositories before it answers None.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-bundle-answers-a-store-miss-without-a-fetch.py
+    patterns:
+      - pattern: |
+          def bundle(...):
+              ...
+      - pattern-not: |
+          def bundle(...):
+              ...
+              $STORE = <... $EXPANDER._fetched(...) ...>
+              ...

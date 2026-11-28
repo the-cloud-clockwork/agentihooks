@@ -25,12 +25,12 @@ import tempfile
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -62,7 +62,7 @@ from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, MoveRefused, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
-from scripts.ci_lab.intake import GradeRequest, admit, served, serves
+from scripts.ci_lab.intake import GradeRequest, admit, named, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
@@ -2128,6 +2128,8 @@ class MirrorExpander:
         self.manifests = manifests
         self.verdicts = verdicts
         self.lab = lab
+        self.served: tuple[str, ...] = ()
+        self._fetching = Lock()
 
     def _environment(self, repo: str) -> dict[str, str] | None:
         if self.auth is None or not repo.startswith(git_auth.GITHUB):
@@ -2143,6 +2145,10 @@ class MirrorExpander:
     def mirror(self, repo: str) -> Mirror:
         """Return the repository's git mirror, the public port a merge resolver reads it through."""
         return self._mirror(repo)
+
+    def serve(self, repos: Iterable[str]) -> None:
+        """Name the repositories whose remotes bundle asks, in this order, for a commit no store holds."""
+        self.served = tuple(repos)
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -2319,33 +2325,58 @@ class MirrorExpander:
         return parent, self._files(mirror, parent)
 
     def bundle(self, sha: str) -> bytes | None:
-        """Return the git bundle of a commit prerequisite on its two parents, from whichever served repository's
-        store under root holds it, or None when none does. Git writes the bundle to standard output, so the call
-        makes no file and needs no temp folder. The ref it bundles from is unique to the call, so two requests for
-        the same commit at once never create or delete each other's ref."""
+        """Return the git bundle of a commit, excluding its first parent only, from the served repository's store
+        under root that holds it, or None when none holds it and no served remote gives it. The bundle of a test
+        merge so carries the head side its first parent does not reach and is prerequisite on that parent and on
+        the fork point of the head, never on the head: a worker applies it before its node mirror holds the pushed
+        head. A commit no store holds, as when a new pod began with an empty store, is fetched first. Git writes
+        the bundle to standard output, so the call makes no file and needs no temp folder. The ref it bundles from
+        is unique to the call, so two requests for the same commit at once never create or delete each other's
+        ref."""
+        store = self._holding(sha) or self._fetched(sha)
+        if store is None:
+            return None
+        parents = subprocess.run(
+            ["git", "-C", str(store), "rev-list", "--parents", "-n", "1", sha],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()[1:]
+        ref = f"refs/lab-bundle/{uuid4().hex}"
+        subprocess.run(["git", "-C", str(store), "update-ref", ref, sha], check=True, capture_output=True)
+        try:
+            return subprocess.run(
+                ["git", "-C", str(store), "bundle", "create", "-", ref] + [f"^{parent}" for parent in parents[:1]],
+                check=True,
+                capture_output=True,
+            ).stdout
+        finally:
+            subprocess.run(["git", "-C", str(store), "update-ref", "-d", ref], check=True, capture_output=True)
+
+    def _holding(self, sha: str) -> Path | None:
+        """Return the store under root that holds the commit, or None when none does."""
         if not self.root.is_dir():
             return None
         for store in sorted(self.root.iterdir()):
             found = subprocess.run(["git", "-C", str(store), "cat-file", "-t", sha], capture_output=True, text=True)
-            if found.stdout.strip() != "commit":
-                continue
-            parents = subprocess.run(
-                ["git", "-C", str(store), "rev-list", "--parents", "-n", "1", sha],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.split()[1:]
-            ref = f"refs/lab-bundle/{uuid4().hex}"
-            subprocess.run(["git", "-C", str(store), "update-ref", ref, sha], check=True, capture_output=True)
-            try:
-                return subprocess.run(
-                    ["git", "-C", str(store), "bundle", "create", "-", ref] + [f"^{parent}" for parent in parents],
-                    check=True,
-                    capture_output=True,
-                ).stdout
-            finally:
-                subprocess.run(["git", "-C", str(store), "update-ref", "-d", ref], check=True, capture_output=True)
+            if found.stdout.strip() == "commit":
+                return store
         return None
+
+    def _fetched(self, sha: str) -> Path | None:
+        """Fetch a commit no store holds through the mirror of each served repository in turn, each fetch bound in
+        time, and return the store that holds it, or None when no remote gave it. The stores are read again before
+        each fetch and after the last, never the fetch's own answer: a commit that arrived although its fetch
+        failed, as beside another writer's fetch of it, is found, and a fetch that brought no commit answers None.
+        One request fetches at a time, so requests for one commit at once fetch it once."""
+        with self._fetching:
+            for repo in self.served:
+                held = self._holding(sha)
+                if held is not None:
+                    return held
+                with suppress(subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    self._mirror(repo).fetch(sha, timeout=merges.GIT_TIMEOUT)
+            return self._holding(sha)
 
     def _tests(
         self,
@@ -2521,7 +2552,9 @@ def build(
     resolve_merges = merges.Background(merges.Resolver(expander.mirror))
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads(), resolve_merges, expander.bundle)
     repository = environ[REPOSITORY]
-    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    listing = environ.get(contract.SERVED_REPOSITORIES, "")
+    expander.serve(named(listing, repository))
+    listed = served(listing, repository)
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)

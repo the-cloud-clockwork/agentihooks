@@ -2,7 +2,7 @@
   "id": "lab-serves-a-bundle-with-no-temp-folder",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
-  "behaviour": "The lab scheduler serves the git bundle of a graded commit without writing a file outside its store: git writes the bundle, prerequisite on the commit's parents, to standard output and the scheduler returns those bytes, so the bundle route answers a worker from a container with a read only root and no temp folder.",
+  "behaviour": "The lab scheduler serves the git bundle of a graded commit without writing a file outside its store: git writes the bundle, prerequisite on the commit's first parent, to standard output and the scheduler returns those bytes, so the bundle route answers a worker from a container with a read only root and no temp folder.",
   "seam": "scripts.ci_lab.scheduler.MirrorExpander.bundle over a real git repository holding a merge commit, and the /bundle route of scripts.ci_lab.lease_api over a real expander, each in a process with no usable temp folder",
   "rules": [
     "lab-scheduler-temp-file-outside-its-store"

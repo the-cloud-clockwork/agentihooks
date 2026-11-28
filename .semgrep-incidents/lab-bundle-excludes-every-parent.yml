@@ -1,0 +1,22 @@
+rules:
+  - id: lab-bundle-excludes-every-parent
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler's git bundle of a test merge excluded every parent of the merge, so it was prerequisite on
+      the pushed head as well as on the base. On 28 November a worker that leased a unit before its node mirror,
+      refreshed once a minute, held that head logged repository lacks these prerequisite commits 22 times and the
+      unit spent its one requeue. Exclude the first parent only, the base the unit already fetches, so the bundle
+      carries the head side.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-bundle-excludes-every-parent.py
+    patterns:
+      - pattern-either:
+          - pattern: '[f"^{$PARENT}" for $PARENT in $PARENTS]'
+          - pattern: '(f"^{$PARENT}" for $PARENT in $PARENTS)'
+      - metavariable-pattern:
+          metavariable: $PARENTS
+          patterns:
+            - pattern-not: $ALL[:1]
