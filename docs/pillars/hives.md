@@ -1514,7 +1514,7 @@ hub never admits a seat the hive spawn refuses. Launches routed by one machine's
 
 When a hive spawn is still refused as unavailable, the spoke gives the claim back with the refusal. The hub then holds
 that lane on that hive for tasks within the refused task's harnesses. The hold lasts until the hive's reported caps or
-session counts change, or for at most ten minutes. A held offer stays queued for the other hives, and a give back
+session counts change, or for at most a day. A held offer stays queued for the other hives, and a give back
 without a refusal is admitted again at once.
 
 #### Closed and draining accounts get no hive agent

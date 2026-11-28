@@ -14,5 +14,9 @@ rules:
         - hive-spawn-claude-cap-one-computation.py
     pattern-either:
       - pattern: LocalHerdrRuntime(HerdrRuntime(...))
+      - pattern: |
+          $HERDR = HerdrRuntime(...)
+          ...
+          LocalHerdrRuntime($HERDR)
       - pattern: session_bands.scaled_cap(...)
       - pattern: session_bands.hive_ceiling(...)

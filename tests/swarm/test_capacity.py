@@ -2609,7 +2609,10 @@ def test_hive_workers_are_admitted_more_at_high_quota_and_fewer_near_a_limit(mon
 def test_a_hive_worker_spawn_reads_the_claude_cap_the_hub_admits_by(
     monkeypatch: pytest.MonkeyPatch, five_used: int, cap: int, free: int
 ) -> None:
+    from types import SimpleNamespace
+
     from scripts.routing import aggregate
+    from scripts.swarm import runtime
 
     five, week = {"used": five_used, "resets_at": 500}, {"used": 11, "resets_at": 600}
     quota = {"observed_at": 100, "five_hour": five, "seven_day": week}
@@ -2632,6 +2635,12 @@ def test_a_hive_worker_spawn_reads_the_claude_cap_the_hub_admits_by(
 
     assert [(row.name, row.cap, capacity.free_seats(row)) for row in hub] == [("a", cap, free)]
     assert [(row.name, row.cap, capacity.free_seats(row)) for row in hive] == [("a", cap, free)]
+
+    herdr = runtime.worker_runtime()
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(time=lambda: 100.0))
+    monkeypatch.setenv("AH_CC_TOKEN_a", "fake")
+    monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
+    assert herdr.has_capacity(None) is (free > 0)
 
 
 @pytest.mark.parametrize("status", [balancer.REVOKED, "rejected"])

@@ -10,6 +10,12 @@ def band_spawn_runtime() -> Any:
     return LocalHerdrRuntime(HerdrRuntime())
 
 
+def band_spawn_runtime_in_two_steps() -> Any:
+    # ruleid: hive-spawn-claude-cap-one-computation
+    herdr = HerdrRuntime()
+    return LocalHerdrRuntime(herdr)
+
+
 def worker_spawn_runtime() -> Any:
     # ok: hive-spawn-claude-cap-one-computation
     return LocalHerdrRuntime(worker_runtime())

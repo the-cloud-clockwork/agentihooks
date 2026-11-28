@@ -35,7 +35,7 @@ ACCOUNT_HOLD = "no permitted harness has a free account seat"
 NO_HARNESS = "the lane agent, required harness and profile permit no harness"
 LANE_HOLD = "lane-hold"
 LANE_HELD = "a spawn on the asking hive refused this lane"
-HOLD_MS = 10 * 60 * 1000
+HOLD_MS = 24 * 60 * 60 * 1000
 
 
 def release_key(text: str) -> Version | None:
@@ -318,7 +318,7 @@ class Admission:
         record: dict[str, Any] = registry.show(redis, hive) or {}
         sessions: dict[str, Any] = json.loads(redis.get(f"{registry.key(hive)}:sessions") or "{}")
         slots: list[dict[str, Any]] = record.get("slots") or []
-        caps = sorted([slot["harness"], slot["account"], slot["cap"]] for slot in slots)
+        caps = sorted([slot["harness"], slot["account"], slot.get("cap")] for slot in slots)
         counts = sorted([name, count] for name, count in sessions.items() if isinstance(count, int))
         return [caps, counts]
 

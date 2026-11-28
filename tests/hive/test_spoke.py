@@ -378,8 +378,10 @@ def test_a_recovered_started_claim_reports_its_launch_decision_before_taking_wor
 
 
 @pytest.mark.feature("events-failed-launch-releases-admission")
-@pytest.mark.parametrize("failure", ["request", "outcome"])
-def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
+@pytest.mark.parametrize(
+    ("failure", "refused"), [("request", ()), ("outcome", ("no room",))], ids=["request", "outcome"]
+)
+def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure, refused):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     if failure == "request":
@@ -391,7 +393,6 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
         ]
     assert rig.spoke.poll() == "retry"
     assert rig.queue.take(0) is None
-    refused = () if failure == "request" else ("no room",)
     rig.tasks.reopen.assert_called_once_with(rig.event, *refused)
     rig.clock.now = 9
     assert rig.spoke.poll() == "empty"
