@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1_hold:f506e98ee1e9474bb6a13c14514d78ce463bbc75e9d0ea06b13bfdad5b274079": {
+    "reader": "standards_reader",
+    "reason": "The mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime, so self.store and its redis client are read identically and no runtime output changes."
+  }
+}

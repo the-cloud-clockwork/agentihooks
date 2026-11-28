@@ -302,7 +302,7 @@ class Spoke:
         self._failed()
         return ASKED
 
-    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int, refused: str = "") -> None:
+    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int, refused: str) -> None:
         """Asks the hub to reopen an offer whose launch failed and left its claim ready while the offer has deliveries
         left, carrying the runtime's refusal when there is one; the final delivery is dead lettered instead."""
         current = json.loads(self.bus.state("spoke-work").get(key).value)

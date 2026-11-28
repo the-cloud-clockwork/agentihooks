@@ -2643,6 +2643,37 @@ def test_a_hive_worker_spawn_reads_the_claude_cap_the_hub_admits_by(
     assert herdr.has_capacity(None) is (free > 0)
 
 
+@pytest.mark.feature("hub-hive-one-claude-cap")
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({}, [("claude", 100, True, {"worker": True}), ("codex", 100, True)]),
+        ({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, [("accounts", 100, True)]),
+    ],
+    ids=["local", "aggregate"],
+)
+def test_the_hive_worker_reader_passes_its_clock_and_default_refresh_to_the_reader_it_uses(
+    monkeypatch: pytest.MonkeyPatch, environ: dict[str, str], expected: list[tuple[Any, ...]]
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    def record(name: str) -> Any:
+        def read(given: dict[str, str], *args: Any, **kwargs: Any) -> list[capacity.Account]:
+            assert given is environ
+            calls.append((name, *args, *([kwargs] if kwargs else [])))
+            return []
+
+        return read
+
+    for name in ("accounts", "_claude", "_codex"):
+        monkeypatch.setattr(capacity, name, record(name.lstrip("_")))
+    monkeypatch.setattr(capacity, "reserved_accounts", lambda rows, given: rows)
+    monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
+
+    assert capacity.worker_accounts(environ, 100) == []
+    assert calls == expected
+
+
 @pytest.mark.parametrize("status", [balancer.REVOKED, "rejected"])
 def test_aggregate_capacity_closes_a_claude_account_the_probe_reads_refused(monkeypatch, status):
     from scripts.routing import aggregate

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/spoke.py:scripts.hive.spoke.x\u01c1Tasks\u01c1reopen:d90f6b6e9d1c04afdb4bda9fb06b5ddb489abd04f0ee7145cbe39d1637be5d1d": {
+    "reader": "standards_reader",
+    "reason": "The Tasks Protocol method body is a docstring and an ellipsis, so its default value is never evaluated by any executed path; every call dispatches to a concrete Tasks implementation."
+  }
+}
