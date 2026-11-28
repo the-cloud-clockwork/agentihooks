@@ -2814,7 +2814,8 @@ gate's head files and its tree from that merge commit instead of the bare head, 
 merge's first parent instead of the git merge base of head and base; the grader revision a gate's workflow,
 registry and delivery.yaml come from stays the event's own base regardless. `MirrorExpander.bundle` answers a
 worker's request for the graded commit's git bundle, prerequisite on its two parents, from whichever served
-repository's store under its root already holds it.
+repository's store under its root already holds it. Git writes that bundle to standard output and the scheduler
+returns those bytes: its container has a read only root and no temp folder, so it makes no file for the bundle.
 
 Before it expands such a grade, the scheduler resolves the merge through `scripts.ci_lab.merges`: one GitHub
 read of the pull request and a git read of the merge's parents, run off the scheduler pass and bound in time,

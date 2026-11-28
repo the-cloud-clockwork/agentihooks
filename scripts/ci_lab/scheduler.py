@@ -2320,8 +2320,10 @@ class MirrorExpander:
 
     def bundle(self, sha: str) -> bytes | None:
         """Return the git bundle of a commit prerequisite on its two parents, from whichever served repository's
-        store under root holds it, or None when none does. The ref it bundles from is unique to the call, so two
-        requests for the same commit at once never create or delete each other's ref."""
+        store under root holds it, or None when none does. Git writes the bundle to standard output, so the call
+        makes no file and needs no temp folder: the scheduler's container has a read only root. The ref it bundles
+        from is unique to the call, so two requests for the same commit at once never create or delete each other's
+        ref."""
         if not self.root.is_dir():
             return None
         for store in sorted(self.root.iterdir()):
@@ -2337,14 +2339,11 @@ class MirrorExpander:
             ref = f"refs/lab-bundle/{uuid4().hex}"
             subprocess.run(["git", "-C", str(store), "update-ref", ref, sha], check=True, capture_output=True)
             try:
-                with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
-                    subprocess.run(
-                        ["git", "-C", str(store), "bundle", "create", handle.name, ref]
-                        + [f"^{parent}" for parent in parents],
-                        check=True,
-                        capture_output=True,
-                    )
-                    return Path(handle.name).read_bytes()
+                return subprocess.run(
+                    ["git", "-C", str(store), "bundle", "create", "-", ref] + [f"^{parent}" for parent in parents],
+                    check=True,
+                    capture_output=True,
+                ).stdout
             finally:
                 subprocess.run(["git", "-C", str(store), "update-ref", "-d", ref], check=True, capture_output=True)
         return None
