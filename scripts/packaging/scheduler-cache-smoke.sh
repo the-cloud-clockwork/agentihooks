@@ -7,7 +7,7 @@ cache_volume="${name}-cache"
 proof_volume="${name}-proof"
 cleanup() {
   docker rm -fv "$name" >/dev/null 2>&1 || true
-  docker volume rm "$cache_volume" "$proof_volume" >/dev/null
+  docker volume rm "$cache_volume" "$proof_volume" >/dev/null || echo "Cleanup retained $cache_volume or $proof_volume" >&2
 }
 docker volume create "$cache_volume" >/dev/null
 docker volume create "$proof_volume" >/dev/null

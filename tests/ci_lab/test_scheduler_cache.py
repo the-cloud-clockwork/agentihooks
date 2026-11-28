@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from collections.abc import Callable, Mapping
 from io import StringIO
 from pathlib import Path
@@ -234,7 +236,7 @@ def test_a_second_owner_refuses_while_the_first_consumer_is_running(policy: dict
     thread.start()
     try:
         assert entered.wait(10)
-        with pytest.raises(cache.PolicyError):
+        with pytest.raises(cache.PolicyError, match="(?i)owner"):
             cache.run(lambda _found: 0, policy | {cache.POD_UID: SECOND_POD})
     finally:
         release.set()
@@ -400,20 +402,27 @@ def test_allocated_bytes_tolerates_a_file_renamed_during_the_scan(
 ) -> None:
     root = tmp_path / "measure"
     root.mkdir()
-    vanished = root / "vanished"
-    vanished.write_bytes(b"x" * 8192)
+    names = {"first", "second", "third"}
+    for name in names:
+        (root / name).write_bytes(b"x" * 65536)
     original = cache.os.stat
+    removed: list[str] = []
 
     def race(
         path: str | Path | int, *, dir_fd: int | None = None, follow_symlinks: bool = True
     ) -> cache.os.stat_result:
-        if path == "vanished" and dir_fd is not None:
-            vanished.unlink(missing_ok=True)
+        if isinstance(path, str) and path in names and dir_fd is not None and not removed:
+            (root / path).unlink()
+            removed.append(path)
             raise FileNotFoundError("renamed during scan")
         return original(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(cache.os, "stat", race)
-    assert cache.allocated_bytes(root) == root.lstat().st_blocks * 512
+    allocated = cache.allocated_bytes(root)
+    expected = root.lstat().st_blocks * 512 + sum(
+        (root / name).lstat().st_blocks * 512 for name in names if name not in removed
+    )
+    assert len(removed) == 1 and allocated == expected
 
 
 @pytest.mark.feature("lab-scheduler-cache-policy")
@@ -487,7 +496,7 @@ def test_startup_measurement_failure_refuses_before_consumers(
         raise PermissionError("cannot measure cache")
 
     monkeypatch.setattr(cache, "allocated_bytes", failed)
-    with pytest.raises(cache.PolicyError):
+    with pytest.raises(cache.PolicyError, match="(?i)generation"):
         cache.run(lambda found: started.append(found) or 0, policy)
     assert started == []
 
@@ -536,3 +545,438 @@ def test_monitor_shutdown_failure_terminates_before_releasing_ownership(
     assert calls == ["started", "closed"]
     assert statuses == [1]
     assert (Path(policy[cache.ROOT]) / FIRST_POD / ".invalid").is_file()
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_an_interrupted_empty_root_with_only_its_lock_can_restart(policy: dict[str, str]) -> None:
+    root = Path(policy[cache.ROOT])
+    (root / ".lock").touch(mode=0o600)
+    assert cache.run(lambda _found: 37, policy) == 37
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_fresh_cache_entries_are_private_even_with_a_permissive_umask(policy: dict[str, str]) -> None:
+    previous = cache.os.umask(0)
+
+    def consume(found: Mapping[str, str]) -> int:
+        store = Path(found["CI_LAB_MIRROR_STORE"])
+        for directory in (store.parent, store, Path(found[contract.GIT_MIRROR])):
+            assert directory.stat().st_mode & 0o707 == 0o700
+        assert (Path(policy[cache.ROOT]) / ".lock").stat().st_mode & 0o777 == 0o600
+        return 0
+
+    try:
+        cache.run(consume, policy)
+    finally:
+        cache.os.umask(previous)
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("entry", ["root", "node", "store", "lock"])
+@pytest.mark.parametrize("write_bit", [0o020, 0o002])
+def test_group_or_world_writable_owned_entries_refuse_start(policy: dict[str, str], entry: str, write_bit: int) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    target = {
+        "root": root,
+        "node": root / FIRST_POD / "node",
+        "store": root / FIRST_POD / "store",
+        "lock": root / ".lock",
+    }[entry]
+    target.chmod(target.stat().st_mode | write_bit)
+    started: list[Mapping[str, str]] = []
+    with pytest.raises(cache.PolicyError) as raised:
+        cache.run(lambda found: started.append(found) or 0, policy)
+    assert started == []
+    assert "none" != str(raised.value).casefold()
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("entry", ["root", "node", "store", "lock"])
+def test_compatible_owned_permissions_are_retained(policy: dict[str, str], entry: str) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    target = {
+        "root": root,
+        "node": root / FIRST_POD / "node",
+        "store": root / FIRST_POD / "store",
+        "lock": root / ".lock",
+    }[entry]
+    target.chmod(target.stat().st_mode | 0o001)
+    assert cache.run(lambda _found: 41, policy) == 41
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_a_hardlinked_lock_refuses_without_removing_its_other_name(policy: dict[str, str], tmp_path: Path) -> None:
+    cache.run(lambda _found: 0, policy)
+    other = tmp_path / "other-lock"
+    other.hardlink_to(Path(policy[cache.ROOT]) / ".lock")
+    with pytest.raises(cache.PolicyError, match="(?i)lock"):
+        cache.run(lambda _found: 0, policy)
+    assert other.is_file()
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("kind", ["wrong-marker", "marker-link", "generation-link"])
+@pytest.mark.parametrize("current", [False, True])
+def test_foreign_uuid_generations_are_never_claimed_or_reclaimed(
+    policy: dict[str, str], tmp_path: Path, kind: str, current: bool
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    outside = tmp_path / "foreign"
+    outside.mkdir()
+    (outside / ".owner").write_text((root / FIRST_POD / ".owner").read_text())
+    retained = outside / "retained"
+    retained.write_text("foreign data")
+    candidate = root / SECOND_POD
+    if kind == "generation-link":
+        candidate.symlink_to(outside, target_is_directory=True)
+    else:
+        candidate.mkdir()
+        (candidate / "retained").write_text("foreign data")
+        if kind == "marker-link":
+            (candidate / ".owner").symlink_to(outside / ".owner")
+        else:
+            (candidate / ".owner").write_text("unowned marker")
+    if current:
+        with pytest.raises(cache.PolicyError, match="(?i)generation"):
+            cache.run(lambda _found: 0, policy | {cache.POD_UID: SECOND_POD})
+    else:
+        cache.run(lambda _found: 0, policy)
+    assert candidate.exists()
+    assert (candidate / "retained").read_text() == "foreign data"
+    assert retained.read_text() == "foreign data"
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("marker", ["regular", "link", "dangling"])
+def test_a_small_invalid_generation_is_reset_without_touching_external_targets(
+    policy: dict[str, str], tmp_path: Path, marker: str
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    generation = Path(policy[cache.ROOT]) / FIRST_POD
+    (generation / "store" / "kept").write_text("small cache")
+    external = tmp_path / "external"
+    external.write_text("external data")
+    invalid = generation / ".invalid"
+    if marker == "regular":
+        invalid.write_text("invalidated")
+    else:
+        invalid.symlink_to(external if marker == "link" else tmp_path / "absent")
+
+    def restart(found: Mapping[str, str]) -> int:
+        assert list(Path(found["CI_LAB_MIRROR_STORE"]).iterdir()) == []
+        assert not invalid.exists() and not invalid.is_symlink()
+        return 0
+
+    assert cache.allocated_bytes(Path(policy[cache.ROOT])) < int(policy[cache.LIMIT])
+    cache.run(restart, policy)
+    assert external.read_text() == "external data"
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_one_byte_is_valid_but_too_small_for_the_cache_metadata(policy: dict[str, str]) -> None:
+    with pytest.raises(cache.PolicyError, match="(?i)exceeds"):
+        cache.run(lambda _found: 0, policy | {cache.LIMIT: "1"})
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_foreign_allocated_data_can_refuse_start_but_is_never_deleted(policy: dict[str, str]) -> None:
+    cache.run(lambda _found: 0, policy)
+    foreign = Path(policy[cache.ROOT]) / "foreign"
+    foreign.mkdir()
+    data = foreign / "data"
+    data.write_bytes(b"x" * (2 * 1024 * 1024))
+    started: list[Mapping[str, str]] = []
+    with pytest.raises(cache.PolicyError, match="(?i)exceeds"):
+        cache.run(lambda found: started.append(found) or 0, policy)
+    assert started == []
+    assert data.stat().st_size == 2 * 1024 * 1024
+
+
+def changed_stat(info: cache.os.stat_result, field: int, value: int) -> cache.os.stat_result:
+    values = list(info)
+    values[field] = value
+    return cache.os.stat_result(values)
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("entry", ["root", "node", "store", "lock"])
+def test_owned_entries_with_foreign_uid_metadata_refuse_before_start(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch, entry: str
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    target = {
+        "root": root,
+        "node": root / FIRST_POD / "node",
+        "store": root / FIRST_POD / "store",
+        "lock": root / ".lock",
+    }[entry]
+    original_lstat = Path.lstat
+    original_fstat = cache.os.fstat
+    identity = target.stat()
+
+    def lstat(path: Path) -> cache.os.stat_result:
+        info = original_lstat(path)
+        return changed_stat(info, 4, info.st_uid + 1) if path == target else info
+
+    def fstat(descriptor: int) -> cache.os.stat_result:
+        info = original_fstat(descriptor)
+        return (
+            changed_stat(info, 4, info.st_uid + 1)
+            if (info.st_dev, info.st_ino) == (identity.st_dev, identity.st_ino)
+            else info
+        )
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(cache.os, "fstat", fstat)
+    started: list[Mapping[str, str]] = []
+    with pytest.raises(cache.PolicyError) as raised:
+        cache.run(lambda found: started.append(found) or 0, policy)
+    assert started == []
+    assert str(raised.value).casefold() != "none"
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("entry", ["generation", "marker"])
+def test_stale_generations_with_foreign_uid_metadata_are_preserved(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch, entry: str
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    candidate = root / SECOND_POD
+    candidate.mkdir()
+    marker = candidate / ".owner"
+    marker.write_text((root / FIRST_POD / ".owner").read_text())
+    retained = candidate / "retained"
+    retained.write_text("foreign data")
+    target = candidate if entry == "generation" else marker
+    original = Path.lstat
+
+    def lstat(path: Path) -> cache.os.stat_result:
+        info = original(path)
+        return changed_stat(info, 4, info.st_uid + 1) if path == target else info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    assert cache.run(lambda _found: 43, policy) == 43
+    assert retained.read_text() == "foreign data"
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_a_nonregular_open_lock_refuses_before_consumers(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    target = (Path(policy[cache.ROOT]) / ".lock").stat()
+    original = cache.os.fstat
+
+    def fstat(descriptor: int) -> cache.os.stat_result:
+        info = original(descriptor)
+        if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
+            return changed_stat(info, 0, cache.stat.S_IFIFO | cache.stat.S_IMODE(info.st_mode))
+        return info
+
+    monkeypatch.setattr(cache.os, "fstat", fstat)
+    with pytest.raises(cache.PolicyError, match="(?i)lock"):
+        cache.run(lambda _found: 0, policy)
+
+
+def manual_intervals(monkeypatch: pytest.MonkeyPatch) -> list[Callable[[], None]]:
+    callbacks: list[Callable[[], None]] = []
+
+    class ManualInterval:
+        def __init__(self, callback: Callable[[], None], *, every: float) -> None:
+            del every
+            callbacks.append(callback)
+
+        def start(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(cache, "Interval", ManualInterval)
+    return callbacks
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_exact_allocated_limit_retains_cache_at_start_and_during_service(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    retained = root / FIRST_POD / "store" / "retained"
+    retained.write_text("healthy cache")
+    limit = cache.allocated_bytes(root)
+    callbacks = manual_intervals(monkeypatch)
+    statuses: list[int] = []
+    monkeypatch.setattr(cache, "_terminate", statuses.append)
+
+    def consume(found: Mapping[str, str]) -> int:
+        assert retained.read_text() == "healthy cache"
+        assert cache.allocated_bytes(root) == limit
+        callbacks[0]()
+        assert not (Path(found["CI_LAB_MIRROR_STORE"]).parent / ".invalid").exists()
+        return 47
+
+    assert cache.run(consume, policy | {cache.LIMIT: str(limit)}) == 47
+    assert statuses == []
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_owned_reset_accepts_an_exact_limit_including_preserved_foreign_bytes(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache.run(lambda _found: 0, policy)
+    root = Path(policy[cache.ROOT])
+    foreign = root / "foreign"
+    foreign.mkdir()
+    retained = foreign / "retained"
+    retained.write_bytes(b"y" * 65536)
+    limit = cache.allocated_bytes(root)
+    (root / FIRST_POD / "store" / "excess").write_bytes(b"x" * 131072)
+    manual_intervals(monkeypatch)
+
+    def consume(found: Mapping[str, str]) -> int:
+        assert list(Path(found["CI_LAB_MIRROR_STORE"]).iterdir()) == []
+        assert cache.allocated_bytes(root) == limit
+        assert retained.read_bytes() == b"y" * 65536
+        return 53
+
+    assert cache.run(consume, policy | {cache.LIMIT: str(limit)}) == 53
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_fatal_budget_reason_is_persisted_and_flushed_before_termination(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    callbacks = manual_intervals(monkeypatch)
+    synced: list[str] = []
+    statuses: list[int] = []
+    original = cache.os.fsync
+
+    class BufferedError(StringIO):
+        flushed = ""
+
+        def flush(self) -> None:
+            self.flushed = self.getvalue()
+
+    stderr = BufferedError()
+
+    def fsync(descriptor: int) -> None:
+        synced.append(cache.os.readlink(f"/proc/self/fd/{descriptor}"))
+        original(descriptor)
+
+    def terminate(status: int) -> None:
+        statuses.append(status)
+        marker = Path(policy[cache.ROOT]) / FIRST_POD / ".invalid"
+        assert str(marker) in synced
+        assert "allocated" in marker.read_text()
+        assert "allocated" in stderr.flushed
+        assert policy[cache.LIMIT] in stderr.flushed
+
+    def consume(found: Mapping[str, str]) -> int:
+        (Path(found["CI_LAB_MIRROR_STORE"]) / "excess").write_bytes(b"x" * (2 * 1024 * 1024))
+        callbacks[0]()
+        return 0
+
+    monkeypatch.setattr(cache.os, "fsync", fsync)
+    monkeypatch.setattr(cache.sys, "stderr", stderr)
+    monkeypatch.setattr(cache, "_terminate", terminate)
+    cache.run(consume, policy)
+    assert statuses == [1]
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("vanished", [False, True])
+def test_directory_walk_errors_propagate_but_vanished_directories_do_not_hide_siblings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vanished: bool
+) -> None:
+    root = tmp_path / "measure"
+    root.mkdir()
+    missing = root / "unreadable"
+    missing.mkdir()
+    retained = root / "retained"
+    retained.write_bytes(b"x" * 65536)
+    original = cache.os.open
+    failure = FileNotFoundError("directory vanished") if vanished else PermissionError("directory unreadable")
+
+    def open_directory(path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        if path == "unreadable" and dir_fd is not None:
+            if vanished:
+                missing.rmdir()
+            raise failure
+        return original(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(cache.os, "open", open_directory)
+    if vanished:
+        assert cache.allocated_bytes(root) >= retained.lstat().st_blocks * 512
+        assert not missing.exists()
+    else:
+        with pytest.raises(PermissionError) as raised:
+            cache.allocated_bytes(root)
+        assert raised.value is failure
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_allocated_bytes_refuses_a_symlink_as_its_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "retained").write_bytes(b"x" * 65536)
+    linked = tmp_path / "linked"
+    linked.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        cache.allocated_bytes(linked)
+    assert (outside / "retained").stat().st_size == 65536
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+@pytest.mark.parametrize("kind", ["missing-root", "invalid-limit", "non-pid-one"])
+def test_main_policy_refusals_name_the_failed_setting(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    environ = policy | dict.fromkeys(scheduler.GITHUB_APP_SETTINGS, "fixture")
+    if kind == "missing-root":
+        environ[cache.ROOT] = str(Path(policy[cache.ROOT]) / "absent")
+    elif kind == "invalid-limit":
+        environ[cache.LIMIT] = "invalid"
+    else:
+        monkeypatch.setattr(cache, "_pid", lambda: 2)
+    assert scheduler.main(["--require-cache-policy"], environ) == 1
+    setting = cache.LIMIT if kind == "invalid-limit" else cache.ROOT
+    assert setting in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_a_lock_without_write_access_refuses_before_consumers(policy: dict[str, str]) -> None:
+    cache.run(lambda _found: 0, policy)
+    lock = Path(policy[cache.ROOT]) / ".lock"
+    lock.chmod(0o400)
+    writable = True
+    try:
+        descriptor = cache.os.open(lock, cache.os.O_RDWR)
+    except PermissionError:
+        writable = False
+    else:
+        cache.os.close(descriptor)
+    if writable:
+        assert cache.run(lambda _found: 59, policy) == 59
+    else:
+        with pytest.raises(cache.PolicyError, match="(?i)lock"):
+            cache.run(lambda _found: 0, policy)
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_allocated_bytes_refuses_a_fifo_without_waiting_for_a_writer(tmp_path: Path) -> None:
+    fifo = tmp_path / "fifo"
+    cache.os.mkfifo(fifo)
+    program = (
+        "import sys; from pathlib import Path; from scripts.ci_lab import cache\n"
+        "try: cache.allocated_bytes(Path(sys.argv[1]))\n"
+        "except NotADirectoryError: sys.exit(0)\n"
+        "sys.exit(1)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", program, str(fifo)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
