@@ -199,21 +199,32 @@ def test_a_step_reading_a_context_name_that_is_not_a_commit_id_holds_the_part(
 
 
 @pytest.mark.feature("lab-authoritative-static-gates")
-def test_a_checkout_with_no_registry_file_holds_the_commit_id_part(
-    copy: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("registry", [None, "{"], ids=["absent", "malformed"])
+def test_the_check_holds_whatever_the_input_key_registry_file_is_since_it_never_reads_it(
+    copy: Path, capsys: pytest.CaptureFixture[str], registry: str | None
 ) -> None:
-    assert not (copy / static_gates.REGISTRY).exists()
+    if registry is not None:
+        (copy / static_gates.REGISTRY).write_text(registry)
+    assert (copy / static_gates.REGISTRY).exists() == (registry is not None)
     assert check.main(copy) == 0
     assert capsys.readouterr().out.splitlines() == HELD
 
 
 @pytest.mark.feature("lab-authoritative-static-gates")
-def test_a_checkout_with_a_malformed_registry_file_raises_and_is_never_reported_as_a_delivery_fault(
-    copy: Path,
+def test_a_job_of_a_workflow_a_listed_gate_calls_reading_a_commit_id_outside_the_key_fails_the_part(
+    copy: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (copy / static_gates.REGISTRY).write_text("{")
-    with pytest.raises(json.JSONDecodeError):
-        check.main(copy)
+    step = {"run": "python -m scripts.gate_protected", "env": {"OTHER": "${{ github.event.workflow_run.head_sha }}"}}
+    called = {"on": "workflow_call", "jobs": {"checks": {"runs-on": "ubuntu-latest", "steps": [step]}}}
+    (copy / delivery.WORKFLOWS / "lint-called.yml").write_text(yaml.safe_dump(called))
+
+    def call(document: Any) -> None:
+        document["jobs"]["lint"].pop("steps")
+        document["jobs"]["lint"]["uses"] = "./.github/workflows/lint-called.yml"
+
+    _edit(copy / check.WORKFLOW, call)
+    assert check.main(copy) == 1
+    assert capsys.readouterr().out.splitlines() == _lacking({10})
 
 
 @pytest.mark.feature("lab-authoritative-static-gates")

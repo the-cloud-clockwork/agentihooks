@@ -40,15 +40,6 @@ def _terms(condition: object) -> list[str]:
     return [term.strip() for term in text.split("&&")]
 
 
-def _registry(root: Path) -> dict[str, object]:
-    """The input-key registry at root, empty when the checkout carries none, by design: an absent registry only
-    widens a gate's paths and base paths to the whole tree, never what it reads, so this check holds without one.
-    A malformed registry raises, uncaught, exactly as a malformed wiring file does: never reported as a delivery
-    fault."""
-    path = root / static_gates.REGISTRY
-    return json.loads(path.read_text()) if path.exists() else {}
-
-
 def _unlisted(gate: static_gates.StaticGate) -> list[str]:
     """Each context name the gate reads that names a commit id outside static_gates.COMMIT_ID_FIELDS: equal to
     github.sha or ending in sha, and not an earlier step's output, outcome or conclusion (steps.<id>.outputs.*
@@ -70,11 +61,12 @@ def _shell_reads(gate: static_gates.StaticGate) -> bool:
     return any(SHELL_SHA.search(text) for text in (gate.run, *(producer.run for producer in gate.producers)))
 
 
-def parts(root: Path, workflow_text: str, registry: dict[str, object]) -> list[tuple[str, bool]]:
+def parts(root: Path, workflow_text: str) -> list[tuple[str, bool]]:
     """Each part of the feature with whether the checkout holds it: the list itself, then for each gate its kept
     authority, the lab check that replaces its job and the skip clause of that job, then whether every static gate
-    of lint, type-gate and test-count, discovered from workflow_text with registry and the reusable workflows at
-    root, reads its commit ids only through names the static key carries and never through the shell."""
+    of lint, type-gate and test-count, discovered from workflow_text with the reusable workflows at root, reads
+    its commit ids only through names the static key carries and never through the shell. The input-key registry
+    is not read: it sets the paths of a gate, never what the gate reads."""
     listed = list(delivery.lab(root)["authoritative"])
     kept = delivery.authoritative(root)
     checks = json.loads((root / WIRING).read_text())["lab_gates"]
@@ -89,7 +81,7 @@ def parts(root: Path, workflow_text: str, registry: dict[str, object]) -> list[t
             (f"the lab check that replaces the {gate} job", replaced),
             (f"the lab skip clause of the {gate} job", skipped),
         ]
-    gates = static_gates.discover(workflow_text, registry, ci_wiring.load(root))
+    gates = static_gates.discover(workflow_text, reusable=ci_wiring.load(root))
     scoped = [gate for gate in gates if gate.job.partition("/")[0] in GATES]
     unlisted = [name for gate in scoped for name in _unlisted(gate)]
     shelled = [gate.name for gate in scoped if _shell_reads(gate)]
@@ -101,7 +93,7 @@ def main(root: Path | None = None) -> int:
     root = ROOT if root is None else root
     try:
         workflow_text = (root / WORKFLOW).read_text()
-        found = parts(root, workflow_text, _registry(root))
+        found = parts(root, workflow_text)
     except delivery.DeliveryError as error:
         print(LACKS.format(part=UNREAD.format(error=error)))
         return 1
