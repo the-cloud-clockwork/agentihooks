@@ -625,17 +625,12 @@ def enhanced(doc: dict[str, Any], name: str, phases: list[str]) -> dict[str, Any
     """Return the task a claimed enhancement plan task of name enhances, when that task sits in the one named phase
     and the phase already holds a plan link, so the section is published for that task and the phase keeps its plan."""
     planned = {phase["id"] for phase in doc["phases"] if phase.get("plan_url")}
+    tasks: list[dict[str, Any]] = doc.get("tasks", [])
     targets = {
-        task.get("enhances")
-        for task in doc["tasks"]
-        if task.get("claimed_by") == name and task.get("state") == "claimed"
+        task.get("enhances") for task in tasks if task.get("claimed_by") == name and task.get("state") == "claimed"
     }
     return next(
-        (
-            task
-            for task in doc["tasks"]
-            if task["id"] in targets and [task.get("phase")] == phases and phases[0] in planned
-        ),
+        (task for task in tasks if task["id"] in targets and [task.get("phase")] == phases and phases[0] in planned),
         None,
     )
 
