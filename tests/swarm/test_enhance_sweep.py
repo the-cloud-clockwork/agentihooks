@@ -19,6 +19,7 @@ from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.steps import CallStep, thin
+from tests.swarm.generated_release import generated_release
 
 pytestmark = pytest.mark.unit
 
@@ -161,6 +162,12 @@ def test_the_sweep_skips_a_thin_task_that_carries_a_pull_request_or_a_branch() -
         _task("t3", pr_url="", branch=""),
     ]
     assert enhance_sweep.thin_by_lane(tasks, thin.unfrozen({"tasks": tasks})) == {"eng": ["t3"], "ci": []}
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+def test_the_sweep_selects_an_ordinary_thin_ops_task_and_never_the_generated_release_task() -> None:
+    tasks = [generated_release(), _task("t1", kind="ops")]
+    assert enhance_sweep.thin_by_lane(tasks, thin.unfrozen({"tasks": tasks})) == {"eng": ["t1"], "ci": []}
 
 
 @pytest.mark.feature("swarm-enhance-sweep")

@@ -1,0 +1,15 @@
+{
+  "id": "thin-release-task-exempt",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-release-task-exempt",
+  "behaviour": "The release task the tick generates for a release phase, an ops task whose id is the release id of its own phase, is never graded thin, so the thin task pass and the enhance sweep never queue an enhancement plan task, mark it needing enhancement or name it to the master, on any pass; an ordinary thin ops task, a release id of another phase, a release task moved to another phase and a code task carrying the release id keep their thin outcome and the ordinary one still gets exactly one enhancement.",
+  "seam": "scripts.swarm.thin_task.exempt, read by scripts.swarm.thin_task.thin, the thin task pass and the enhance sweep, over the task phase_planning._add_release generates",
+  "tests": [
+    "tests/swarm/test_thin_task.py::test_the_release_task_the_phase_builder_generates_is_never_thin",
+    "tests/swarm/test_thin_task.py::test_a_task_that_is_not_the_ops_release_task_of_its_own_phase_is_still_thin",
+    "tests/tick/steps/test_thin_task_pass.py::test_the_generated_release_task_gets_no_write_on_repeated_passes",
+    "tests/tick/steps/test_thin_task_pass.py::test_an_ordinary_thin_ops_task_beside_the_release_task_gets_exactly_one_enhancement",
+    "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_an_ordinary_thin_ops_task_and_never_the_generated_release_task",
+    "tests/swarm/test_phase_planning.py::test_the_generated_release_task_gets_no_enhancement_task_mark_or_notice_over_repeated_ticks"
+  ]
+}

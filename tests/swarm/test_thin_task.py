@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm import slice_check
 from scripts.swarm.thin_task import section_complete, thin
+from tests.swarm.generated_release import generated_release
 
 pytestmark = pytest.mark.unit
 
@@ -249,6 +250,41 @@ def test_a_task_with_an_empty_description_is_thin() -> None:
 )
 def test_a_sliced_plan_planned_or_skipped_task_is_never_thin(fields: dict[str, Any]) -> None:
     assert thin(task(description="Fix it.", territory=[], **fields)) == []
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+@pytest.mark.parametrize("title", ["Build", "Prove the generated release task is never graded as thin work"])
+def test_the_release_task_the_phase_builder_generates_is_never_thin(title: str) -> None:
+    assert thin(generated_release(title=title)) == []
+
+
+@pytest.mark.feature("thin-release-task-exempt")
+@pytest.mark.parametrize(
+    ("fields", "tid", "seamless"),
+    [
+        ({"id": "t2"}, "t2", []),
+        ({"id": "release-p2"}, "release-p2", []),
+        ({"phase": "p2"}, "release-p1", []),
+        ({"id": "release-", "phase": ""}, "release-", []),
+        ({"kind": "code"}, "release-p1", ["Task release-p1 is code work that names no seam."]),
+    ],
+    ids=[
+        "ordinary ops task titled release",
+        "release id of another phase",
+        "moved to another phase",
+        "no phase",
+        "code kind",
+    ],
+)
+def test_a_task_that_is_not_the_ops_release_task_of_its_own_phase_is_still_thin(
+    fields: dict[str, Any], tid: str, seamless: list[str]
+) -> None:
+    assert thin({**generated_release(), **fields}) == [
+        f"Task {tid} has a description under 40 words.",
+        f"Task {tid} has no done when sentence.",
+        f"Task {tid} names no territory.",
+        *seamless,
+    ]
 
 
 @pytest.mark.parametrize("mark", ["", "needed"])

@@ -650,6 +650,23 @@ def test_a_release_phase_gets_one_release_task_on_the_tick_its_build_tasks_are_d
     assert not any("is done" in i.text for i in items(store, MASTER_SEAT))
 
 
+@pytest.mark.feature("thin-release-task-exempt")
+def test_the_generated_release_task_gets_no_enhancement_task_mark_or_notice_over_repeated_ticks(
+    env: tuple[RedisStore, FileLedger],
+) -> None:
+    store, ledger = env
+    build_task(ledger, "t1")
+    set_phase("p1", release=True)
+    for _ in range(3):
+        run(store, ledger)
+    [release] = [t for t in tasks("p1") if t["id"] != "t1"]
+    assert (release["id"], release["kind"], release["state"]) == ("release-p1", "ops", "open")
+    assert release["contract"] == phase_planning.RELEASE_CONTRACT
+    assert not release.get("enhancement")
+    assert [t["id"] for t in state(SLUG)["tasks"] if t.get("enhances")] == []
+    assert [i.text for i in items(store, MASTER_SEAT) if "release-p1" in i.text] == []
+
+
 def test_no_release_task_while_a_build_task_is_open_or_without_the_release_field(env):
     store, ledger = env
     build_task(ledger, "t1")
