@@ -32,6 +32,7 @@ paced = test_warm_writer.paced
 twins = test_warm_writer.twins
 writer = test_warm_writer.writer
 ROOT = Path(__file__).resolve().parents[2]
+BASE = Clock().time()
 WALL = 2.5
 CPU = 0.5
 OPERATIONS = "/api/v1/ledgers/:slug/operations"
@@ -240,12 +241,13 @@ def test_a_socket_write_caller_has_its_reply_while_the_writer_still_keeps_the_sa
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
-def test_an_idle_owner_pass_leaves_its_journal_bytes_unchanged(owner: Path) -> None:
+def test_an_idle_owner_pass_leaves_its_journal_bytes_unchanged(owner: Path, capsys: pytest.CaptureFixture[str]) -> None:
     request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
     request_metrics.persist()
     before = owner.read_bytes()
     request_metrics.persist()
     assert owner.read_bytes() == before
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
@@ -338,6 +340,50 @@ def test_a_spool_no_server_takes_drops_samples_past_retention_when_it_compacts(
 
 
 @pytest.mark.feature("ledger-writer-request-samples")
+def test_a_spool_exactly_at_its_cap_is_not_compacted(folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    monkeypatch.setattr(request_metrics, "time", clock)
+    with request_metrics.command("POST", TASKS_PATH):
+        clock.wall += 1.0
+    monkeypatch.setattr(request_metrics, "SPOOL_BYTES", spooled(folder)[1])
+    clock.wall += request_metrics.RETENTION_SECONDS + 1.0
+    with request_metrics.command("POST", TASKS_PATH):
+        clock.wall += 2.0
+    assert spooled(folder)[0] == [1.0, 2.0]
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
+def test_spooled_samples_take_their_time_order_among_the_held_samples(
+    owner: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    monkeypatch.setattr(request_metrics, "time", clock)
+    clock.wall = 10.0
+    with request_metrics.command("POST", TASKS_PATH):
+        pass
+    for wall in (20.0, 30.0):
+        clock.wall = wall
+        request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+    request_metrics.persist()
+    held_rows = [(row[0] - BASE, row[2]) for row in request_metrics.SAMPLES]
+    assert held_rows == [(10.0, TASKS), (20.0, OPERATIONS), (30.0, OPERATIONS)]
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
+def test_the_owner_takes_a_spooled_sample_at_the_retention_floor_and_drops_an_older_one(
+    owner: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    monkeypatch.setattr(request_metrics, "time", clock)
+    for wall in (1.0, 2.0):
+        with request_metrics.command("POST", TASKS_PATH):
+            clock.wall += wall
+    clock.wall += request_metrics.RETENTION_SECONDS
+    request_metrics.persist()
+    assert [row[3] for row in request_metrics.SAMPLES] == [2.0]
+
+
+@pytest.mark.feature("ledger-writer-request-samples")
 def test_a_spool_the_owner_cannot_take_never_stops_its_own_journal_write(
     folder: Path, owner: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -372,8 +418,10 @@ def test_a_write_whose_sample_cannot_be_spooled_still_answers_and_names_the_fail
 def test_a_host_with_no_ledger_folder_spools_nothing_and_says_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "none"))
+    host = tmp_path / "host"
+    host.mkdir()
+    monkeypatch.setenv("LEDGER_DIR", str(host / "none"))
     with request_metrics.command("POST", TASKS_PATH):
         pass
-    assert list(tmp_path.iterdir()) == []
+    assert list(host.iterdir()) == []
     assert capsys.readouterr().err == ""

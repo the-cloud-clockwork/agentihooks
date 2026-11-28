@@ -9844,6 +9844,9 @@
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_legacy_journal_stays_readable_beside_spooled_samples",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_no_server_takes_keeps_only_its_newest_samples_under_its_cap",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_no_server_takes_drops_samples_past_retention_when_it_compacts",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_exactly_at_its_cap_is_not_compacted",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_spooled_samples_take_their_time_order_among_the_held_samples",
+        "tests/swarm_ledger/test_writer_request_samples.py::test_the_owner_takes_a_spooled_sample_at_the_retention_floor_and_drops_an_older_one",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_spool_the_owner_cannot_take_never_stops_its_own_journal_write",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_write_whose_sample_cannot_be_spooled_still_answers_and_names_the_failure",
         "tests/swarm_ledger/test_writer_request_samples.py::test_a_host_with_no_ledger_folder_spools_nothing_and_says_nothing"
