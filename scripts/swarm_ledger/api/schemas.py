@@ -120,7 +120,7 @@ FIELDS = {
     "source_add": "by source",
     "watchdog_copy": "by text",
     "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
-    "plan_add": "by plan title artifact url source",
+    "plan_add": "by plan title artifact url source task",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
     "phase_review": "by item state note override rounds escalated",

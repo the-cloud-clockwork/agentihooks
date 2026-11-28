@@ -233,7 +233,7 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
         ({"op": "slice_add", "phase": 3, "anchor": "first"}, "slice_add needs phase and an anchor"),
         (
             {"op": "plan_add", "plan": "a", "title": "A", "extra": 1},
-            "plan_add takes only plan title artifact url source",
+            "plan_add takes only plan title artifact url source task",
         ),
         (
             {"op": "plan_add", "plan": "a", "title": "A", "source": {"harness": "claude"}},

@@ -27,8 +27,8 @@ def check(op: dict) -> None:
         if not isinstance(op.get("phase"), str) or not isinstance(anchor, str) or not ANCHOR_RE.fullmatch(anchor):
             raise ValueError("slice_add needs phase and an anchor")
         return
-    if set(op) - {"op", "id", "by", "plan", "title", "source", *LINKS}:
-        raise ValueError("plan_add takes only plan title artifact url source")
+    if set(op) - {"op", "id", "by", "plan", "title", "source", "task", *LINKS}:
+        raise ValueError("plan_add takes only plan title artifact url source task")
     if not isinstance(op.get("plan"), str) or not PLAN_RE.fullmatch(op["plan"]):
         raise ValueError("plan_add needs plan, an id of letters, digits, _ and -")
     if not isinstance(op.get("title"), str) or not op["title"].strip():
@@ -271,13 +271,25 @@ def add_plan(doc: dict, op: dict, ctx: OpContext) -> str:
         "id": op["plan"],
         "title": op["title"].strip(),
         **{key: op.get(key, "") for key in LINKS},
-        **({"source": op["source"]} if "source" in op else {}),
+        **{key: op[key] for key in ("source", "task") if key in op},
     }
     if existing := next((row for row in plans if row["id"] == plan["id"]), None):
         return "" if existing == plan else f"plan {plan['id']} already exists"
     plans.append(plan)
     ctx.record(op["by"], "added", f"plans/{plan['id']}", text=plan["title"])
     return ""
+
+
+def own_artifact(doc: dict, task: str, plan_url: str) -> str:
+    """Return the artifact of a plan published for task whose link or artifact is plan_url, else an empty string."""
+    return next(
+        (
+            str(row["artifact"])
+            for row in doc.get("plans", [])
+            if row.get("task") == task and plan_url in (row.get("url"), row.get("artifact"))
+        ),
+        "",
+    )
 
 
 def add_slice(doc: dict, op: dict, ctx: OpContext) -> str:
